@@ -109,8 +109,9 @@ column widens with the font (`EpubSession.preferences()`). 3, UX refinement (sli
 thumbnails, one theme that follows dark mode, accessibility). Owner-reported
 (2026-10-26): rotating while reading briefly flashes the library before the page
 returns. Cause: recreation starts with no session, so `MainActivity` draws
-`LibraryScreen` until the saved book reopens. Quick mitigation: show a plain
-reader-coloured screen while reopening; full fix is the Stage 4 item below. 4, foldable
+`LibraryScreen` until the saved book reopens. Quick mitigation done the same day
+(`reopeningBookId` in `MainActivity` shows a reader-coloured page; guarded by
+`ReaderLifecycleTest`); the full fix, no reload at all, is the Stage 4 item below. 4, foldable
 features (move state out of `MainActivity`, survive fold/unfold without reload,
 two-page spread when unfolded, battery measurement, in-book search). 5,
 release (final app ID, release signing, R8, current targetSdk, CI, docs).

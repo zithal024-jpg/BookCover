@@ -54,6 +54,7 @@ class ReaderLifecycleTest {
         val reader = openAndMoveInto(book)
         val before = progressionOf(reader)
         scenario!!.recreate() // What Android does to the activity when the phone rotates.
+        assertLibraryNeverShownUntilReaderOpens(book)
         val reopened = waitForReader(book)
         assertNotSame("The activity really was recreated", reader, reopened)
         waitFor("the reopened book shows the same place") { abs(progressionOf(reopened) - before) <= 0.02 }
@@ -71,6 +72,7 @@ class ReaderLifecycleTest {
                 waitFor("the app moves to the other screen ($step)", timeout = 20_000) {
                     onActivity { it.resources.configuration.screenWidthDp } != width
                 }
+                assertLibraryNeverShownUntilReaderOpens(book)
                 val current = waitForReader(book)
                 // Page breaks differ between the two screens, so allow about one page of difference.
                 waitFor("the book shows the same place after $step") { abs(progressionOf(current) - before) <= 0.05 }
@@ -118,6 +120,18 @@ class ReaderLifecycleTest {
             runCatching { js(reader, "Boolean(window.readium && document.getElementById('paragraph-0'))") == "true" }.getOrDefault(false)
         }
         return reader
+    }
+
+    /** Samples the rebuilt screen until the book is open again; the library must never be what is shown. */
+    private fun assertLibraryNeverShownUntilReaderOpens(book: BookRecord) {
+        val deadline = SystemClock.uptimeMillis() + 20_000
+        while (SystemClock.uptimeMillis() < deadline) {
+            val (library, open) = onActivity { it.showsLibraryForTests to (it.sessionForTests?.book?.id == book.id) }
+            assertFalse("The library flashed while the book was reopening", library)
+            if (open) return
+            SystemClock.sleep(10)
+        }
+        throw AssertionError("The book did not reopen")
     }
 
     private fun progressionOf(reader: EpubSession): Double =

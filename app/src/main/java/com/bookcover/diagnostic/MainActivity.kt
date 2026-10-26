@@ -4,6 +4,7 @@ import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -21,6 +22,7 @@ import com.bookcover.diagnostic.cover.ExteriorCoverController
 import com.bookcover.diagnostic.library.*
 import com.bookcover.diagnostic.reader.EpubReaderScreen
 import com.bookcover.diagnostic.reader.EpubSession
+import com.bookcover.diagnostic.reader.readerBackground
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -31,6 +33,8 @@ class MainActivity : FragmentActivity() {
     private lateinit var library: BookLibrary
     private lateinit var exterior: ExteriorCoverController
     private var session by mutableStateOf<EpubSession?>(null)
+    // Set while a book that was open before rotation/fold is reopened; the library stays hidden meanwhile.
+    private var reopeningBookId by mutableStateOf<String?>(null)
     private var busy by mutableStateOf(true)
     private var message by mutableStateOf("Preparing your library…")
     private var showDiagnostics by mutableStateOf(false)
@@ -86,6 +90,8 @@ class MainActivity : FragmentActivity() {
         timer = preferences.getInt("coverTimer", 30).takeIf { it in listOf(0, 30, 60) } ?: 30
         libraryTheme = LibraryThemeChoice.fromId(preferences.getString("libraryTheme", "automatic") ?: "automatic").id
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        reopeningBookId = savedInstanceState?.getString("openBook")
+        if (reopeningBookId != null) setReadingWindow(true)
         setContent {
             val books by library.books.collectAsState()
             val recent = books.filter { it.lastReadAt > 0 }.maxByOrNull { it.lastReadAt }
@@ -94,7 +100,9 @@ class MainActivity : FragmentActivity() {
             }
             MaterialTheme(colorScheme = libraryColorScheme(libraryTheme, seed)) {
                 val current = session
-                if (current == null) LibraryScreen(books, library, busy, message, autoCover, timer,
+                if (current == null && reopeningBookId != null)
+                    Box(Modifier.fillMaxSize().background(readerBackground(preferences.getString("theme", "Paper"))))
+                else if (current == null) LibraryScreen(books, library, busy, message, autoCover, timer,
                     onAutoCover = { autoCover = it; preferences.edit().putBoolean("autoCover", it).apply() },
                     onTimer = { timer = it; preferences.edit().putInt("coverTimer", it).apply() },
                     onImport = { importBook.launch(arrayOf("application/epub+zip", "application/octet-stream", "application/zip")) },
@@ -124,20 +132,26 @@ class MainActivity : FragmentActivity() {
             }
         }
         work {
-            val loaded = library.load()
-            if (!preferences.getBoolean("samplesInstalled", false)) {
-                library.importSample("samples/lantern-keeper.epub")
-                library.importSample("samples/river-maps.epub")
-                preferences.edit().putBoolean("samplesInstalled", true).apply()
+            try {
+                val loaded = library.load()
+                if (!preferences.getBoolean("samplesInstalled", false)) {
+                    library.importSample("samples/lantern-keeper.epub")
+                    library.importSample("samples/river-maps.epub")
+                    preferences.edit().putBoolean("samplesInstalled", true).apply()
+                }
+                if (loaded.recoveredFromBackup || loaded.skipped > 0)
+                    DiagnosticLog.record("Library index recovered: backup=${loaded.recoveredFromBackup}, skipped=${loaded.skipped}")
+                message = when {
+                    loaded.recoveredFromBackup -> "Your library list was damaged, so BookCover restored its last good copy. Recent changes may be missing."
+                    loaded.skipped > 0 -> "${loaded.skipped} damaged library entries could not be read and were set aside. Your other books are safe."
+                    else -> "Swipe to turn pages. Tap the middle of a page for controls."
+                }
+                reopeningBookId?.let { id -> library.book(id)?.let { loadBook(it) } }
+            } finally {
+                // Whatever happened, never leave the plain reopening screen in place.
+                reopeningBookId = null
+                if (session == null) setReadingWindow(false)
             }
-            if (loaded.recoveredFromBackup || loaded.skipped > 0)
-                DiagnosticLog.record("Library index recovered: backup=${loaded.recoveredFromBackup}, skipped=${loaded.skipped}")
-            message = when {
-                loaded.recoveredFromBackup -> "Your library list was damaged, so BookCover restored its last good copy. Recent changes may be missing."
-                loaded.skipped > 0 -> "${loaded.skipped} damaged library entries could not be read and were set aside. Your other books are safe."
-                else -> "Swipe to turn pages. Tap the middle of a page for controls."
-            }
-            savedInstanceState?.getString("openBook")?.let { id -> library.book(id)?.let { loadBook(it) } }
         }
     }
 
@@ -145,6 +159,7 @@ class MainActivity : FragmentActivity() {
     internal val libraryForTests: BookLibrary get() = library
     internal val sessionForTests: EpubSession? get() = session
     internal val busyForTests: Boolean get() = busy
+    internal val showsLibraryForTests: Boolean get() = session == null && reopeningBookId == null
     internal fun openBookForTests(book: BookRecord) = openBook(book)
 
     private fun openBook(book: BookRecord) {
@@ -198,7 +213,7 @@ class MainActivity : FragmentActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
-        outState.putString("openBook", session?.book?.id)
+        outState.putString("openBook", session?.book?.id ?: reopeningBookId)
         super.onSaveInstanceState(outState)
     }
 

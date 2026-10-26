@@ -20,6 +20,10 @@ import com.bookcover.diagnostic.R
 import com.bookcover.diagnostic.library.BookRecord
 import kotlin.math.roundToInt
 
+/** Page colour for a reading theme; also used for the plain screen shown while a book reopens. */
+internal fun readerBackground(theme: String?): Color =
+    when (theme) { "Night" -> Color.Black; "Sepia" -> Color(0xFFFAF4E8); else -> Color.White }
+
 @Composable
 internal fun EpubReaderScreen(
     session: EpubSession,
@@ -38,7 +42,7 @@ internal fun EpubReaderScreen(
 ) {
     var contentsVisible by remember(session) { mutableStateOf(false) }
     val night = session.themeName == "Night"
-    val background = when (session.themeName) { "Night" -> Color.Black; "Sepia" -> Color(0xFFFAF4E8); else -> Color.White }
+    val background = readerBackground(session.themeName)
     val scheme = if (night) darkColorScheme() else lightColorScheme()
     BackHandler {
         when { contentsVisible -> contentsVisible = false; session.controlsVisible -> session.controlsVisible = false; else -> onHome() }
