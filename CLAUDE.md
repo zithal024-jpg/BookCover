@@ -77,10 +77,14 @@ That is deliberate: OneDrive breaks Android's resource merger.
 
 ## Current plan
 
-The full review is the Expert Panel Review. If the owner saved it into this
-folder (for example `docs/review/EXPERT-PANEL-REVIEW.md`), read it first; its
-issue IDs (BC-01 … BC-29) are used below. Work in stage order, one issue at a
-time, building and testing after each.
+The full review is the Expert Panel Review: read
+`docs/review/EXPERT-PANEL-REVIEW.md` first (Markdown converted from the owner's
+`Expert Panel Review.docx`, which stays unchanged beside it). Its issue IDs
+(BC-01 … BC-29) are used below. The **Completion tracker** at the top of that
+file is the shared status list for Claude Code, Codex and the owner: check it
+before starting (another agent may already be on an issue) and update its row,
+with the commit and how it was verified, in the same commit as the work. Work in
+stage order, one issue at a time, building and testing after each.
 
 **Stage 1: Stabilization (do this first)**
 - BC-04: the `.git` folder exists but has zero commits. Commit the current
