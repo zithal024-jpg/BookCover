@@ -51,7 +51,11 @@ class ReaderTestActivity : FragmentActivity() {
         lifecycleScope.launch {
             try {
                 val fixed = intent.getBooleanExtra(EXTRA_FIXED_LAYOUT, false)
-                val fixture = withContext(Dispatchers.IO) { NativeEpubFixture.write(testDirectory, fixed) }
+                val fixture = withContext(Dispatchers.IO) {
+                    NativeEpubFixture.write(testDirectory, fixed,
+                        progression = intent.getStringExtra(EXTRA_READING_PROGRESSION),
+                        language = intent.getStringExtra(EXTRA_LANGUAGE) ?: "en")
+                }
                 val engine = ReadiumEngine(isolatedContext)
                 val library = BookLibrary(isolatedContext, engine)
                 library.load() // The library refuses to save until it has loaded (BC-02).
@@ -92,6 +96,8 @@ class ReaderTestActivity : FragmentActivity() {
 
     companion object {
         const val EXTRA_FIXED_LAYOUT = "fixedLayout"
+        const val EXTRA_READING_PROGRESSION = "readingProgression"
+        const val EXTRA_LANGUAGE = "language"
         const val TEST_PREFERENCES = "reader-native-instrumentation-test"
     }
 }

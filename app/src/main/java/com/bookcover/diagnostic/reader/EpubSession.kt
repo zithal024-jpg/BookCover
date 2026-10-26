@@ -26,6 +26,7 @@ import org.readium.r2.navigator.epub.css.RsProperties
 import org.readium.r2.navigator.input.InputListener
 import org.readium.r2.navigator.input.DragEvent
 import org.readium.r2.navigator.input.TapEvent
+import org.readium.r2.navigator.preferences.ReadingProgression
 import org.readium.r2.shared.ExperimentalReadiumApi
 import org.readium.r2.shared.DelicateReadiumApi
 import org.readium.r2.shared.publication.Layout
@@ -113,13 +114,16 @@ internal class EpubSession(
                 // Readium filters interactive links, active selections and drag gestures before
                 // this callback. Keep its native touch recognizers and selection handling intact.
                 when (readingTapAction(event.point.x, event.point.y, view.width.toFloat(), view.height.toFloat(),
-                    view.resources.displayMetrics.density, edgeTaps, controlsVisible, typographyUpdating, event.targetElement != null)) {
+                    view.resources.displayMetrics.density, edgeTaps, controlsVisible, typographyUpdating, event.targetElement != null,
+                    // Use the same resolved direction as Readium's native navigation, including
+                    // language inference when the publication omits page-progression-direction.
+                    rightToLeft = fragment.settings.value.readingProgression == ReadingProgression.RTL)) {
                     ReadingTapAction.CONTROLS -> {
                         controlsVisible = !controlsVisible
                         DiagnosticLog.record("EPUB controls ${if (controlsVisible) "revealed" else "hidden"}; same host activity")
                     }
-                    ReadingTapAction.PREVIOUS -> { fragment.goBackward(animated = true); DiagnosticLog.record("EPUB left-edge completed tap") }
-                    ReadingTapAction.NEXT -> { fragment.goForward(animated = true); DiagnosticLog.record("EPUB right-edge completed tap") }
+                    ReadingTapAction.PREVIOUS -> { fragment.goBackward(animated = true); DiagnosticLog.record("EPUB edge completed tap: backward") }
+                    ReadingTapAction.NEXT -> { fragment.goForward(animated = true); DiagnosticLog.record("EPUB edge completed tap: forward") }
                     ReadingTapAction.NONE -> return false
                 }
                 return true

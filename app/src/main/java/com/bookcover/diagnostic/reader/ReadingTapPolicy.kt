@@ -6,6 +6,7 @@ internal enum class ReadingTapAction { NONE, CONTROLS, PREVIOUS, NEXT }
 internal fun readingTapAction(
     x: Float, y: Float, width: Float, height: Float, density: Float,
     edgeEnabled: Boolean, controlsVisible: Boolean, typographyBusy: Boolean, hasTargetElement: Boolean,
+    rightToLeft: Boolean = false,
 ): ReadingTapAction {
     if (!x.isFinite() || !y.isFinite() || width <= 0 || height <= 0 || density <= 0 ||
         x !in 0f..width || y !in (height * 0.10f)..(height * 0.90f)) return ReadingTapAction.NONE
@@ -13,8 +14,8 @@ internal fun readingTapAction(
     if (!edgeEnabled || controlsVisible || typographyBusy || hasTargetElement) return ReadingTapAction.NONE
     val edge = minOf(32f * density, width * 0.06f)
     return when {
-        x < edge -> ReadingTapAction.PREVIOUS
-        x > width - edge -> ReadingTapAction.NEXT
+        x < edge -> if (rightToLeft) ReadingTapAction.NEXT else ReadingTapAction.PREVIOUS
+        x > width - edge -> if (rightToLeft) ReadingTapAction.PREVIOUS else ReadingTapAction.NEXT
         else -> ReadingTapAction.NONE
     }
 }

@@ -177,7 +177,7 @@ internal fun EpubReaderScreen(
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
                                     Text("Edge-tap page turns", style = MaterialTheme.typography.labelLarge)
-                                    Text("Optional narrow left/right edges. Swipes always work.", style = MaterialTheme.typography.bodySmall)
+                                    Text("Optional narrow edges follow the book's reading direction. Swipes always work.", style = MaterialTheme.typography.bodySmall)
                                 }
                                 Switch(checked = session.edgeTaps, onCheckedChange = session::changeEdgeTaps,
                                     modifier = Modifier.semantics { contentDescription = "Enable edge-tap page turns" })

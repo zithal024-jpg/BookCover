@@ -25,6 +25,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.readium.r2.shared.ExperimentalReadiumApi
+import org.readium.r2.navigator.preferences.ReadingProgression
 
 /** Real Android WebView/Readium integration tests, isolated from the user's library/preferences. */
 @RunWith(AndroidJUnit4::class)
@@ -46,8 +47,10 @@ class NativeReaderTest {
         target.getSharedPreferences(ReaderTestActivity.TEST_PREFERENCES, Context.MODE_PRIVATE).edit().clear().commit()
     }
 
-    private fun launch(fixed: Boolean = false) {
+    private fun launch(fixed: Boolean = false, progression: String? = null, language: String = "en") {
         val intent = Intent(target, ReaderTestActivity::class.java).putExtra(ReaderTestActivity.EXTRA_FIXED_LAYOUT, fixed)
+            .putExtra(ReaderTestActivity.EXTRA_READING_PROGRESSION, progression)
+            .putExtra(ReaderTestActivity.EXTRA_LANGUAGE, language)
         scenario = ActivityScenario.launch<ReaderTestActivity>(intent).also { it.onActivity { activity -> host = activity } }
         reader = main { withTimeout(20_000) { host.ready.await() } }
         waitFor("navigator is attached") { main { reader.fragment.isAdded && reader.fragment.view?.width != 0 } }
@@ -152,6 +155,81 @@ class NativeReaderTest {
             main { reader.fragment.currentLocator.value.href.toString().endsWith("chapter1.xhtml") }
         }
         assertTrue("The destination chapter rendered", js("Boolean(document.getElementById('linked'))") == "true")
+    }
+
+    @Test fun explicitRtlEdgesFollowBookDirectionAndPreserveNativeInteractions() {
+        launch(progression = "rtl", language = "ar")
+        checkDirectionalEdgeTurns(rightToLeft = true)
+    }
+
+    @Test fun languageInferredRtlUsesTheSameEdgeDirectionAsReadium() {
+        launch(language = "he") // No spine direction: Readium infers RTL from Hebrew metadata.
+        assertNull(main { reader.publication.metadata.readingProgression })
+        checkDirectionalEdgeTurns(rightToLeft = true)
+    }
+
+    @Test fun explicitLtrDirectionOverridesAnRtlLanguageForEdgeTurns() {
+        launch(progression = "ltr", language = "ar")
+        checkDirectionalEdgeTurns(rightToLeft = false)
+    }
+
+    private fun checkDirectionalEdgeTurns(rightToLeft: Boolean) {
+        assertEquals(if (rightToLeft) ReadingProgression.RTL else ReadingProgression.LTR,
+            main { reader.fragment.settings.value.readingProgression })
+        val forwardEdge = if (rightToLeft) 0.02f else 0.98f
+        val backwardEdge = 1f - forwardEdge
+        val sign = if (rightToLeft) -1 else 1
+        val start = settledPageOffset()
+        val pageWidth = js("window.innerWidth").toDouble()
+        assertFalse(main { reader.edgeTaps })
+        tapViewport(forwardEdge, 0.60f)
+        SystemClock.sleep(400)
+        assertEquals("Edges remain disabled by default in either direction", start, pageOffset(), 1.0)
+
+        swipeViewport(if (rightToLeft) 0.20f else 0.80f, if (rightToLeft) 0.80f else 0.20f, 0.60f)
+        waitFor("native swipe advances in book direction") { (pageOffset() - start) * sign > 50 }
+        val afterSwipe = settledPageOffset()
+        main { reader.changeEdgeTaps(true) }
+        tapViewport(forwardEdge, 0.60f)
+        waitFor("forward edge advances in book direction") { (pageOffset() - afterSwipe) * sign > 50 }
+        val afterForwardTap = settledPageOffset()
+        assertEquals("Forward edge advances exactly one page", pageWidth, (afterForwardTap - afterSwipe) * sign, 2.0)
+        tapViewport(backwardEdge, 0.60f)
+        waitFor("opposite edge returns in book direction") { (afterForwardTap - pageOffset()) * sign > 50 }
+        assertEquals("Backward edge returns exactly one page", afterSwipe, settledPageOffset(), 2.0)
+
+        main { reader.controlsVisible = true }
+        tapViewport(forwardEdge, 0.60f)
+        SystemClock.sleep(400)
+        assertEquals("Visible controls still suppress edge turns", afterSwipe, pageOffset(), 1.0)
+        main { reader.controlsVisible = false }
+        assertEquals("true", js("(function(){var r=document.createRange();r.selectNodeContents(document.getElementById('paragraph-0'));var s=window.getSelection();s.removeAllRanges();s.addRange(r);return !s.isCollapsed;})()"))
+        tapViewport(forwardEdge, 0.60f)
+        SystemClock.sleep(400)
+        assertEquals("Dismissing a selection must not turn an RTL or LTR page", afterSwipe, pageOffset(), 1.0)
+
+        // Check spine transitions as well as scrolling within the long resource.
+        js("window.getSelection().removeAllRanges(); readium.scrollToEnd(); true")
+        settledPageOffset()
+        tapViewport(forwardEdge, 0.60f)
+        waitFor("forward edge crosses to the next chapter") {
+            main { reader.fragment.currentLocator.value.href.toString().endsWith("chapter1.xhtml") } &&
+                js("Boolean(document.getElementById('linked'))") == "true"
+        }
+        settledPageOffset()
+        tapViewport(backwardEdge, 0.60f)
+        waitFor("backward edge returns to the previous chapter") {
+            main { reader.fragment.currentLocator.value.href.toString().endsWith("chapter0.xhtml") } &&
+                js("Boolean(document.getElementById('paragraph-0'))") == "true"
+        }
+        settledPageOffset()
+        js("readium.scrollToStart(); true")
+        settledPageOffset()
+        tapElement("edge-link")
+        waitFor("edge-positioned hyperlink still wins over page navigation") {
+            main { reader.fragment.currentLocator.value.href.toString().endsWith("chapter1.xhtml") } &&
+                js("Boolean(document.getElementById('linked'))") == "true"
+        }
     }
 
     @Test fun selectionDismissalDoesNotTriggerAnEdgePageTurn() {
