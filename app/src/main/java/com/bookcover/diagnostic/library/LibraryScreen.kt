@@ -133,7 +133,7 @@ internal fun LibraryScreen(
             }
             Text("Keep BookCover in front while reading. Tap the middle of a page to show controls. Swipe left or right to turn pages.", style = MaterialTheme.typography.bodySmall)
             TextButton(onClick = { settings = false; onDiagnostics() }) { Text("Device diagnostics") }
-            Text("EPUB engine: Readium 3.4.0 · BSD 3-Clause\nBookCover 0.4.0 prototype", style = MaterialTheme.typography.bodySmall)
+            Text("EPUB engine: Readium 3.4.0 · BSD 3-Clause\nOpenDyslexic font by Abelardo Gonzalez · CC BY 3.0, based on Bitstream Vera\nBookCover 0.4.0 prototype", style = MaterialTheme.typography.bodySmall)
         }
     }, confirmButton = { TextButton(onClick = { settings = false }) { Text("Done") } })
 }
