@@ -4,6 +4,7 @@ import android.content.Context
 import java.io.File
 import java.io.IOException
 import org.readium.r2.shared.publication.Publication
+import org.readium.r2.shared.publication.encryption.encryption
 import org.readium.r2.shared.publication.services.isRestricted
 import org.readium.r2.shared.publication.services.positions
 import org.readium.r2.shared.util.Try
@@ -21,6 +22,11 @@ import org.readium.r2.streamer.PublicationOpener
 import org.readium.r2.streamer.parser.DefaultPublicationParser
 
 internal class ReadiumEngine(context: Context) {
+    private companion object {
+        /** IDPF and Adobe font obfuscation: scrambles embedded fonts only, not DRM. */
+        val FONT_OBFUSCATION = setOf("http://www.idpf.org/2008/embedding", "http://ns.adobe.com/pdf/enc#RC")
+    }
+
     // This prototype reads owned local copies. No network client or download integration is enabled.
     private val http = object : HttpClient {
         override suspend fun stream(request: HttpRequest): HttpTry<HttpStreamResponse> =
@@ -50,6 +56,11 @@ internal class ReadiumEngine(context: Context) {
         try {
             require(publication.conformsTo(Publication.Profile.EPUB)) { "Please choose an EPUB book" }
             require(!publication.isRestricted) { "This EPUB is protected. The prototype opens DRM-free EPUBs." }
+            // Readium only flags DRM schemes it has a protection service for. Any other encrypted chapter or
+            // resource would display as scrambled text, so refuse it; font obfuscation is ordinary and allowed.
+            require((publication.readingOrder + publication.resources).none { link ->
+                link.properties.encryption?.let { it.algorithm !in FONT_OBFUSCATION } == true
+            }) { "This EPUB is protected. The prototype opens DRM-free EPUBs." }
             require(publication.readingOrder.isNotEmpty()) { "This EPUB has no readable chapters" }
             publication.positions() // Populate the cached position service before constructing the navigator.
             return publication

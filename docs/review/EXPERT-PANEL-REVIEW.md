@@ -26,12 +26,12 @@ this file together with the change it records.
 | BC-10 | P1 | Accessibility, volume-key page turns | Open | | |
 | BC-11 | P1 | Release build, final app ID | Open | | Needs the owner's decision on the final name and application ID |
 | BC-12 | P1 | Font licence notices | Partial | 8d426c9 | Correction: the bundled OpenDyslexic is v2.001, CC BY 3.0 over Bitstream Vera, not OFL; notices shipped in assets and credited in Settings. About → Licences screen not built |
-| BC-13 | P1 | Real-book EPUB test corpus | Open | | |
+| BC-13 | P1 | Real-book EPUB test corpus | Done | (this commit) | Owner chose generated books (no downloads): 28 in `EpubCorpus.kt`, run by `EpubCorpusTest` on phone: 22 open, show readable text, turn pages and reopen in place; 5 malformed or DRM books are rejected with the library unchanged; UTF-16 skipped as BC-18. Found and fixed: unknown-scheme encrypted EPUBs were imported (now rejected in `ReadiumEngine`). Not covered: real published books, 500-page search timing |
 | BC-14 | P2 | Debounce saves, logging off main thread | Done | 976b573 | `LatestValueSaverTest`, `CoalescingWriterTest`; position survived a full app kill on phone. 1.5 s debounce; StrictMode not run |
 | BC-15 | P2 | ViewModel / state out of MainActivity | Open | | One shared `BookLibrary` per process already (a67bc24) |
 | BC-16 | P2 | Delete dead code | Done | 528e354 | Sample text moved to `scripts/lantern-keeper.txt` |
 | BC-17 | P2 | RTL-aware edge taps | Open | | |
-| BC-18 | P2 | Sanitiser encodings, tag soup | Open | | |
+| BC-18 | P2 | Sanitiser encodings, tag soup | Open | | Confirmed by `EpubCorpusTest`: a UTF-16 chapter renders garbled (marked knownIssue "BC-18"; the test fails on purpose once fixed). Tag soup already renders fine |
 | BC-19 | P2 | Two-page spread when unfolded | Open | | |
 | BC-20 | P2 | Chapter progress, TOC marker, named bookmarks | Open | | |
 | BC-21 | P2 | One palette; Automatic follows dark mode | Open | | |
@@ -39,7 +39,7 @@ this file together with the change it records.
 | BC-23 | P2 | Split settings; hide diagnostics | Open | | |
 | BC-24 | P2 | Permission audit | Open | | |
 | BC-25 | P2 | CI and AGP 10 migration | Open | | Stage 1 gate's "CI green" is still unmet |
-| BC-26 | P3 | Friendly error messages | Open | | |
+| BC-26 | P3 | Friendly error messages | Open | | `EpubCorpusTest` logs each rejection message (tag EpubCorpus); a non-zip file shows the raw "zip END header not found" |
 | BC-27 | P3 | Multi-select import, temp cleanup | Open | | |
 | BC-28 | P3 | Consolidate documentation | Open | | |
 | BC-29 | P2 | In-book search | Open | | |
