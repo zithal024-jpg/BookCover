@@ -7,6 +7,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.Executors
 
 /** Small local-only event log; image contents and document URIs must never be recorded. */
 object DiagnosticLog {
@@ -19,6 +20,10 @@ object DiagnosticLog {
     private var logFile: File? = null
     private var initialized = false
     private var deviceMetadata = "Device metadata unavailable: logger has not been initialized."
+    // File writes happen on one background thread so logging never blocks drawing or touch.
+    private val writer = CoalescingWriter(Executors.newSingleThreadExecutor { task ->
+        Thread(task, "bookcover-diagnostic-log").apply { isDaemon = true }
+    }) { saveToFile() }
 
     @Synchronized
     fun init(context: Context) {
@@ -73,8 +78,15 @@ object DiagnosticLog {
         val line = "$timestamp $safeMessage"
         addLine(line)
         Log.i(TAG, safeMessage)
+        writer.request()
+    }
+
+    private fun saveToFile() {
+        val (file, text) = synchronized(this) {
+            (logFile ?: return) to lines.joinToString(separator = "\n", postfix = "\n")
+        }
         try {
-            logFile?.writeText(lines.joinToString(separator = "\n", postfix = "\n"), Charsets.UTF_8)
+            file.writeText(text, Charsets.UTF_8)
         } catch (_: Exception) {
             // A diagnostic failure must not interfere with the display experiment.
             Log.w(TAG, "Diagnostic log could not be saved; events remain available in memory.")

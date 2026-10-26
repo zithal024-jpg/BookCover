@@ -10,8 +10,11 @@ import androidx.lifecycle.lifecycleScope
 import com.bookcover.diagnostic.DiagnosticLog
 import com.bookcover.diagnostic.library.BookLibrary
 import com.bookcover.diagnostic.library.BookRecord
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -67,6 +70,12 @@ internal class EpubSession(
     private var typographyAnchor: Locator? = null
     private var typographyAnchorInvalidated = false
     private var closed = false
+    // Not tied to the activity's lifecycle, so a pending position still saves while it is destroyed.
+    private val saveScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val positions = LatestValueSaver<Locator>(saveScope, quietMillis = 1_500) { locator ->
+        try { library.updatePosition(book.id, locator) }
+        catch (error: Exception) { DiagnosticLog.record("Reading position save failed: ${error.javaClass.simpleName}") }
+    }
     val fragment: EpubNavigatorFragment
 
     init {
@@ -76,7 +85,7 @@ internal class EpubSession(
             configuration = EpubNavigatorFragment.Configuration().apply { useReadiumCssFontSize = true },
             listener = object : EpubNavigatorFragment.Listener {
                 override fun onExternalLinkActivated(url: AbsoluteUrl) {
-                    report("External book links are not opened automatically. Use the library's browser search if needed.")
+                    report("This link points to a website. BookCover does not open web pages.")
                 }
                 override fun onResourceLoadFailed(href: Url, error: ReadError) {
                     report("A chapter resource could not be displayed. Other chapters may still work.")
@@ -118,7 +127,7 @@ internal class EpubSession(
             fragment.currentLocator.collect { locator ->
                 currentLocator = locator
                 progress = locator.locations.totalProgression ?: progress
-                if (!typographyUpdating) library.updatePosition(book.id, locator)
+                if (!typographyUpdating) positions.submit(locator)
                 DiagnosticLog.record("EPUB position=${(progress * 100).toInt()}%; same host activity")
             }
         }
@@ -170,7 +179,7 @@ internal class EpubSession(
                 }?.let { fragment.go(it, animated = false) } ?: false
                 delay(180)
                 currentLocator = fragment.currentLocator.value
-                currentLocator?.let { library.updatePosition(book.id, it) }
+                currentLocator?.let { positions.submit(it) }
                 if (!settled) report("Text settings saved. This book's styles may limit the selected typography.")
                 DiagnosticLog.record("EPUB typography CSS reflow; size=${ReadingTextSize.percent(fontScale)}%; font=$fontId; CSS confirmed=$settled; semantic anchor restored=$restored")
                 typographyAnchor = null
@@ -197,10 +206,14 @@ internal class EpubSession(
 
     fun next() { fragment.goForward(animated = true); controlsVisible = false }
     fun previous() { fragment.goBackward(animated = true); controlsVisible = false }
+    /** Saves a waiting reading position now, e.g. when the app goes to the background. */
+    fun flushPosition() = positions.flush()
+
     fun close() {
         if (closed) return
         closed = true
         locationJob?.cancel()
+        positions.flush()
         typographyJob?.cancel()
         if (!activity.supportFragmentManager.isDestroyed && fragment.isAdded) {
             runCatching { activity.supportFragmentManager.beginTransaction().remove(fragment).commitNowAllowingStateLoss() }

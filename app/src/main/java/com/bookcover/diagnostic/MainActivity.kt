@@ -196,6 +196,12 @@ class MainActivity : FragmentActivity() {
         super.onSaveInstanceState(outState)
     }
 
+    override fun onStop() {
+        // Android may end the process while the app is in the background; save the position first.
+        session?.flushPosition()
+        super.onStop()
+    }
+
     override fun onDestroy() {
         exterior.close()
         session?.close()
