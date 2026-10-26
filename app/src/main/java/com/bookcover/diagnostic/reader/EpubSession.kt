@@ -86,9 +86,10 @@ internal class EpubSession(
             configuration = EpubNavigatorFragment.Configuration().apply {
                 useReadiumCssFontSize = true
                 // Readium caps lines at 40rem, which grows with the text size and narrows the margins on
-                // the wide inner screen. A pixel cap (40rem at 100%) keeps the margins fixed so text reflows.
+                // the wide inner screen. A pixel cap keeps the margins fixed so text reflows. 800px is wider
+                // than Readium's 640px default at 100%, at the owner's request for narrower side margins.
                 // (RsProperties.maxLineLength accepts only rem, so the value goes in as an override.)
-                readiumCssRsProperties = RsProperties(overrides = mapOf("--RS__maxLineLength" to "640px"))
+                readiumCssRsProperties = RsProperties(overrides = mapOf("--RS__maxLineLength" to "800px"))
             },
             listener = object : EpubNavigatorFragment.Listener {
                 override fun onExternalLinkActivated(url: AbsoluteUrl) {

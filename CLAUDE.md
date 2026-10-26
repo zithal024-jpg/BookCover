@@ -103,8 +103,9 @@ time, building and testing after each.
 spacing/margins, EPUB test corpus, chapter progress, RTL-aware taps, volume-key
 page turns). Fixed 2026-10-26: text size used to look like zooming on the inner
 screen because Readium CSS caps lines at `40rem`, which grows with
-`--USER__fontSize`. `EpubSession` now overrides `--RS__maxLineLength` to `640px`
-(`RsProperties.maxLineLength` accepts only rem). Guarded by `ReadingLayoutTest`,
+`--USER__fontSize`. `EpubSession` now overrides `--RS__maxLineLength` to `800px`
+(owner found 640px left too much empty space; `RsProperties.maxLineLength`
+accepts only rem). Guarded by `ReadingLayoutTest`,
 which needs the phone physically unfolded and is skipped otherwise. 3, UX refinement (slim reader bar, split settings, cover
 thumbnails, one theme that follows dark mode, accessibility). Owner-reported
 (2026-10-26): rotating while reading briefly flashes the library before the page
