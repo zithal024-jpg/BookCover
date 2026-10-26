@@ -25,7 +25,7 @@ internal fun LibraryScreen(
     books: List<BookRecord>, library: BookLibrary, busy: Boolean, message: String,
     autoCover: Boolean, timer: Int, onAutoCover: (Boolean) -> Unit, onTimer: (Int) -> Unit,
     onImport: () -> Unit, onOpen: (BookRecord) -> Unit, onMove: (BookRecord, String) -> Unit,
-    onRemove: (BookRecord) -> Unit, onDiagnostics: () -> Unit,
+    onRemove: (BookRecord) -> Unit, onExportBackup: () -> Unit, onRestoreBackup: () -> Unit, onDiagnostics: () -> Unit,
     libraryTheme: String, onLibraryTheme: (String) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
@@ -132,6 +132,15 @@ internal fun LibraryScreen(
                 listOf(30, 60, 0).forEach { minutes -> FilterChip(timer == minutes, { onTimer(minutes) }, label = { Text(if (minutes == 0) "Manual" else "$minutes min") }) }
             }
             Text("Keep BookCover in front while reading. Tap the middle of a page to show controls. Swipe left or right to turn pages.", style = MaterialTheme.typography.bodySmall)
+            HorizontalDivider()
+            Text("Library backup", style = MaterialTheme.typography.titleMedium)
+            Text("Saves reading positions, bookmarks and collections to a file you choose. Book files are not included; keep your EPUBs. " +
+                "To restore after reinstalling, import your EPUBs first.", style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                TextButton(onClick = { settings = false; onExportBackup() }, enabled = !busy) { Text("Save backup") }
+                TextButton(onClick = { settings = false; onRestoreBackup() }, enabled = !busy) { Text("Restore backup") }
+            }
+            HorizontalDivider()
             TextButton(onClick = { settings = false; onDiagnostics() }) { Text("Device diagnostics") }
             Text("EPUB engine: Readium 3.4.0 · BSD 3-Clause\nOpenDyslexic font by Abelardo Gonzalez · CC BY 3.0, based on Bitstream Vera\nBookCover 0.4.0 prototype", style = MaterialTheme.typography.bodySmall)
         }

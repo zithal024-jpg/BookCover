@@ -14,6 +14,7 @@ import android.text.StaticLayout
 import android.text.TextPaint
 import android.util.AtomicFile
 import android.util.Size
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
@@ -129,6 +130,35 @@ internal class BookLibrary(private val context: Context, private val engine: Rea
             try { bitmap.compress(Bitmap.CompressFormat.PNG, 100, output); atomicCover.finishWrite(output) }
             catch (error: Exception) { atomicCover.failWrite(output); throw error }
             persist(mutableBooks.value.map { if (it.id == id) it.copy(coverRevision = System.currentTimeMillis()) else it })
+        }
+    }
+
+    /** Writes reading positions, bookmarks and collections to [uri]. Returns how many books were saved. */
+    suspend fun exportBackup(uri: Uri): Int = withContext(Dispatchers.IO) {
+        val records = mutableBooks.value
+        val output = context.contentResolver.openOutputStream(uri, "wt") ?: throw IOException("Could not write the backup file")
+        output.use { it.write(LibraryBackup.export(records, System.currentTimeMillis()).toByteArray()) }
+        records.size
+    }
+
+    suspend fun restoreBackup(uri: Uri): LibraryBackup.MergeResult = withContext(Dispatchers.IO) {
+        val input = context.contentResolver.openInputStream(uri) ?: throw IOException("Could not read the selected file")
+        val text = input.use { stream ->
+            val bytes = ByteArrayOutputStream()
+            val buffer = ByteArray(32 * 1024)
+            while (true) {
+                val read = stream.read(buffer)
+                if (read < 0) break
+                bytes.write(buffer, 0, read)
+                require(bytes.size() <= 20 * 1024 * 1024) { "This file is too large to be a BookCover library backup." }
+            }
+            bytes.toString("UTF-8")
+        }
+        val backup = LibraryBackup.parse(text)
+        lock.withLock {
+            val result = LibraryBackup.merge(mutableBooks.value, backup.records)
+            if (result.records != mutableBooks.value) persist(result.records)
+            result
         }
     }
 

@@ -56,6 +56,24 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+    private val exportLibrary = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) work {
+            val count = library.exportBackup(uri)
+            message = "Saved reading positions, bookmarks and collections for $count books. The books themselves are not in the backup."
+        }
+    }
+    private val restoreLibrary = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) work {
+            val result = library.restoreBackup(uri)
+            message = when {
+                result.restored == 0 && result.missing == 0 -> "That backup has no books in it."
+                result.missing == 0 -> "Restored ${result.restored} books from the backup."
+                else -> "Restored ${result.restored} books. ${result.missing} books in the backup are not in your library: " +
+                    "import those EPUBs, then restore again."
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Navigator restoration needs an open Publication. Reopen from our durable locator instead
         // of asking Android's fragment restoration to construct a navigator without its factory.
@@ -83,6 +101,8 @@ class MainActivity : FragmentActivity() {
                     onOpen = ::openBook,
                     onMove = { book, collection -> work { library.move(book.id, collection); message = "Collection updated." } },
                     onRemove = { book -> work { library.remove(book.id); message = "Local copy removed." } },
+                    onExportBackup = { exportLibrary.launch("BookCover-library-${java.time.LocalDate.now()}.json") },
+                    onRestoreBackup = { restoreLibrary.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
                     onDiagnostics = { showDiagnostics = true }, libraryTheme = libraryTheme,
                     onLibraryTheme = { libraryTheme = it; preferences.edit().putString("libraryTheme", it).apply() })
                 else EpubReaderScreen(current, books.firstOrNull { it.id == current.book.id } ?: current.book,

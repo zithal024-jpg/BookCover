@@ -11,6 +11,19 @@ import org.json.JSONObject
 
 internal class LibraryIndexException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
+/** Reads each record on its own, skipping unreadable ones and repeated IDs. Returns the records and the skipped count. */
+internal fun readBookRecords(array: JSONArray): Pair<List<BookRecord>, Int> {
+    val records = LinkedHashMap<String, BookRecord>()
+    var skipped = 0
+    for (position in 0 until array.length()) {
+        val record = try { BookRecord.fromJson(array.getJSONObject(position)) }
+        catch (error: JSONException) { null }
+        catch (error: IllegalArgumentException) { null }
+        if (record == null || record.id in records) skipped++ else records[record.id] = record
+    }
+    return records.values.toList() to skipped
+}
+
 /**
  * Reads and writes `books.json`. Writes are refused until a load succeeds, so an unreadable index is
  * never replaced by an empty list. Bad records are skipped one by one, the previous good index is kept
@@ -61,16 +74,8 @@ internal class LibraryIndex(private val directory: File, private val clock: () -
     }
 
     private fun parse(text: String): LoadResult {
-        val array = JSONObject(text).getJSONArray("books")
-        val records = LinkedHashMap<String, BookRecord>()
-        var skipped = 0
-        for (position in 0 until array.length()) {
-            val record = try { BookRecord.fromJson(array.getJSONObject(position)) }
-            catch (error: JSONException) { null }
-            catch (error: IllegalArgumentException) { null }
-            if (record == null || record.id in records) skipped++ else records[record.id] = record
-        }
-        return LoadResult(records.values.toList(), skipped)
+        val (records, skipped) = readBookRecords(JSONObject(text).getJSONArray("books"))
+        return LoadResult(records, skipped)
     }
 
     private fun replace(target: File, bytes: ByteArray) {
