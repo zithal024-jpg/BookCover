@@ -30,6 +30,8 @@ The existing coalescing, CSS-settle check, drag cancellation guard, chapter guar
 
 Native checks ran on the owner's unfolded Samsung SM-F976U, Android 17, using only `com.bookcover.diagnostic.qa`. The installed main app and its personal library were not used as the instrumentation target. The first broad run found the corrected position defect and the already-documented QA screen-attachment timeout; subsequent targeted reader and layout runs passed. This does not claim that the initial full suite passed or that every real-world EPUB has been tested.
 
+Owner confirmation, October 26, 2026: after installing the BC-08 update and receiving the manual test steps, Frank reported "it works" and requested that BC-08 be marked as confirmed by him. This records his acceptance of the installed change alongside the automated results above; it is not an additional automated test run.
+
 A supplementary desktop Chromium check with the exact Readium 3.4 CSS passed at 411px and 859px viewports: poetry restores, spacing/alignment change, margins change, and margins remain fixed while font size reflows. This supplements, rather than substitutes for, the Android results above.
 
 ## Files and reproduction
