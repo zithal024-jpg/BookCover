@@ -31,7 +31,7 @@ this file together with the change it records.
 | BC-15 | P2 | ViewModel / state out of MainActivity | Open | | One shared `BookLibrary` per process already (a67bc24) |
 | BC-16 | P2 | Delete dead code | Done | 528e354 | Sample text moved to `scripts/lantern-keeper.txt` |
 | BC-17 | P2 | RTL-aware edge taps | Open | | |
-| BC-18 | P2 | Sanitiser encodings, tag soup | Open | | Confirmed by `EpubCorpusTest`: a UTF-16 chapter renders garbled (marked knownIssue "BC-18"; the test fails on purpose once fixed). Tag soup already renders fine |
+| BC-18 | P2 | Sanitiser encodings, tag soup | In progress (Claude Code) | | Confirmed by `EpubCorpusTest`: a UTF-16 chapter renders garbled (marked knownIssue "BC-18"; the test fails on purpose once fixed). Tag soup already renders fine |
 | BC-19 | P2 | Two-page spread when unfolded | Open | | |
 | BC-20 | P2 | Chapter progress, TOC marker, named bookmarks | Open | | |
 | BC-21 | P2 | One palette; Automatic follows dark mode | Open | | |
