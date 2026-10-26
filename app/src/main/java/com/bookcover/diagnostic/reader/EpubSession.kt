@@ -23,6 +23,7 @@ import org.json.JSONObject
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.navigator.epub.EpubPreferences
+import org.readium.r2.navigator.epub.css.RsProperties
 import org.readium.r2.navigator.input.InputListener
 import org.readium.r2.navigator.input.DragEvent
 import org.readium.r2.navigator.input.TapEvent
@@ -82,7 +83,13 @@ internal class EpubSession(
         val factory = EpubNavigatorFactory(publication).createFragmentFactory(
             initialLocator = currentLocator,
             initialPreferences = preferences(),
-            configuration = EpubNavigatorFragment.Configuration().apply { useReadiumCssFontSize = true },
+            configuration = EpubNavigatorFragment.Configuration().apply {
+                useReadiumCssFontSize = true
+                // Readium caps lines at 40rem, which grows with the text size and narrows the margins on
+                // the wide inner screen. A pixel cap (40rem at 100%) keeps the margins fixed so text reflows.
+                // (RsProperties.maxLineLength accepts only rem, so the value goes in as an override.)
+                readiumCssRsProperties = RsProperties(overrides = mapOf("--RS__maxLineLength" to "640px"))
+            },
             listener = object : EpubNavigatorFragment.Listener {
                 override fun onExternalLinkActivated(url: AbsoluteUrl) {
                     report("This link points to a website. BookCover does not open web pages.")

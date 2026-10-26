@@ -47,6 +47,13 @@ class ReaderLifecycleTest {
     @After fun cleanUp() {
         scenario?.close()
         shell("cmd device_state state reset")
+        // Let the phone finish moving back to its physical screen before the next test starts.
+        // print-state answers "3"; base-state answers "Committed state: DeviceState{identifier=3, ...}".
+        waitFor("the phone returns to its physical fold state") {
+            val physical = Regex("identifier=(\\d+)").find(shell("cmd device_state base-state"))?.groupValues?.get(1)
+            physical != null && shell("cmd device_state print-state").trim() == physical
+        }
+        SystemClock.sleep(2_000)
     }
 
     @Test fun rotationReopensTheBookAtTheSamePlace() {
