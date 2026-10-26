@@ -13,6 +13,7 @@ import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import android.util.AtomicFile
+import android.util.LruCache
 import android.util.Size
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -50,6 +51,11 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
     fun book(id: String): BookRecord? = mutableBooks.value.firstOrNull { it.id == id }
     fun epubFile(book: BookRecord): File = File(directory, "${book.id}.epub")
     fun coverFile(book: BookRecord): File = File(directory, "${book.id}.png")
+    fun thumbnailFile(book: BookRecord): File = File(directory, "${book.id}.thumb.png")
+    // Recently shown library tiles, keyed by book and cover revision so a replaced cover is never stale.
+    private val thumbnails = object : LruCache<String, Bitmap>(
+        (Runtime.getRuntime().maxMemory() / 8).coerceAtMost(48L * 1024 * 1024).toInt()
+    ) { override fun sizeOf(key: String, value: Bitmap) = value.byteCount }
 
     suspend fun load(): LibraryIndex.LoadResult = withContext(Dispatchers.IO) {
         lock.withLock { index.load().also { mutableBooks.value = it.records } }
@@ -99,6 +105,7 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
                     val destination = epubFile(record)
                     if (!temporary.renameTo(destination)) temporary.copyTo(destination, overwrite = true)
                     coverFile(record).outputStream().use { cover.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                    writePng(thumbnailFile(record), shrink(cover))
                     persist(mutableBooks.value + record)
                 }
                 return record to true
@@ -125,7 +132,8 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
         lock.withLock {
             val record = book(id) ?: return@withLock
             persist(mutableBooks.value.filterNot { it.id == id })
-            epubFile(record).delete(); coverFile(record).delete()
+            epubFile(record).delete(); coverFile(record).delete(); thumbnailFile(record).delete()
+            forgetThumbnails(id)
         }
     }
 
@@ -137,10 +145,9 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
         }
         lock.withLock {
             val record = book(id) ?: return@withLock
-            val atomicCover = AtomicFile(coverFile(record))
-            val output = atomicCover.startWrite()
-            try { bitmap.compress(Bitmap.CompressFormat.PNG, 100, output); atomicCover.finishWrite(output) }
-            catch (error: Exception) { atomicCover.failWrite(output); throw error }
+            writePng(coverFile(record), bitmap)
+            writePng(thumbnailFile(record), shrink(bitmap))
+            forgetThumbnails(id)
             persist(mutableBooks.value.map { if (it.id == id) it.copy(coverRevision = System.currentTimeMillis()) else it })
         }
     }
@@ -174,7 +181,49 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
         }
     }
 
+    /** The full-size cover, for the outside screen. Library tiles use [thumbnailBitmap]. */
     fun coverBitmap(record: BookRecord): Bitmap = BitmapFactory.decodeFile(coverFile(record).absolutePath) ?: placeholder(record)
+
+    /**
+     * A small cover (at most 400×600) for library tiles. Comes from memory, then the saved thumbnail;
+     * books imported before thumbnails existed get one made from their cover the first time. Blocking: call off the main thread.
+     */
+    fun thumbnailBitmap(record: BookRecord): Bitmap {
+        val key = "${record.id}:${record.coverRevision}"
+        thumbnails.get(key)?.let { return it }
+        val bitmap = BitmapFactory.decodeFile(thumbnailFile(record).absolutePath)
+            ?: (decodeSmallCover(record) ?: shrink(placeholder(record))).also { made ->
+                runCatching { writePng(thumbnailFile(record), made) }
+            }
+        thumbnails.put(key, bitmap)
+        return bitmap
+    }
+
+    /** Decodes the saved cover skipping pixels it does not need, then scales it to thumbnail size. */
+    private fun decodeSmallCover(record: BookRecord): Bitmap? {
+        val path = coverFile(record).absolutePath
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(path, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        val options = BitmapFactory.Options().apply { inSampleSize = CoverThumbnail.sampleSize(bounds.outWidth, bounds.outHeight) }
+        return BitmapFactory.decodeFile(path, options)?.let(::shrink)
+    }
+
+    private fun shrink(bitmap: Bitmap): Bitmap {
+        val (width, height) = CoverThumbnail.fit(bitmap.width, bitmap.height)
+        return if (width == bitmap.width && height == bitmap.height) bitmap else Bitmap.createScaledBitmap(bitmap, width, height, true)
+    }
+
+    private fun forgetThumbnails(id: String) {
+        thumbnails.snapshot().keys.filter { it.startsWith("$id:") }.forEach { thumbnails.remove(it) }
+    }
+
+    private fun writePng(file: File, bitmap: Bitmap) {
+        val atomic = AtomicFile(file)
+        val output = atomic.startWrite()
+        try { bitmap.compress(Bitmap.CompressFormat.PNG, 100, output); atomic.finishWrite(output) }
+        catch (error: Exception) { atomic.failWrite(output); throw error }
+    }
 
     private suspend fun change(id: String, transform: BookRecord.() -> BookRecord) = withContext(Dispatchers.IO) {
         lock.withLock { persist(mutableBooks.value.map { if (it.id == id) transform(it) else it }) }

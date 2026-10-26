@@ -77,7 +77,7 @@ internal fun LibraryScreen(
                 items(visible, key = { it.id }) { book ->
                     var menu by remember { mutableStateOf(false) }
                     val cover by produceState<android.graphics.Bitmap?>(null, book.id, book.coverRevision) {
-                        value = withContext(Dispatchers.IO) { library.coverBitmap(book) }
+                        value = withContext(Dispatchers.IO) { library.thumbnailBitmap(book) }
                     }
                     Column {
                         Surface(shape = RoundedCornerShape(10.dp), tonalElevation = 2.dp,

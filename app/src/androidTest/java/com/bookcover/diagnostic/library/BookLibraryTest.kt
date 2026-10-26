@@ -74,7 +74,48 @@ class BookLibraryTest {
         assertTrue(library.books.value.isEmpty())
         assertFalse(library.epubFile(book).exists())
         assertFalse(library.coverFile(book).exists())
+        assertFalse(library.thumbnailFile(book).exists())
         assertTrue("Removal is saved", newLibrary().apply { load() }.books.value.isEmpty())
+    }
+
+    @Test fun importSavesASmallThumbnail() = runBlocking {
+        val library = newLibrary().apply { load() }
+        val book = library.import(epub()).first
+        val cover = BitmapFactory.decodeFile(library.coverFile(book).absolutePath)
+        val saved = BitmapFactory.decodeFile(library.thumbnailFile(book).absolutePath)
+        assertNotNull("A thumbnail file is written at import", saved)
+        assertTrue("At most 400×600: ${saved.width}×${saved.height}", saved.width <= 400 && saved.height <= 600)
+        assertEquals("Keeps the cover's shape", cover.width.toDouble() / cover.height, saved.width.toDouble() / saved.height, 0.01)
+        val tile = library.thumbnailBitmap(book)
+        assertTrue("A tile uses far less memory than the cover: ${tile.byteCount} vs ${cover.byteCount}",
+            tile.byteCount * 2 < cover.byteCount && tile.byteCount <= 400 * 600 * 4)
+    }
+
+    @Test fun replacingACoverReplacesItsThumbnailAndCacheEntry() = runBlocking {
+        val library = newLibrary().apply { load() }
+        val book = library.import(epub()).first
+        val before = library.thumbnailBitmap(book)
+        assertSame("A repeated tile comes from memory", before, library.thumbnailBitmap(book))
+        val image = File(directory, "cover.png").apply {
+            outputStream().use { Bitmap.createBitmap(40, 60, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.RED) }
+                .compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+        SystemClock.sleep(5)
+        library.replaceCover(book.id, Uri.fromFile(image))
+        val tile = library.thumbnailBitmap(library.book(book.id)!!)
+        assertNotSame("The old cover is not served from memory", before, tile)
+        assertEquals("A small image is not enlarged", 40, tile.width)
+        assertEquals(Color.RED, tile.getPixel(20, 30))
+        assertEquals(Color.RED, BitmapFactory.decodeFile(library.thumbnailFile(book).absolutePath).getPixel(20, 30))
+    }
+
+    @Test fun aMissingThumbnailIsRebuiltFromTheCover() = runBlocking {
+        val library = newLibrary().apply { load() }
+        val book = library.import(epub()).first
+        assertTrue(library.thumbnailFile(book).delete()) // Like a book imported before thumbnails existed.
+        val tile = newLibrary().apply { load() }.thumbnailBitmap(book)
+        assertTrue("Rebuilt at thumbnail size: ${tile.width}×${tile.height}", tile.width <= 400 && tile.height <= 600)
+        assertTrue("The rebuilt thumbnail is saved for next time", library.thumbnailFile(book).exists())
     }
 
     @Test fun replaceCoverStoresTheNewImageAndChangesTheRevision() = runBlocking {

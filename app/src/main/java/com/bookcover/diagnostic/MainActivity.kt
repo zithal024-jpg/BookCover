@@ -96,7 +96,7 @@ class MainActivity : FragmentActivity() {
             val books by library.books.collectAsState()
             val recent = books.filter { it.lastReadAt > 0 }.maxByOrNull { it.lastReadAt }
             val seed by produceState(DEFAULT_COVER_SEED, recent?.id, recent?.coverRevision) {
-                value = recent?.let { book -> withContext(Dispatchers.IO) { coverThemeSeed(library.coverBitmap(book)) } } ?: DEFAULT_COVER_SEED
+                value = recent?.let { book -> withContext(Dispatchers.IO) { coverThemeSeed(library.thumbnailBitmap(book)) } } ?: DEFAULT_COVER_SEED
             }
             MaterialTheme(colorScheme = libraryColorScheme(libraryTheme, seed)) {
                 val current = session

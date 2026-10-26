@@ -33,6 +33,11 @@ That is deliberate: OneDrive breaks Android's resource merger.
 - **On-phone tests:** only through
   `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-Device.ps1`
   The phone must be connected by USB, unlocked, with USB debugging on.
+  Ask the owner to keep it unfolded with the screen on and untouched: folded,
+  the tap-injecting `NativeReaderTest` can hang with no focused window, and
+  `ReadingLayoutTest` is skipped. Known flakiness: the first reader screen of a
+  run, or one right after a fold switch, sometimes times out ("navigator is
+  attached"); rerunning that class passes. Hardening the tests is still to do.
 - **Installing the owner's app:** `adb install -r output\BookCover-prototype.apk`
   updates it in place and keeps the library. adb is at
   `%LOCALAPPDATA%\BookCoverBuild\sdk\platform-tools\adb.exe`.
