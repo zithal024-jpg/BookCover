@@ -12,7 +12,7 @@ Reading uses swipes, hidden center-tap controls and a small bottom-left completi
 
 **Installable APK:** `output/BookCover-prototype.apk`. It updates the existing package in place; the launcher now says **BookCover**. Build, 14 JVM tests and Android lint pass, as do APK signature/alignment checks. Installed on the Samsung phone: two local EPUB imports/opening, sample swipes, chapter/bookmark navigation, and saved progress across reopening and a cold restart were exercised. Actual inner/exterior screenshots were inspected. **The user confirmed that the physical outside cover stays visible while swiping inside EPUB pages.**
 
-Start with [the EPUB phone test](PHONE-TEST-EPUB.md) and [architecture/scope](docs/EPUB-PROTOTYPE.md). Library Settings offers a labeled Anna's Archive **browser search shortcut**, not an embedded catalog or downloader. Double-click **Build BookCover.cmd** to rebuild and run checks. Older APKs remain in `output`.
+Start with [the EPUB phone test](PHONE-TEST-EPUB.md) and [architecture/scope](docs/EPUB-PROTOTYPE.md). Double-click **Build BookCover.cmd** to rebuild and run checks. Older APKs remain in `output`.
 
 The sections below describe earlier diagnostic versions and are retained as history.
 

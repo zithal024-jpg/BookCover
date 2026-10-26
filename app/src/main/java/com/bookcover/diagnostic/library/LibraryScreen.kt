@@ -25,7 +25,7 @@ internal fun LibraryScreen(
     books: List<BookRecord>, library: BookLibrary, busy: Boolean, message: String,
     autoCover: Boolean, timer: Int, onAutoCover: (Boolean) -> Unit, onTimer: (Int) -> Unit,
     onImport: () -> Unit, onOpen: (BookRecord) -> Unit, onMove: (BookRecord, String) -> Unit,
-    onRemove: (BookRecord) -> Unit, onSearchWeb: (String) -> Unit, onDiagnostics: () -> Unit,
+    onRemove: (BookRecord) -> Unit, onDiagnostics: () -> Unit,
     libraryTheme: String, onLibraryTheme: (String) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
@@ -35,8 +35,6 @@ internal fun LibraryScreen(
     var moving by remember { mutableStateOf<BookRecord?>(null) }
     var removing by remember { mutableStateOf<BookRecord?>(null) }
     var collectionName by remember { mutableStateOf("") }
-    var webSearch by remember { mutableStateOf(false) }
-    var webQuery by remember { mutableStateOf("") }
     val collections = listOf("All") + books.map { it.collection }.distinct().sorted()
     val visible = books.filter { (collection == "All" || it.collection == collection) &&
         (it.title.contains(query, true) || it.author.contains(query, true)) }.let {
@@ -134,16 +132,8 @@ internal fun LibraryScreen(
                 listOf(30, 60, 0).forEach { minutes -> FilterChip(timer == minutes, { onTimer(minutes) }, label = { Text(if (minutes == 0) "Manual" else "$minutes min") }) }
             }
             Text("Keep BookCover in front while reading. Tap the middle of a page to show controls. Swipe left or right to turn pages.", style = MaterialTheme.typography.bodySmall)
-            TextButton(onClick = { settings = false; webSearch = true }) { Text("Anna's Archive · browser search") }
             TextButton(onClick = { settings = false; onDiagnostics() }) { Text("Device diagnostics") }
             Text("EPUB engine: Readium 3.4.0 · BSD 3-Clause\nBookCover 0.4.0 prototype", style = MaterialTheme.typography.bodySmall)
         }
     }, confirmButton = { TextButton(onClick = { settings = false }) { Text("Done") } })
-    if (webSearch) AlertDialog(onDismissRequest = { webSearch = false }, title = { Text("Search in your browser") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Opens a web search for Anna's Archive and your title or author. This prototype has no archive API or download integration. Import an EPUB afterward through Files.")
-            OutlinedTextField(webQuery, { webQuery = it }, label = { Text("Title or author") })
-        }
-    }, confirmButton = { TextButton(enabled = webQuery.isNotBlank(), onClick = { onSearchWeb(webQuery); webSearch = false }) { Text("Search web") } },
-        dismissButton = { TextButton(onClick = { webSearch = false }) { Text("Cancel") } })
 }

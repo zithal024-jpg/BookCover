@@ -1,7 +1,5 @@
 package com.bookcover.diagnostic
 
-import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.compose.setContent
@@ -85,10 +83,7 @@ class MainActivity : FragmentActivity() {
                     onOpen = ::openBook,
                     onMove = { book, collection -> work { library.move(book.id, collection); message = "Collection updated." } },
                     onRemove = { book -> work { library.remove(book.id); message = "Local copy removed." } },
-                    onSearchWeb = { query ->
-                        runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=" + Uri.encode("Anna's Archive $query")))) }
-                            .onFailure { message = "No browser is available." }
-                    }, onDiagnostics = { showDiagnostics = true }, libraryTheme = libraryTheme,
+                    onDiagnostics = { showDiagnostics = true }, libraryTheme = libraryTheme,
                     onLibraryTheme = { libraryTheme = it; preferences.edit().putString("libraryTheme", it).apply() })
                 else EpubReaderScreen(current, books.firstOrNull { it.id == current.book.id } ?: current.book,
                     exterior.active, exterior.busy, exterior.stopPending, exterior.available && !busy,

@@ -20,6 +20,4 @@ This version replaces the sample-only screen with a local EPUB library and a Rea
 
 Library **Settings** offers automatic outside-cover start and 30-minute, 60-minute, or Manual cover sessions. Manual lasts until stopped or the system ends the session. Activity recreation reopens the book at its saved location and makes a fresh outside-display request when enabled and available. Android/Samsung still controls availability; a callback is not proof of a visible physical panel.
 
-**Optional search:** Library → Settings → **Anna's Archive · browser search** opens a Google query containing that name and your book query. No archive API, embedded catalog or downloading is implemented. Import a local EPUB through Files afterward.
-
 This prototype supports local DRM-free EPUBs, including Readium's reflow rendering, table of contents and native swipe navigation. PDF, Kindle formats, DRM, cloud sync, annotations and text-to-speech are outside this milestone. Fixed-layout EPUBs may use the publisher's layout rather than obey all text settings.
