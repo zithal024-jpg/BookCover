@@ -25,14 +25,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
-import org.json.JSONObject
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.services.coverFitting
 
 internal class BookLibrary(private val context: Context, private val engine: ReadiumEngine) {
     private val directory = File(context.filesDir, "library").apply { mkdirs() }
-    private val index = AtomicFile(File(directory, "books.json"))
+    private val index = LibraryIndex(directory)
     private val lock = Mutex()
     private val mutableBooks = MutableStateFlow<List<BookRecord>>(emptyList())
     val books = mutableBooks.asStateFlow()
@@ -40,14 +38,8 @@ internal class BookLibrary(private val context: Context, private val engine: Rea
     fun epubFile(book: BookRecord): File = File(directory, "${book.id}.epub")
     fun coverFile(book: BookRecord): File = File(directory, "${book.id}.png")
 
-    suspend fun load() = withContext(Dispatchers.IO) {
-        lock.withLock {
-            if (index.baseFile.exists() || File(directory, "books.json.bak").exists()) {
-                val json = JSONObject(index.openRead().use { it.readBytes().toString(Charsets.UTF_8) })
-                val array = json.getJSONArray("books")
-                mutableBooks.value = (0 until array.length()).map { BookRecord.fromJson(array.getJSONObject(it)) }
-            }
-        }
+    suspend fun load(): LibraryIndex.LoadResult = withContext(Dispatchers.IO) {
+        lock.withLock { index.load().also { mutableBooks.value = it.records } }
     }
 
     suspend fun import(uri: Uri): Pair<BookRecord, Boolean> = withContext(Dispatchers.IO) {
@@ -147,10 +139,7 @@ internal class BookLibrary(private val context: Context, private val engine: Rea
     }
 
     private fun persist(records: List<BookRecord>) {
-        val json = JSONObject().put("version", 1).put("books", JSONArray().apply { records.forEach { put(it.toJson()) } })
-        val output = index.startWrite()
-        try { output.write(json.toString().toByteArray()); index.finishWrite(output) }
-        catch (error: Exception) { index.failWrite(output); throw error }
+        index.save(records)
         mutableBooks.value = records
     }
 

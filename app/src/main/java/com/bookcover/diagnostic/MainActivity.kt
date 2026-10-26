@@ -109,13 +109,19 @@ class MainActivity : FragmentActivity() {
             }
         }
         work {
-            library.load()
+            val loaded = library.load()
             if (!preferences.getBoolean("samplesInstalled", false)) {
                 library.importSample("samples/lantern-keeper.epub")
                 library.importSample("samples/river-maps.epub")
                 preferences.edit().putBoolean("samplesInstalled", true).apply()
             }
-            message = "Swipe to turn pages. Tap the middle of a page for controls."
+            if (loaded.recoveredFromBackup || loaded.skipped > 0)
+                DiagnosticLog.record("Library index recovered: backup=${loaded.recoveredFromBackup}, skipped=${loaded.skipped}")
+            message = when {
+                loaded.recoveredFromBackup -> "Your library list was damaged, so BookCover restored its last good copy. Recent changes may be missing."
+                loaded.skipped > 0 -> "${loaded.skipped} damaged library entries could not be read and were set aside. Your other books are safe."
+                else -> "Swipe to turn pages. Tap the middle of a page for controls."
+            }
             savedInstanceState?.getString("openBook")?.let { id -> library.book(id)?.let { loadBook(it) } }
         }
     }
