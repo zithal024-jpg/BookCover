@@ -79,8 +79,8 @@ class MainActivity : FragmentActivity() {
         // of asking Android's fragment restoration to construct a navigator without its factory.
         super.onCreate(null)
         DiagnosticLog.init(this)
-        engine = ReadiumEngine(this)
-        library = BookLibrary(this, engine)
+        library = BookLibrary.forApp(this)
+        engine = library.engine
         exterior = ExteriorCoverController(this, lifecycleScope)
         autoCover = preferences.getBoolean("autoCover", true)
         timer = preferences.getInt("coverTimer", 30).takeIf { it in listOf(0, 30, 60) } ?: 30
@@ -140,6 +140,12 @@ class MainActivity : FragmentActivity() {
             savedInstanceState?.getString("openBook")?.let { id -> library.book(id)?.let { loadBook(it) } }
         }
     }
+
+    // Hooks for the lifecycle tests in the separate QA app (app/src/androidTest); the app does not use them.
+    internal val libraryForTests: BookLibrary get() = library
+    internal val sessionForTests: EpubSession? get() = session
+    internal val busyForTests: Boolean get() = busy
+    internal fun openBookForTests(book: BookRecord) = openBook(book)
 
     private fun openBook(book: BookRecord) {
         if (busy || session != null) return

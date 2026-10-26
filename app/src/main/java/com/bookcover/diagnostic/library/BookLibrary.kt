@@ -29,7 +29,19 @@ import kotlinx.coroutines.withContext
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.services.coverFitting
 
-internal class BookLibrary(private val context: Context, private val engine: ReadiumEngine) {
+internal class BookLibrary(private val context: Context, val engine: ReadiumEngine) {
+    companion object {
+        @Volatile private var shared: BookLibrary? = null
+
+        /**
+         * The app's single library. Activity recreation (rotation, fold, unfold) must reuse it: a second
+         * instance would have its own lock and could read or write `books.json` during the first's save.
+         */
+        fun forApp(context: Context): BookLibrary = shared ?: synchronized(this) {
+            shared ?: context.applicationContext.let { app -> BookLibrary(app, ReadiumEngine(app)) }.also { shared = it }
+        }
+    }
+
     private val directory = File(context.filesDir, "library").apply { mkdirs() }
     private val index = LibraryIndex(directory)
     private val lock = Mutex()

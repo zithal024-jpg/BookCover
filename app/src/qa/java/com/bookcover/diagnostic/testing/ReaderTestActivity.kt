@@ -54,6 +54,7 @@ class ReaderTestActivity : FragmentActivity() {
                 val fixture = withContext(Dispatchers.IO) { NativeEpubFixture.write(testDirectory, fixed) }
                 val engine = ReadiumEngine(isolatedContext)
                 val library = BookLibrary(isolatedContext, engine)
+                library.load() // The library refuses to save until it has loaded (BC-02).
                 val (book, _) = library.import(android.net.Uri.fromFile(fixture))
                 val publication = withContext(Dispatchers.IO) { engine.open(library.epubFile(book)) }
                 val saved = getSharedPreferences("reader", Context.MODE_PRIVATE)

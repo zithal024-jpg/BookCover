@@ -95,6 +95,9 @@ time, building and testing after each.
 - BC-16: delete the dead code listed above. BC-14: debounce position saves and
   move `DiagnosticLog` writes off the main thread.
 - Gate: no known data-loss path, export round-trips, all tests pass.
+- Status 2026-10-26: all Stage 1 items done and the gate met (43 JVM tests, 15
+  on-phone QA tests, backup round trip and position survival confirmed on the
+  owner's phone). Private repo: github.com/zithal024-jpg/BookCover.
 
 **Next stages (summary):** 2, core reading (publisher-styles toggle, line
 spacing/margins, EPUB test corpus, chapter progress, RTL-aware taps, volume-key
