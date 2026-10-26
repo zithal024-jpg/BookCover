@@ -1,0 +1,282 @@
+package com.bookcover.diagnostic.testing
+
+import android.content.Context
+import android.content.Intent
+import android.graphics.Rect
+import android.os.SystemClock
+import android.view.InputDevice
+import android.view.MotionEvent
+import android.view.View
+import android.view.ViewGroup
+import android.webkit.WebView
+import androidx.test.core.app.ActivityScenario
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import com.bookcover.diagnostic.reader.EpubSession
+import kotlin.math.abs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import org.json.JSONObject
+import org.junit.After
+import org.junit.Assert.*
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.readium.r2.shared.ExperimentalReadiumApi
+
+/** Real Android WebView/Readium integration tests, isolated from the user's library/preferences. */
+@RunWith(AndroidJUnit4::class)
+@OptIn(ExperimentalReadiumApi::class)
+class NativeReaderTest {
+    private val instrumentation = InstrumentationRegistry.getInstrumentation()
+    private val target get() = instrumentation.targetContext
+    private var scenario: ActivityScenario<ReaderTestActivity>? = null
+    private lateinit var host: ReaderTestActivity
+    private lateinit var reader: EpubSession
+
+    @Before fun cleanTestPreferences() {
+        target.getSharedPreferences(ReaderTestActivity.TEST_PREFERENCES, Context.MODE_PRIVATE).edit().clear().commit()
+    }
+
+    @After fun cleanUp() {
+        scenario?.close()
+        target.getSharedPreferences(ReaderTestActivity.TEST_PREFERENCES, Context.MODE_PRIVATE).edit().clear().commit()
+    }
+
+    private fun launch(fixed: Boolean = false) {
+        val intent = Intent(target, ReaderTestActivity::class.java).putExtra(ReaderTestActivity.EXTRA_FIXED_LAYOUT, fixed)
+        scenario = ActivityScenario.launch<ReaderTestActivity>(intent).also { it.onActivity { activity -> host = activity } }
+        reader = main { withTimeout(20_000) { host.ready.await() } }
+        waitFor("navigator is attached") { main { reader.fragment.isAdded && reader.fragment.view?.width != 0 } }
+        if (!fixed) waitFor("reflowable chapter is rendered") {
+            runCatching { js("Boolean(document.getElementById('paragraph-0') && window.readium)") == "true" }.getOrDefault(false)
+        }
+    }
+
+    @Test fun fontSizeChangesGlyphsAndWrappingWithoutMagnifyingViewportOrImages() {
+        launch()
+        assertTrue(main { reader.supportsTypography })
+        val before = metrics()
+        assertEquals("The CSS font-size route leaves Android WebSettings.textZoom at 100", 100, main { visibleWebView().settings.textZoom })
+        js("readium.scrollToId('paragraph-35'); true")
+        val anchorBefore = firstVisibleParagraph()
+        assertTrue("The test is midway through the chapter", anchorBefore >= 30)
+        main { reader.changeFont(1.6) }
+        waitFor("CSS typography update completes") { !main { reader.typographyUpdating } && metrics().getDouble("font") > before.getDouble("font") * 1.45 }
+        val after = metrics()
+        assertTrue("Actual paragraph glyphs increase in size", after.getDouble("font") > before.getDouble("font") * 1.45)
+        assertTrue("The prose creates more line fragments after reflow", after.getInt("lines") > before.getInt("lines"))
+        assertEquals("Viewport width stays fixed", before.getDouble("viewport"), after.getDouble("viewport"), 0.5)
+        assertEquals("Images are not magnified by font controls", before.getDouble("imageWidth"), after.getDouble("imageWidth"), 0.5)
+        assertEquals("Visual viewport scale stays fixed", before.getDouble("scale"), after.getDouble("scale"), 0.01)
+        assertEquals(100, main { visibleWebView().settings.textZoom })
+        assertTrue("Reading remains near the same paragraph", abs(firstVisibleParagraph() - anchorBefore) <= 2)
+        assertEquals("An emphasized span keeps its italic style", "italic", after.getString("emStyle"))
+        assertTrue("Strong text keeps a heavier weight", after.getInt("strongWeight") > after.getInt("normalWeight"))
+        assertTrue("Paragraph spacing is positive", after.getDouble("paragraphSpace") > 0)
+    }
+
+    @Test fun fontFamilyAndSizePersistWhenOpeningANewSession() {
+        launch()
+        main { reader.changeFontFamily("sans"); reader.changeFont(1.4) }
+        waitFor("font family and size are applied") {
+            !main { reader.typographyUpdating } && metrics().getString("family").contains("sans", ignoreCase = true)
+        }
+        val preference = target.getSharedPreferences(ReaderTestActivity.TEST_PREFERENCES, Context.MODE_PRIVATE)
+        assertEquals("sans", preference.getString("fontId", null))
+        assertEquals(1.4f, preference.getFloat("fontScale", 0f), 0.001f)
+        scenario!!.close(); scenario = null
+        launch()
+        assertEquals("sans", main { reader.fontId })
+        assertEquals(1.4, main { reader.fontScale }, 0.001)
+        waitFor("saved typography appears in the new native renderer") {
+            metrics().getString("family").contains("sans", ignoreCase = true) && metrics().getDouble("font") > 20.0
+        }
+        main { reader.changeFontFamily("dyslexic") }
+        waitFor("the bundled OpenDyslexic font is loaded and used") {
+            !main { reader.typographyUpdating } &&
+                metrics().getString("family").contains("OpenDyslexic", ignoreCase = true) &&
+                js("document.fonts.check('16px \"OpenDyslexic\"') && document.fonts.status === 'loaded'") == "true"
+        }
+        assertEquals("An actual declared OpenDyslexic FontFace loaded, rather than merely a fallback family name",
+            "true", js("Array.from(document.fonts).some(function(font){return font.family.indexOf('OpenDyslexic') >= 0 && font.status === 'loaded';})"))
+        assertEquals("dyslexic", preference.getString("fontId", null))
+    }
+
+    @Test fun optionalEdgeTapsPreserveSwipesAndFollowLinksInsteadOfTurningPages() {
+        launch()
+        assertFalse("Swipes are the default; edge taps start disabled", main { reader.edgeTaps })
+        val start = settledPageOffset()
+        val pageWidth = js("window.innerWidth").toDouble()
+        tapViewport(0.98f, 0.60f)
+        SystemClock.sleep(400)
+        assertEquals("Disabled edge tap does not navigate", start, pageOffset(), 1.0)
+        swipeViewport(0.80f, 0.20f, 0.60f)
+        waitFor("a normal swipe advances a page") { pageOffset() > start + 50 }
+        val afterSwipe = settledPageOffset()
+        main { reader.changeEdgeTaps(true) }
+        tapViewport(0.98f, 0.60f)
+        waitFor("enabled right-edge tap advances") { pageOffset() > afterSwipe + 50 }
+        val afterRightTap = settledPageOffset()
+        assertEquals("A right-edge tap advances exactly one page", pageWidth, afterRightTap - afterSwipe, 2.0)
+        tapViewport(0.02f, 0.60f)
+        waitFor("enabled left-edge tap goes back") { pageOffset() < afterRightTap - 50 }
+        val afterLeftTap = settledPageOffset()
+        assertEquals("A left-edge tap returns exactly one page", pageWidth, afterRightTap - afterLeftTap, 2.0)
+        // This point is below the top toolbar and above the controls panel in either layout.
+        tapViewport(0.50f, 0.16f)
+        waitFor("the existing center tap reveals reading controls") { main { reader.controlsVisible } }
+        tapViewport(0.98f, 0.16f)
+        SystemClock.sleep(400)
+        assertEquals("An edge tap does not navigate while reading controls are visible", afterLeftTap, pageOffset(), 1.0)
+        main { reader.controlsVisible = false }
+        main { reader.changeEdgeTaps(false) }
+        val beforeDisabledTap = afterLeftTap
+        tapViewport(0.98f, 0.60f)
+        SystemClock.sleep(400)
+        assertEquals(beforeDisabledTap, pageOffset(), 1.0)
+        swipeViewport(0.80f, 0.20f, 0.60f)
+        waitFor("swipes still work after toggling edge taps") { pageOffset() > beforeDisabledTap + 50 }
+        settledPageOffset()
+
+        // Return to the chapter start and tap a real edge-positioned HTML hyperlink. Readium's
+        // interactive-element path gets first refusal; the app's edge listener must not consume it.
+        js("readium.scrollToStart(); true")
+        settledPageOffset()
+        main { reader.changeEdgeTaps(true) }
+        tapElement("edge-link")
+        waitFor("the edge hyperlink opens its target chapter") {
+            main { reader.fragment.currentLocator.value.href.toString().endsWith("chapter1.xhtml") }
+        }
+        assertTrue("The destination chapter rendered", js("Boolean(document.getElementById('linked'))") == "true")
+    }
+
+    @Test fun selectionDismissalDoesNotTriggerAnEdgePageTurn() {
+        launch()
+        main { reader.changeEdgeTaps(true) }
+        val offset = pageOffset()
+        // A real DOM text selection exercises Readium's selection guard deterministically. The
+        // separate human-device checklist also covers native long-press selection and handles.
+        assertEquals("true", js("(function(){var r=document.createRange();r.selectNodeContents(document.getElementById('paragraph-0'));var s=window.getSelection();s.removeAllRanges();s.addRange(r);return !s.isCollapsed;})()"))
+        tapViewport(0.98f, 0.60f)
+        SystemClock.sleep(400)
+        assertEquals("A tap dismissing selection is not a page turn", offset, pageOffset(), 1.0)
+    }
+
+    @Test fun fixedLayoutDisablesTypographyAndKeepsPublisherLayout() {
+        launch(fixed = true)
+        assertFalse("Fixed-layout EPUBs cannot be reflowed by typography controls", main { reader.supportsTypography })
+        val size = main { reader.fontScale }
+        val family = main { reader.fontId }
+        main { reader.changeFont(1.8); reader.changeFontFamily("sans") }
+        assertEquals(size, main { reader.fontScale }, 0.0)
+        assertEquals(family, main { reader.fontId })
+        assertNull("Fixed layout has no reflowable JavaScript viewport", main { reader.fragment.evaluateJavascript("document.documentElement.clientWidth") })
+        assertFalse("Unsupported changes do not start a typography operation", main { reader.typographyUpdating })
+    }
+
+    private fun metrics(): JSONObject = JSONObject(js("""(function(){
+        var p=document.getElementById('paragraph-0'), s=getComputedStyle(p), r=document.createRange();
+        r.selectNode(p.firstChild);
+        var image=document.getElementById('sample-image');
+        return {font:parseFloat(s.fontSize),family:s.fontFamily,lines:r.getClientRects().length,
+            viewport:window.innerWidth,imageWidth:image.getBoundingClientRect().width,
+            scale:window.visualViewport ? window.visualViewport.scale : 1,
+            emStyle:getComputedStyle(p.querySelector('em')).fontStyle,
+            strongWeight:parseInt(getComputedStyle(p.querySelector('strong')).fontWeight),
+            normalWeight:parseInt(s.fontWeight),paragraphSpace:parseFloat(s.marginBottom)};
+        })()"""))
+
+    private fun firstVisibleParagraph(): Int {
+        val locator = main { reader.fragment.firstVisibleElementLocator() } ?: error("No visible text locator")
+        return Regex("Paragraph (\\d+)").find(locator.text.highlight.orEmpty())?.groupValues?.get(1)?.toInt()
+            ?: error("Expected a paragraph anchor; received ${locator.locations.otherLocations}")
+    }
+
+    private fun pageOffset(): Double = js("window.scrollX").toDouble()
+
+    /** A turn emits intermediate offsets during Readium's animation; assertions use its endpoint. */
+    private fun settledPageOffset(): Double {
+        var previous = pageOffset()
+        var stableSince = SystemClock.uptimeMillis()
+        waitFor("the native page animation reaches a stable endpoint", timeout = 5_000) {
+            val current = pageOffset()
+            if (abs(current - previous) > 0.5) stableSince = SystemClock.uptimeMillis()
+            previous = current
+            SystemClock.uptimeMillis() - stableSince >= 240
+        }
+        return previous
+    }
+
+    private fun js(script: String): String = main {
+        withTimeout(10_000) { reader.fragment.evaluateJavascript(script) } ?: error("No reflowable viewport")
+    }
+
+    private fun <T> main(action: suspend () -> T): T = runBlocking { withContext(Dispatchers.Main) { action() } }
+
+    private fun waitFor(description: String, timeout: Long = 15_000, predicate: () -> Boolean) {
+        val deadline = SystemClock.uptimeMillis() + timeout
+        var lastFailure: Throwable? = null
+        while (SystemClock.uptimeMillis() < deadline) {
+            try { if (predicate()) return } catch (failure: Throwable) { lastFailure = failure }
+            SystemClock.sleep(60)
+        }
+        throw AssertionError("Timed out waiting for $description", lastFailure)
+    }
+
+    /** Public Android View inspection is confined to this test; production uses Readium APIs. */
+    private fun visibleWebView(): WebView {
+        fun descendants(view: View): Sequence<View> = sequence {
+            yield(view)
+            if (view is ViewGroup) for (index in 0 until view.childCount) yieldAll(descendants(view.getChildAt(index)))
+        }
+        return descendants(reader.fragment.requireView()).filterIsInstance<WebView>().maxByOrNull {
+            val visible = Rect(); if (it.getGlobalVisibleRect(visible)) visible.width() * visible.height() else 0
+        } ?: error("No native WebView")
+    }
+
+    private fun webViewFrame(): Rect = main {
+        val view = visibleWebView(); val point = IntArray(2); view.getLocationOnScreen(point)
+        Rect(point[0], point[1], point[0] + view.width, point[1] + view.height)
+    }
+
+    private fun tapViewport(x: Float, y: Float) {
+        val frame = webViewFrame()
+        tap(frame.left + frame.width() * x, frame.top + frame.height() * y)
+    }
+
+    private fun tapElement(id: String) {
+        val point = JSONObject(js("""(function(){var r=document.getElementById('$id').getBoundingClientRect();return {x:(r.left+r.width/2)*devicePixelRatio,y:(r.top+r.height/2)*devicePixelRatio};})()"""))
+        val frame = webViewFrame()
+        tap(frame.left + point.getDouble("x").toFloat(), frame.top + point.getDouble("y").toFloat())
+    }
+
+    private fun tap(x: Float, y: Float) {
+        val down = SystemClock.uptimeMillis()
+        send(down, down, MotionEvent.ACTION_DOWN, x, y)
+        SystemClock.sleep(40)
+        send(down, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, x, y)
+        instrumentation.waitForIdleSync()
+    }
+
+    private fun swipeViewport(start: Float, end: Float, y: Float) {
+        val frame = webViewFrame()
+        val down = SystemClock.uptimeMillis()
+        val height = frame.top + frame.height() * y
+        send(down, down, MotionEvent.ACTION_DOWN, frame.left + frame.width() * start, height)
+        for (step in 1..12) {
+            SystemClock.sleep(20)
+            send(down, SystemClock.uptimeMillis(), MotionEvent.ACTION_MOVE,
+                frame.left + frame.width() * (start + (end - start) * step / 12), height)
+        }
+        send(down, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, frame.left + frame.width() * end, height)
+        instrumentation.waitForIdleSync()
+    }
+
+    private fun send(down: Long, time: Long, action: Int, x: Float, y: Float) {
+        MotionEvent.obtain(down, time, action, x, y, 0).apply { source = InputDevice.SOURCE_TOUCHSCREEN }
+            .also { instrumentation.sendPointerSync(it); it.recycle() }
+    }
+}

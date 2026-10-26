@@ -1,0 +1,27 @@
+.gradle/
+.kotlin/
+.idea/
+**/build/
+local.properties
+*.iml
+*.hprof
+.tools/
+captures/
+review-deliverables/
+
+# Build results, screenshots and phone dumps. They can show personal books.
+output/
+*.apk
+*.aab
+
+# Personal books never go into Git. Only the two generated samples do.
+*.epub
+!app/src/main/assets/samples/*.epub
+
+# Signing keys
+*.jks
+*.keystore
+*.p12
+
+# Old MainActivity snapshots (BC-04). They stay on disk, out of Git.
+docs/baselines/*.kt

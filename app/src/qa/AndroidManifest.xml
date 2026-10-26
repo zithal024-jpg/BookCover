@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Isolated QA renderer harness; absent from user debug/release builds and not exported. -->
+        <activity android:name=".testing.ReaderTestActivity" android:exported="false"
+            android:resizeableActivity="true" android:theme="@style/Theme.BookCover" />
+    </application>
+</manifest>
