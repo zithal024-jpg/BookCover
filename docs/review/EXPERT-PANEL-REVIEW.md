@@ -30,7 +30,7 @@ this file together with the change it records.
 | BC-14 | P2 | Debounce saves, logging off main thread | Done | 976b573 | `LatestValueSaverTest`, `CoalescingWriterTest`; position survived a full app kill on phone. 1.5 s debounce; StrictMode not run |
 | BC-15 | P2 | ViewModel / state out of MainActivity | Open | | One shared `BookLibrary` per process already (a67bc24) |
 | BC-16 | P2 | Delete dead code | Done | 528e354 | Sample text moved to `scripts/lantern-keeper.txt` |
-| BC-17 | P2 | RTL-aware edge taps | Done | This commit | Uses Readium's resolved book direction. 53 JVM tests; all 10 `NativeReaderTest` cases pass on the unfolded phone, including explicit RTL, inferred Hebrew RTL and explicit LTR overriding Arabic language; exact edge turns, chapter transitions, swipes, selection and links checked. Owner confirmation pending. See `docs/BC-17-DIRECTIONAL-EDGE-TAPS.md` |
+| BC-17 | P2 | RTL-aware edge taps | In progress (Codex: image-page follow-up) | 4db7ae2 | Initial prose checks passed (53 JVM / 10 native), but owner reported manga edge taps failing on 2026-10-26. Correct APK, enabled setting and explicit RTL metadata verified. Adding artwork and inert Kindle-overlay regressions; overlay fix also needs BC-18's resource-filter wiring correction. See `docs/BC-17-DIRECTIONAL-EDGE-TAPS.md` |
 | BC-18 | P2 | Sanitiser encodings, tag soup | In progress (Claude Code) | | Confirmed by `EpubCorpusTest`: a UTF-16 chapter renders garbled (marked knownIssue "BC-18"; the test fails on purpose once fixed). Tag soup already renders fine |
 | BC-19 | P2 | Two-page spread when unfolded | Open | | |
 | BC-20 | P2 | Chapter progress, TOC marker, named bookmarks | Open | | |
