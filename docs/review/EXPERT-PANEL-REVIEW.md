@@ -21,7 +21,7 @@ this file together with the change it records.
 | BC-05 | P1 | Export / import library backup | Done | 5316eb7 | `LibraryBackupTest`; save and restore round trip on the owner's phone |
 | BC-06 | P1 | Cover thumbnails and cache | Done | 0343325 | `CoverThumbnailTest`, `BookLibraryTest`; thumbnails made on phone. 200-book scroll speed not measured |
 | BC-07 | P1 | Fold/unfold without reload | Partial | 55516e6 | Library flash hidden while reopening (owner confirmed). Still reloads the book and ends the cover session |
-| BC-08 | P1 | Publisher styles, spacing, margins | In progress (Codex) | fd7d50e, 75161e5 | Margins already fixed: 800px line cap so text reflows inside fixed margins (`ReadingLayoutTest`) |
+| BC-08 | P1 | Publisher styles, spacing, margins | Done | This commit; fd7d50e, 75161e5 | 51 JVM tests; `NativeReaderTest` 7/7 and unfolded `ReadingLayoutTest` 1/1 on phone. Publisher toggle restores poetry indents/fonts; custom spacing, margins and alignment persist and retain position within 2 paragraphs. Existing 800px cap retained. See `docs/BC-08-READING-COMFORT.md` |
 | BC-09 | P1 | Library and lifecycle tests | Done | a67bc24 | `BookLibraryTest`, `ReaderLifecycleTest` (rotation, emulated fold, save on stop) |
 | BC-10 | P1 | Accessibility, volume-key page turns | Open | | |
 | BC-11 | P1 | Release build, final app ID | Open | | Needs the owner's decision on the final name and application ID |

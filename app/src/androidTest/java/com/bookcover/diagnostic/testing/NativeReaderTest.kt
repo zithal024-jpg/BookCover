@@ -37,7 +37,8 @@ class NativeReaderTest {
     private lateinit var reader: EpubSession
 
     @Before fun cleanTestPreferences() {
-        target.getSharedPreferences(ReaderTestActivity.TEST_PREFERENCES, Context.MODE_PRIVATE).edit().clear().commit()
+        target.getSharedPreferences(ReaderTestActivity.TEST_PREFERENCES, Context.MODE_PRIVATE).edit().clear()
+            .putBoolean("publisherStyles", false).commit() // Existing reflow probes deliberately use custom typography.
     }
 
     @After fun cleanUp() {
@@ -170,12 +171,86 @@ class NativeReaderTest {
         assertFalse("Fixed-layout EPUBs cannot be reflowed by typography controls", main { reader.supportsTypography })
         val size = main { reader.fontScale }
         val family = main { reader.fontId }
-        main { reader.changeFont(1.8); reader.changeFontFamily("sans") }
+        val comfort = main { reader.comfort }
+        main {
+            reader.changeFont(1.8); reader.changeFontFamily("sans"); reader.changePublisherStyles(true)
+            reader.changeLineSpacing(2.0); reader.changePageMargins("wide"); reader.changeTextAlignment("justified")
+        }
         assertEquals(size, main { reader.fontScale }, 0.0)
         assertEquals(family, main { reader.fontId })
+        assertEquals(comfort, main { reader.comfort })
         assertNull("Fixed layout has no reflowable JavaScript viewport", main { reader.fragment.evaluateJavascript("document.documentElement.clientWidth") })
         assertFalse("Unsupported changes do not start a typography operation", main { reader.typographyUpdating })
     }
+
+    @Test fun publisherStylesDefaultOnAndRestorePoetryWithoutLosingCustomPreferences() {
+        target.getSharedPreferences(ReaderTestActivity.TEST_PREFERENCES, Context.MODE_PRIVATE).edit().clear().commit()
+        launch()
+        assertTrue("A fresh reader respects publisher styles", main { reader.comfort.publisherStyles })
+        val authored = comfortMetrics()
+        assertEquals("center", authored.getString("poemAlign"))
+        assertEquals(3.0, authored.getDouble("poemIndent") / authored.getDouble("poemFont"), 0.05)
+        assertTrue(authored.getString("poemFamily").contains("monospace"))
+        main { reader.changePublisherStyles(false) }
+        waitFor("custom paragraph settings replace publisher overrides") {
+            !main { reader.typographyUpdating } && comfortMetrics().getString("poemAlign") == "start"
+        }
+        assertTrue(comfortMetrics().getDouble("poemIndent") < authored.getDouble("poemIndent"))
+        main { reader.changeLineSpacing(1.8); reader.changePageMargins("wide"); reader.changeTextAlignment("justified") }
+        waitFor("custom choices are applied") { !main { reader.typographyUpdating } && comfortMetrics().getString("alignment") == "justify" }
+        val custom = main { reader.comfort }
+        main { reader.changePublisherStyles(true) }
+        waitFor("publisher poetry formatting is restored") {
+            !main { reader.typographyUpdating } && comfortMetrics().getString("poemAlign") == "center"
+        }
+        val restored = comfortMetrics()
+        assertEquals(authored.getDouble("poemIndent"), restored.getDouble("poemIndent"), 0.5)
+        assertEquals(authored.getString("poemFamily"), restored.getString("poemFamily"))
+        assertEquals(custom.copy(publisherStyles = true), main { reader.comfort })
+        scenario!!.close(); scenario = null; launch()
+        assertEquals(custom.copy(publisherStyles = true), main { reader.comfort })
+        main { reader.changePublisherStyles(false) }
+        waitFor("saved custom settings return") { !main { reader.typographyUpdating } && comfortMetrics().getString("alignment") == "justify" }
+        assertEquals(custom, main { reader.comfort })
+        assertTrue("CSS application succeeded, rather than only saving controls", host.reports.isEmpty())
+    }
+
+    @Test fun comfortControlsChangeRealLayoutAndPreserveMidChapterPosition() {
+        launch()
+        js("readium.scrollToId('paragraph-35'); true")
+        val before = comfortMetrics()
+        fun nearAnchor(control: String, action: () -> Unit) {
+            val paragraph = firstVisibleParagraph()
+            main { action() }
+            waitFor("comfort layout settles") { !main { reader.typographyUpdating } }
+            val after = firstVisibleParagraph()
+            assertTrue("$control retains nearby paragraph: before=$paragraph, after=$after", abs(after - paragraph) <= 2)
+        }
+        nearAnchor("Line spacing") { reader.changeLineSpacing(2.0) }
+        assertTrue(comfortMetrics().getDouble("lineHeight") > before.getDouble("lineHeight") * 1.2)
+        nearAnchor("Side margins") { reader.changePageMargins("wide") }
+        val wide = comfortMetrics()
+        assertTrue(wide.getDouble("padding") > before.getDouble("padding") * 1.8)
+        assertTrue(wide.getDouble("textWidth") < before.getDouble("textWidth"))
+        nearAnchor("Alignment") { reader.changeTextAlignment("justified") }
+        assertEquals("justify", comfortMetrics().getString("alignment"))
+        nearAnchor("Font size") { reader.changeFont(1.6) }
+        assertEquals("Changing font size must not change selected side margins", wide.getDouble("padding"), comfortMetrics().getDouble("padding"), 0.5)
+        assertEquals("The owner's fixed text-column cap is retained", "800px", comfortMetrics().getString("maxLine"))
+        scenario!!.close(); scenario = null; launch()
+        assertEquals(2.0, main { reader.comfort.lineSpacing }, 0.0)
+        assertEquals("wide", main { reader.comfort.margins.id })
+        assertEquals("justified", main { reader.comfort.alignment.id })
+        assertFalse(main { reader.comfort.publisherStyles })
+        assertTrue(host.reports.isEmpty())
+    }
+
+    private fun comfortMetrics(): JSONObject = JSONObject(js("""(function(){
+        var p=document.getElementById('paragraph-0'), s=getComputedStyle(p), b=getComputedStyle(document.body);
+        var v=getComputedStyle(document.getElementById('poem'));
+        return {lineHeight:parseFloat(s.lineHeight),alignment:s.textAlign,padding:parseFloat(b.paddingLeft),
+            textWidth:p.getBoundingClientRect().width,poemIndent:parseFloat(v.textIndent),poemFont:parseFloat(v.fontSize),
+            poemAlign:v.textAlign,poemFamily:v.fontFamily,maxLine:getComputedStyle(document.documentElement).getPropertyValue('--RS__maxLineLength').trim()};})()"""))
 
     private fun metrics(): JSONObject = JSONObject(js("""(function(){
         var p=document.getElementById('paragraph-0'), s=getComputedStyle(p), r=document.createRange();

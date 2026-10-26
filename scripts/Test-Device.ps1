@@ -1,7 +1,9 @@
-param([string]$TestClass = '', [string]$Serial = '')
+param([string]$TestClass = '', [string]$Serial = '', [string]$BuildRoot = '', [string]$ProjectCache = '')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $toolRoot = Join-Path $env:LOCALAPPDATA 'BookCoverBuild'
+if (-not $BuildRoot) { $BuildRoot = Join-Path $toolRoot 'project-output' }
+if (-not $ProjectCache) { $ProjectCache = Join-Path $toolRoot 'project-cache' }
 if (Test-Path -LiteralPath (Join-Path $toolRoot 'java')) {
     $jdk = Get-ChildItem -LiteralPath (Join-Path $toolRoot 'java') -Directory | Select-Object -First 1
     if ($jdk) { $env:JAVA_HOME = $jdk.FullName }
@@ -24,7 +26,7 @@ $phonePolicy = & $adb -s $env:ANDROID_SERIAL shell dumpsys window policy
 if ($LASTEXITCODE -ne 0 -or ($phonePolicy -match '\bshowing=true\b')) { throw 'Unlock the selected phone before starting native UI tests.' }
 Push-Location -LiteralPath $projectRoot
 try {
-    $arguments = @('connectedQaAndroidTest', '--console=plain', '--project-cache-dir', "$toolRoot\project-cache", "-Pbookcover.buildRoot=$toolRoot\project-output")
+    $arguments = @('connectedQaAndroidTest', '--console=plain', '--project-cache-dir', $ProjectCache, "-Pbookcover.buildRoot=$BuildRoot")
     if ($TestClass) { $arguments += "-Pandroid.testInstrumentationRunnerArguments.class=$TestClass" }
     & '.\gradlew.bat' @arguments
     if ($LASTEXITCODE -ne 0) { throw 'Device tests failed; inspect the connected-test results.' }

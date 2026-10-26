@@ -22,14 +22,10 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
-import org.readium.r2.navigator.epub.EpubPreferences
 import org.readium.r2.navigator.epub.css.RsProperties
 import org.readium.r2.navigator.input.InputListener
 import org.readium.r2.navigator.input.DragEvent
 import org.readium.r2.navigator.input.TapEvent
-import org.readium.r2.navigator.preferences.ColumnCount
-import org.readium.r2.navigator.preferences.FontFamily
-import org.readium.r2.navigator.preferences.Theme
 import org.readium.r2.shared.ExperimentalReadiumApi
 import org.readium.r2.shared.DelicateReadiumApi
 import org.readium.r2.shared.publication.Layout
@@ -60,6 +56,9 @@ internal class EpubSession(
     var edgeTaps by mutableStateOf(initialEdgeTaps)
         private set
     var typographyUpdating by mutableStateOf(false)
+        private set
+    private val readerPreferences = activity.getSharedPreferences("reader", 0)
+    var comfort by mutableStateOf(readerPreferences.readingComfort())
         private set
     val supportsTypography = (publication.metadata.layout ?: Layout.REFLOWABLE) == Layout.REFLOWABLE
     var themeName by mutableStateOf(initialTheme)
@@ -143,18 +142,46 @@ internal class EpubSession(
 
     fun changeFont(value: Double) {
         if (!supportsTypography) return
+        comfort = comfort.copy(publisherStyles = false)
         fontScale = ReadingTextSize.percent(value) / 100.0
         applyTypography()
     }
 
     fun changeFontFamily(id: String) {
         if (!supportsTypography) return
+        comfort = comfort.copy(publisherStyles = false)
         fontId = ReadingFont.fromId(id).id
+        applyTypography()
+    }
+
+    fun changePublisherStyles(enabled: Boolean) {
+        if (!supportsTypography) return
+        comfort = comfort.copy(publisherStyles = enabled)
+        applyTypography()
+    }
+
+    fun changeLineSpacing(value: Double) {
+        if (!supportsTypography) return
+        comfort = comfort.copy(publisherStyles = false, lineSpacing = ReadingComfort.normalizedLineSpacing(value))
+        applyTypography()
+    }
+
+    fun changePageMargins(id: String) {
+        if (!supportsTypography) return
+        comfort = comfort.copy(publisherStyles = false, margins = ReadingMargins.fromId(id))
+        applyTypography()
+    }
+
+    fun changeTextAlignment(id: String) {
+        if (!supportsTypography) return
+        comfort = comfort.copy(publisherStyles = false, alignment = ReadingAlignment.fromId(id))
         applyTypography()
     }
 
     private fun applyTypography() {
         if (closed || !fragment.isAdded) return
+        // Persist the selection immediately, even if the reader leaves before a debounced reflow.
+        readerPreferences.saveReadingTypography(comfort, fontScale, fontId)
         typographyJob?.cancel()
         if (!typographyUpdating) typographyAnchorInvalidated = false
         typographyUpdating = true
@@ -162,21 +189,27 @@ internal class EpubSession(
             try {
                 // Keep the same semantic anchor for the entire adjustment burst, rather than
                 // repeatedly capturing a page that has already moved during repagination.
-                if (typographyAnchor == null) typographyAnchor = fragment.firstVisibleElementLocator() ?: currentLocator
+                if (typographyAnchor == null) typographyAnchor = fragment.visibleReadingAnchor() ?: currentLocator
                 delay(100)
-                val requestedSize = fontScale
-                val requestedFont = ReadingFont.fromId(fontId).cssFamily
-                activity.getSharedPreferences("reader", 0).edit().putFloat("fontScale", fontScale.toFloat())
-                    .putString("fontId", fontId).apply()
-                fragment.submitPreferences(preferences())
+                val requested = preferences()
+                val requestedFont = requested.fontFamily?.name.orEmpty()
+                val bookStyles = requested.publisherStyles == true
+                fragment.submitPreferences(requested)
                 val settled = withTimeoutOrNull(3_000) {
-                    fragment.settings.first { it.fontSize == requestedSize && it.fontFamily?.name == requestedFont }
+                    fragment.settings.first {
+                        it.fontSize == requested.fontSize && it.fontFamily == requested.fontFamily &&
+                            it.publisherStyles == bookStyles && it.lineHeight == requested.lineHeight &&
+                            it.pageMargins == requested.pageMargins && it.textAlign == requested.textAlign
+                    }
                     // A public, read-only query confirms that the asynchronous CSS update and
                     // font loading reached the visible resource. No extra JavaScript bridge.
                     while (fragment.evaluateJavascript("""
                         (function(){var s=getComputedStyle(document.documentElement);
-                        return Math.abs(parseFloat(s.getPropertyValue('--USER__fontSize'))-${requestedSize * 100})<0.1
-                        && s.getPropertyValue('--USER__fontFamily').indexOf('$requestedFont')>=0
+                        return Math.abs(parseFloat(s.getPropertyValue('--USER__fontSize'))-${requested.fontSize!! * 100})<0.1
+                        && ${if (bookStyles) "!s.getPropertyValue('--USER__fontFamily').trim()" else "s.getPropertyValue('--USER__fontFamily').indexOf('$requestedFont')>=0"}
+                        && s.getPropertyValue('--USER__advancedSettings').indexOf('readium-advanced-${if (bookStyles) "off" else "on"}')>=0
+                        && Math.abs(parseFloat(s.getPropertyValue('--USER__pageMargins'))-${requested.pageMargins})<0.01
+                        && ${if (bookStyles) "!s.getPropertyValue('--USER__lineHeight').trim() && !s.getPropertyValue('--USER__textAlign').trim()" else "Math.abs(parseFloat(s.getPropertyValue('--USER__lineHeight'))-${requested.lineHeight})<0.01 && s.getPropertyValue('--USER__textAlign').trim()=='${comfort.alignment.css}'"}
                         && document.fonts.status==='loaded';})()
                     """.trimIndent()) != "true") delay(40)
                     delay(160) // Let Readium's resize/pagination observer finish before restoring the block.
@@ -189,7 +222,7 @@ internal class EpubSession(
                 currentLocator = fragment.currentLocator.value
                 currentLocator?.let { positions.submit(it) }
                 if (!settled) report("Text settings saved. This book's styles may limit the selected typography.")
-                DiagnosticLog.record("EPUB typography CSS reflow; size=${ReadingTextSize.percent(fontScale)}%; font=$fontId; CSS confirmed=$settled; semantic anchor restored=$restored")
+                DiagnosticLog.record("EPUB typography CSS reflow; bookStyles=$bookStyles; size=${ReadingTextSize.percent(fontScale)}%; font=$fontId; lineSpacing=${comfort.lineSpacing}; margins=${comfort.margins.id}; alignment=${comfort.alignment.id}; CSS confirmed=$settled; semantic anchor restored=$restored")
                 typographyAnchor = null
                 typographyUpdating = false
             } catch (cancelled: CancellationException) { throw cancelled }
@@ -229,10 +262,5 @@ internal class EpubSession(
         publication.close()
     }
 
-    private fun preferences() = EpubPreferences(
-        fontFamily = FontFamily(ReadingFont.fromId(fontId).cssFamily), fontSize = fontScale,
-        lineHeight = 1.5, pageMargins = 1.0, paragraphSpacing = 0.6, paragraphIndent = 1.2,
-        columnCount = ColumnCount.ONE, scroll = false, publisherStyles = false,
-        theme = when (themeName) { "Night" -> Theme.DARK; "Sepia" -> Theme.SEPIA; else -> Theme.LIGHT },
-    )
+    private fun preferences() = comfort.epubPreferences(fontScale, fontId, themeName)
 }

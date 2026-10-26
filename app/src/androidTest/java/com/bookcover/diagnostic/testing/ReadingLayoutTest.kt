@@ -31,7 +31,8 @@ class ReadingLayoutTest {
     private lateinit var reader: EpubSession
 
     @Before fun cleanPreferences() {
-        target.getSharedPreferences(ReaderTestActivity.TEST_PREFERENCES, Context.MODE_PRIVATE).edit().clear().commit()
+        target.getSharedPreferences(ReaderTestActivity.TEST_PREFERENCES, Context.MODE_PRIVATE).edit().clear()
+            .putBoolean("publisherStyles", false).commit() // This regression probe measures custom text size.
     }
 
     @After fun cleanUp() {

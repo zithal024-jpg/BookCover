@@ -116,14 +116,26 @@ internal fun EpubReaderScreen(
                             }
                             Text("Typography", style = MaterialTheme.typography.titleMedium)
                             if (!session.supportsTypography) {
-                                Text("Fixed-layout EPUB: the publisher positions the page contents. Text size and font changes are unavailable for this book.", style = MaterialTheme.typography.bodySmall)
+                                Text("Fixed-layout EPUB: the publisher positions the page contents. Font, spacing, margin and alignment changes are unavailable for this book.", style = MaterialTheme.typography.bodySmall)
                             }
-                            val typeEnabled = session.supportsTypography && !session.typographyUpdating
+                            val canChangeType = session.supportsTypography && !session.typographyUpdating
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Publisher styles", style = MaterialTheme.typography.labelLarge)
+                                    Text("Use the book's fonts and paragraph formatting.", style = MaterialTheme.typography.bodySmall)
+                                }
+                                Switch(checked = session.comfort.publisherStyles, onCheckedChange = session::changePublisherStyles,
+                                    enabled = canChangeType, modifier = Modifier.semantics { contentDescription = "Use publisher styles" })
+                            }
+                            if (session.comfort.publisherStyles && session.supportsTypography) {
+                                Text("Turn off publisher styles to use the custom settings below. Your saved choices are kept.", style = MaterialTheme.typography.bodySmall)
+                            }
+                            val typeEnabled = canChangeType && !session.comfort.publisherStyles
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                                 OutlinedButton(onClick = { session.changeFont(session.fontScale - 0.1) },
                                     enabled = typeEnabled && ReadingTextSize.percent(session.fontScale) > ReadingTextSize.MIN_PERCENT,
                                     modifier = Modifier.semantics { contentDescription = "Decrease text size" }) { Text("A−") }
-                                Text("Text size: ${ReadingTextSize.percent(session.fontScale)}%", style = MaterialTheme.typography.labelLarge)
+                                Text("${if (session.comfort.publisherStyles) "Saved text size" else "Text size"}: ${ReadingTextSize.percent(session.fontScale)}%", style = MaterialTheme.typography.labelLarge)
                                 OutlinedButton(onClick = { session.changeFont(session.fontScale + 0.1) },
                                     enabled = typeEnabled && ReadingTextSize.percent(session.fontScale) < ReadingTextSize.MAX_PERCENT,
                                     modifier = Modifier.semantics { contentDescription = "Increase text size" }) { Text("A+") }
@@ -136,6 +148,30 @@ internal fun EpubReaderScreen(
                             ReadingFont.entries.forEach { font ->
                                 FilterChip(selected = session.fontId == font.id, onClick = { session.changeFontFamily(font.id) },
                                     enabled = typeEnabled, label = { Text(font.label) })
+                            }
+                            Text("Line spacing", style = MaterialTheme.typography.labelLarge)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                ReadingComfort.lineSpacingChoices.forEach { spacing ->
+                                    FilterChip(selected = session.comfort.lineSpacing == spacing,
+                                        onClick = { session.changeLineSpacing(spacing) }, enabled = typeEnabled,
+                                        label = { Text("${spacing}×") },
+                                        modifier = Modifier.weight(1f).semantics { contentDescription = "Line spacing $spacing" })
+                                }
+                            }
+                            Text("Side margins", style = MaterialTheme.typography.labelLarge)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                ReadingMargins.entries.forEach { margin ->
+                                    FilterChip(selected = session.comfort.margins == margin, onClick = { session.changePageMargins(margin.id) },
+                                        enabled = typeEnabled, label = { Text(margin.label) }, modifier = Modifier.weight(1f))
+                                }
+                            }
+                            Text("Alignment", style = MaterialTheme.typography.labelLarge)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                ReadingAlignment.entries.forEach { alignment ->
+                                    FilterChip(selected = session.comfort.alignment == alignment,
+                                        onClick = { session.changeTextAlignment(alignment.id) }, enabled = typeEnabled,
+                                        label = { Text(alignment.label) }, modifier = Modifier.weight(1f))
+                                }
                             }
                             if (session.typographyUpdating) Text("Reflowing text and restoring your reading position…", style = MaterialTheme.typography.bodySmall)
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
