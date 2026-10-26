@@ -54,7 +54,9 @@ class ReaderTestActivity : FragmentActivity() {
                 val fixture = withContext(Dispatchers.IO) {
                     NativeEpubFixture.write(testDirectory, fixed,
                         progression = intent.getStringExtra(EXTRA_READING_PROGRESSION),
-                        language = intent.getStringExtra(EXTRA_LANGUAGE) ?: "en")
+                        language = intent.getStringExtra(EXTRA_LANGUAGE) ?: "en",
+                        imagePages = intent.getBooleanExtra(EXTRA_IMAGE_PAGES, false),
+                        legacyOverlay = intent.getBooleanExtra(EXTRA_LEGACY_OVERLAY, false))
                 }
                 val engine = ReadiumEngine(isolatedContext)
                 val library = BookLibrary(isolatedContext, engine)
@@ -98,6 +100,8 @@ class ReaderTestActivity : FragmentActivity() {
         const val EXTRA_FIXED_LAYOUT = "fixedLayout"
         const val EXTRA_READING_PROGRESSION = "readingProgression"
         const val EXTRA_LANGUAGE = "language"
+        const val EXTRA_IMAGE_PAGES = "imagePages"
+        const val EXTRA_LEGACY_OVERLAY = "legacyOverlay"
         const val TEST_PREFERENCES = "reader-native-instrumentation-test"
     }
 }

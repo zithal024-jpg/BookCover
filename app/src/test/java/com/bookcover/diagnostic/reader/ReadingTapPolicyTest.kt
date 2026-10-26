@@ -43,7 +43,7 @@ class ReadingTapPolicyTest {
         assertEquals(ReadingTapAction.NONE, tap(65f, width = 2200f))
         assertEquals(ReadingTapAction.NONE, tap(60f))
     }
-    @Test fun controlsTypographyImagesAndVerticalInsetsSuppressNavigation() {
+    @Test fun controlsTypographyProtectedTargetsAndVerticalInsetsSuppressNavigation() {
         assertEquals(ReadingTapAction.NONE, tap(1f, controls = true))
         assertEquals(ReadingTapAction.NONE, tap(999f, busy = true))
         assertEquals(ReadingTapAction.NONE, tap(1f, target = true))

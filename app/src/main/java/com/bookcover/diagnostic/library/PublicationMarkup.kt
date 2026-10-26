@@ -22,5 +22,6 @@ internal fun passivePublicationMarkup(bytes: ByteArray): ByteArray {
             }
         }
     }
+    normalizePassiveImageOverlays(document)
     return document.outerHtml().toByteArray(Charsets.UTF_8)
 }

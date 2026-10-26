@@ -47,15 +47,19 @@ class NativeReaderTest {
         target.getSharedPreferences(ReaderTestActivity.TEST_PREFERENCES, Context.MODE_PRIVATE).edit().clear().commit()
     }
 
-    private fun launch(fixed: Boolean = false, progression: String? = null, language: String = "en") {
+    private fun launch(fixed: Boolean = false, progression: String? = null, language: String = "en",
+                       imagePages: Boolean = false, legacyOverlay: Boolean = false) {
         val intent = Intent(target, ReaderTestActivity::class.java).putExtra(ReaderTestActivity.EXTRA_FIXED_LAYOUT, fixed)
             .putExtra(ReaderTestActivity.EXTRA_READING_PROGRESSION, progression)
             .putExtra(ReaderTestActivity.EXTRA_LANGUAGE, language)
+            .putExtra(ReaderTestActivity.EXTRA_IMAGE_PAGES, imagePages)
+            .putExtra(ReaderTestActivity.EXTRA_LEGACY_OVERLAY, legacyOverlay)
         scenario = ActivityScenario.launch<ReaderTestActivity>(intent).also { it.onActivity { activity -> host = activity } }
         reader = main { withTimeout(20_000) { host.ready.await() } }
         waitFor("navigator is attached") { main { reader.fragment.isAdded && reader.fragment.view?.width != 0 } }
         if (!fixed) waitFor("reflowable chapter is rendered") {
-            runCatching { js("Boolean(document.getElementById('paragraph-0') && window.readium)") == "true" }.getOrDefault(false)
+            val marker = if (imagePages) "graphic" else "paragraph-0"
+            runCatching { js("Boolean(document.getElementById('$marker') && window.readium)") == "true" }.getOrDefault(false)
         }
     }
 
@@ -229,6 +233,44 @@ class NativeReaderTest {
         waitFor("edge-positioned hyperlink still wins over page navigation") {
             main { reader.fragment.currentLocator.value.href.toString().endsWith("chapter1.xhtml") } &&
                 js("Boolean(document.getElementById('linked'))") == "true"
+        }
+    }
+
+    @Test fun rtlImagePagesAcceptEdgeTapsOnArtwork() = checkImagePageEdgeTurns(legacyOverlay = false)
+
+    @Test fun rtlImagePagesWithInertKindlePanelOverlaysAcceptEdgeTaps() = checkImagePageEdgeTurns(legacyOverlay = true)
+
+    private fun checkImagePageEdgeTurns(legacyOverlay: Boolean) {
+        target.getSharedPreferences(ReaderTestActivity.TEST_PREFERENCES, Context.MODE_PRIVATE).edit()
+            .putBoolean("publisherStyles", true).commit()
+        launch(progression = "rtl", imagePages = true, legacyOverlay = legacyOverlay)
+        assertEquals(ReadingProgression.RTL, main { reader.fragment.settings.value.readingProgression })
+        settledPageOffset()
+        if (legacyOverlay) assertEquals("Kindle-only href-less overlays must be passive in the rendered DOM", "\"span\"",
+            js("document.querySelector('[data-app-amzn-magnify]').tagName.toLowerCase()"))
+        val imageLayout = js("JSON.stringify({x:scrollX,w:innerWidth,h:innerHeight,tag:document.elementFromPoint(innerWidth*0.02,innerHeight*0.60).tagName,rect:document.getElementById('graphic').getBoundingClientRect().toJSON(),style:getComputedStyle(document.getElementById('graphic')).position})")
+        assertEquals("The edge lies on artwork or its inert panel overlay, not an empty margin: $imageLayout", "true",
+            js("['IMG','SPAN','A'].includes(document.elementFromPoint(innerWidth*0.02,innerHeight*0.60).tagName.toUpperCase())"))
+        tapViewport(0.02f, 0.60f)
+        SystemClock.sleep(400)
+        assertTrue("Image edges stay off by default", main { reader.fragment.currentLocator.value.href.toString().endsWith("chapter0.xhtml") })
+        main { reader.changeEdgeTaps(true) }
+        tapViewport(0.02f, 0.60f)
+        waitFor("left-edge artwork tap advances to the next RTL image page") {
+            main { reader.fragment.currentLocator.value.href.toString().endsWith("chapter1.xhtml") }
+        }
+        settledPageOffset()
+        tapViewport(0.98f, 0.60f)
+        waitFor("right-edge artwork tap returns to the previous RTL image page") {
+            main { reader.fragment.currentLocator.value.href.toString().endsWith("chapter0.xhtml") }
+        }
+        settledPageOffset()
+        tapViewport(0.02f, 0.30f)
+        waitFor("a real image hyperlink still uses the existing link handler") { main { host.reports.any { it.contains("website") } } }
+        assertTrue("An image link is not consumed as a page turn", main { reader.fragment.currentLocator.value.href.toString().endsWith("chapter0.xhtml") })
+        swipeViewport(0.20f, 0.80f, 0.60f)
+        waitFor("native swipe still advances an RTL image page") {
+            main { reader.fragment.currentLocator.value.href.toString().endsWith("chapter1.xhtml") }
         }
     }
 

@@ -32,6 +32,7 @@ import org.readium.r2.shared.DelicateReadiumApi
 import org.readium.r2.shared.publication.Layout
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
+import org.readium.r2.shared.publication.services.content.Content
 import org.readium.r2.shared.util.AbsoluteUrl
 import org.readium.r2.shared.util.Url
 import org.readium.r2.shared.util.data.ReadError
@@ -113,8 +114,11 @@ internal class EpubSession(
                 val view = fragment.view ?: return false
                 // Readium filters interactive links, active selections and drag gestures before
                 // this callback. Keep its native touch recognizers and selection handling intact.
+                // Passive artwork must accept edge taps too: manga pages may contain no prose.
+                val target = event.targetElement?.content
+                val protectedTarget = target != null && target !is Content.ImageElement && target !is Content.SvgElement
                 when (readingTapAction(event.point.x, event.point.y, view.width.toFloat(), view.height.toFloat(),
-                    view.resources.displayMetrics.density, edgeTaps, controlsVisible, typographyUpdating, event.targetElement != null,
+                    view.resources.displayMetrics.density, edgeTaps, controlsVisible, typographyUpdating, protectedTarget,
                     // Use the same resolved direction as Readium's native navigation, including
                     // language inference when the publication omits page-progression-direction.
                     rightToLeft = fragment.settings.value.readingProgression == ReadingProgression.RTL)) {

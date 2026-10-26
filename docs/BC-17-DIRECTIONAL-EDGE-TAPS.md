@@ -10,7 +10,7 @@ When optional edge taps are enabled, an LTR book advances at the right edge and 
 
 Production changes are limited to `reader/ReadingTapPolicy.kt`, `reader/EpubSession.kt` and `reader/EpubReaderScreen.kt`. The QA host and generated fixture accept optional publication-direction and language inputs; all existing callers retain their defaults. BC-18's sanitizer and corpus files are outside this change.
 
-## Acceptance checks and results
+## Initial acceptance checks and results
 
 | Check | Result |
 | --- | --- |
@@ -38,3 +38,15 @@ Use `scripts/Build.ps1` for the normal build/unit-test/lint workflow. Run device
 Separate checkouts may pass `-BuildRoot` and `-ProjectCache` to that script to avoid overlapping generated files. Build logs and JUnit results are saved locally under ignored `output/BC17-validation/`; APKs and device logs are not committed.
 
 For manual evaluation, enable **Edge-tap page turns** in reading settings, close the settings, and test an RTL book: left edge advances, right edge returns. Repeat with an LTR book and check that ordinary swipes, link activation and selection still behave normally. Edge taps should be inert with the setting off. Owner confirmation of this build is not yet recorded.
+
+## Image-page follow-up after owner testing
+
+The owner reported manga taps failing after the initial build. Read-only checks confirmed that the installed APK matched the BC-17 artifact, edge taps were enabled, and the book explicitly declared RTL. Only structural metadata was inspected locally in memory; no personal book, artwork or page text was saved in the repository or captured in screenshots.
+
+Two missing cases were identified: the application rejected every non-null tap target, including passive images, and legacy Kindle panel overlays used href-less `a.app-amzn-magnify[data-app-amzn-magnify]` elements that Readium treats as interactive. Generated graphic-only fixtures reproduce these structures without using the owner's book. Both new navigation tests failed before the fix. After the image-target change, the plain-artwork test passed, while the overlay test still failed because the existing resource filter was not being applied by Readium. That wiring correction is part of Claude Code's concurrent BC-18 work.
+
+The reader now allows passive bitmap/SVG image targets while retaining the safeguard for other recognized target types. Readium still filters real links, selections and interactive elements before the app's listener. `ReadingImageMarkup.kt` changes only the specific href-less Kindle panel anchors into spans, preserving their content, classes, IDs and layout attributes. Actual href links, unrelated anchors and named anchors remain intact. Its call in `PublicationMarkup.kt` shares the existing document parse; original EPUB files are not modified and reimport is unnecessary.
+
+Two new markup unit tests pass, including real-image-link preservation and idempotence. With BC-18's pending resource-filter wiring present in the isolated validation checkout, both image regressions pass and the full `NativeReaderTest` class passes 12/12 with zero failures or skips on the unfolded phone. The new cases verify default-off taps, RTL forward/backward artwork turns, native swipes and real image hyperlinks. The app's website-link handler is asserted without making any network request. Local before/after logs are retained under ignored `output/BC17-validation/image-followup/`.
+
+BC-17 stays **Partial — owner retest pending** until the owner confirms the real manga book. The overlay behavior also depends on BC-18's resource-filter correction; it must accompany any build intended to contain this fix. The pending BC-18 source used for the validation build is retained with the local evidence so the APK's inputs remain reviewable without attributing that work to BC-17.

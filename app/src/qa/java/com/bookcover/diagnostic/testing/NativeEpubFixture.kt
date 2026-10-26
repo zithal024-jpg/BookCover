@@ -10,7 +10,8 @@ import java.util.zip.ZipOutputStream
 
 /** Original, generated EPUBs: long reflowable prose and a separate fixed-layout document. */
 internal object NativeEpubFixture {
-    fun write(directory: File, fixed: Boolean, progression: String? = null, language: String = "en"): File {
+    fun write(directory: File, fixed: Boolean, progression: String? = null, language: String = "en",
+              imagePages: Boolean = false, legacyOverlay: Boolean = false): File {
         val direction = progression ?: if (language in listOf("ar", "he")) "rtl" else "ltr"
         val spineDirection = progression?.let { " page-progression-direction=\"$it\"" }.orEmpty()
         val image = ByteArrayOutputStream().use { bytes ->
@@ -39,6 +40,11 @@ internal object NativeEpubFixture {
             entry("EPUB/square.png", image)
             if (fixed) {
                 for (index in 0..1) text("EPUB/chapter$index.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Fixed page $index</title><meta name="viewport" content="width=600,height=800"/></head><body style="margin:0;width:600px;height:800px;background:#f5eddb"><h1 style="position:absolute;left:40px;top:60px;font-size:36px">Fixed page $index</h1><p style="position:absolute;left:40px;top:180px;font-size:20px">Publisher layout remains fixed.</p><img src="square.png" style="position:absolute;left:40px;top:260px;width:64px;height:64px"/></body></html>""")
+            } else if (imagePages) {
+                for (index in 0..1) {
+                    val overlay = if (legacyOverlay) """<a class="app-amzn-magnify" data-app-amzn-magnify="{}" style="position:fixed;inset:0;z-index:2"></a>""" else ""
+                    text("EPUB/chapter$index.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml" lang="$language" dir="$direction"><head><title>Image page $index</title><style>html,body {margin:0;padding:0;} #graphic {position:fixed;inset:0;width:100vw;height:100vh;} #image-link {position:fixed;left:0;top:25vh;width:10vw;height:10vh;z-index:3;} #image-link img {width:100%;height:100%;}</style></head><body><img id="graphic" src="square.png" alt="Original test graphic $index"/>$overlay<a id="image-link" href="https://example.com/"><img src="square.png" alt="Test link"/></a></body></html>""")
+                }
             } else {
                 val paragraphs = (0 until 90).joinToString("") { index ->
                     """<p id="paragraph-$index">Paragraph $index. The river carried small reflections beneath the bridge as the keeper walked home. Each familiar stone had a story, and each turning in the path revealed another quiet corner of the valley. Reading these original words provides enough continuous prose to test changing line wraps, semantic position, paragraph spacing, and many page turns without substituting a picture of a page. <em>Emphasized words remain italic.</em> <strong>Strong words remain bold.</strong> The paragraph closes with a distinct marker number $index.</p>"""
