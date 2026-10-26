@@ -33,7 +33,7 @@ this file together with the change it records.
 | BC-17 | P2 | RTL-aware edge taps | Done — owner confirmed with manga | 4db7ae2; 3a56e91 | Owner confirmed the corrected build works with manga on 2026-10-26. Passive image targets accept edge taps; inert Kindle panel anchors become passive spans. Combined build with BC-18's pending source: 61 JVM tests and 12/12 native reader checks pass, including artwork, overlays, swipes and real image links; zero lint errors. Installed `BookCover-BC17-image-fix.apk`. BC-18 resource-filter wiring must accompany the fix. See `docs/BC-17-DIRECTIONAL-EDGE-TAPS.md` |
 | BC-18 | P2 | Sanitiser encodings, tag soup | In progress (Claude Code) | | Confirmed by `EpubCorpusTest`: a UTF-16 chapter renders garbled (marked knownIssue "BC-18"; the test fails on purpose once fixed). Tag soup already renders fine |
 | BC-19 | P2 | Two-page spread when unfolded | Open | | |
-| BC-20 | P2 | Chapter progress, TOC marker, named bookmarks | Open | | |
+| BC-20 | P2 | Chapter progress, TOC marker, named bookmarks | In progress (Codex) | | Selected next on 2026-10-26 after owner-confirmed BC-17; separate from Claude Code's BC-18. Scope: chapter progress and evidence-based time-left estimates, current chapter highlighted/scrolled into view in Contents, named bookmarks with chapter context and duplicate prevention. Preserve the quiet reading page and existing saved bookmarks. Implementation and validation pending. |
 | BC-21 | P2 | One palette; Automatic follows dark mode | Open | | |
 | BC-22 | P2 | Screen-on timeout, battery measurement | Open | | |
 | BC-23 | P2 | Split settings; hide diagnostics | Open | | |
