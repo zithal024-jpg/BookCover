@@ -3,7 +3,6 @@ from pathlib import Path
 from zipfile import ZipFile, ZIP_STORED, ZIP_DEFLATED, ZipInfo
 from xml.sax.saxutils import escape
 import io
-import re
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,8 +51,7 @@ def write_epub(filename, title, chapters, art):
             content=''.join(f'<p>{escape(p)}</p>' for p in paras)
             entry(z, f'EPUB/chapter{i}.xhtml', f'<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>{escape(heading)}</title><link rel="stylesheet" href="style.css"/></head><body><h1>{escape(heading)}</h1>{content}</body></html>')
 
-source=(ROOT/'app/src/main/java/com/bookcover/diagnostic/reader/SampleBook.kt').read_text(encoding='utf-8')
-lantern=re.findall(r'"""(.*?)"""', source, re.S)
+lantern=(ROOT/'scripts/lantern-keeper.txt').read_text(encoding='utf-8').strip().split('\n\n')
 assert len(lantern)==12
 write_epub('lantern-keeper.epub', 'The Lantern Keeper', [('The Light in the Window',lantern[:4]),('A Map of Reading Rooms',lantern[4:8]),('The Next Keeper',lantern[8:])], cover('The Lantern|Keeper','A STORY OF SHARED LIGHT','#203F3D','#C5AC77','lantern'))
 

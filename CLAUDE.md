@@ -66,10 +66,9 @@ That is deliberate: OneDrive breaks Android's resource merger.
     WindowManager `WindowAreaController` (an experimental API)
 - `app/src/test/`: JVM unit tests. `app/src/androidTest/` + `app/src/qa/`:
   on-phone tests and their isolated host activity.
-- Dead code, scheduled for removal (BC-16): `reader/SampleReaderScreen.kt`,
-  `reader/SampleBook.kt`, `reader/SampleReadingPosition.kt`,
-  `cover/OuterBrightnessControl.kt`, `DisplayPolicy.kt`, the Kindle `<queries>`
-  entry in the manifest, and `docs/baselines/*.kt`.
+- `scripts/GenerateSamples.py` rebuilds the two sample EPUBs; "The Lantern
+  Keeper" text is in `scripts/lantern-keeper.txt`. (The old sample reader and
+  other dead code were removed in BC-16.)
 
 ## Current plan
 

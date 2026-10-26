@@ -22,6 +22,3 @@ output/
 *.jks
 *.keystore
 *.p12
-
-# Old MainActivity snapshots (BC-04). They stay on disk, out of Git.
-docs/baselines/*.kt
