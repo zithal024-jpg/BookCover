@@ -37,7 +37,7 @@ Use `scripts/Build.ps1` for the normal build/unit-test/lint workflow. Run device
 
 Separate checkouts may pass `-BuildRoot` and `-ProjectCache` to that script to avoid overlapping generated files. Build logs and JUnit results are saved locally under ignored `output/BC17-validation/`; APKs and device logs are not committed.
 
-For manual evaluation, enable **Edge-tap page turns** in reading settings, close the settings, and test an RTL book: left edge advances, right edge returns. Repeat with an LTR book and check that ordinary swipes, link activation and selection still behave normally. Edge taps should be inert with the setting off. Owner confirmation of this build is not yet recorded.
+For manual evaluation, enable **Edge-tap page turns** in reading settings, close the settings, and test an RTL book: left edge advances, right edge returns. Repeat with an LTR book and check that ordinary swipes, link activation and selection still behave normally. Edge taps should be inert with the setting off. Owner confirmation of the corrected manga build is recorded below.
 
 ## Image-page follow-up after owner testing
 
@@ -49,6 +49,8 @@ The reader now allows passive bitmap/SVG image targets while retaining the safeg
 
 Two new markup unit tests pass, including real-image-link preservation and idempotence. With BC-18's pending resource-filter wiring present in the isolated validation checkout, both image regressions pass and the full `NativeReaderTest` class passes 12/12 with zero failures or skips on the unfolded phone. The new cases verify default-off taps, RTL forward/backward artwork turns, native swipes and real image hyperlinks. The app's website-link handler is asserted without making any network request. Local before/after logs are retained under ignored `output/BC17-validation/image-followup/`.
 
-BC-17 stays **Partial — owner retest pending** until the owner confirms the real manga book. The overlay behavior also depends on BC-18's resource-filter correction; it must accompany any build intended to contain this fix. The pending BC-18 source used for the validation build is retained with the local evidence so the APK's inputs remain reviewable without attributing that work to BC-17.
+Owner confirmation, October 26, 2026: Frank retested the corrected installed build and reported "Confirmed working now with Manga", requesting that the tracker be marked accordingly. BC-17 is now **Done — owner confirmed with manga**. This records manual acceptance alongside the automated results; no additional automated run was performed for this documentation update.
+
+The overlay behavior also depends on BC-18's resource-filter correction; it must accompany any build intended to contain this fix. The pending BC-18 source used for the validation build is retained with the local evidence so the APK's inputs remain reviewable without attributing that work to BC-17.
 
 Final combined validation: BC-17 commit `3a56e91` plus the five pending BC-18 source files recorded in `output/BC17-validation/image-followup/bc18-validation-inputs/`. Debug and QA APK compilation passed; all 61 JVM tests passed, followed by all 12 native reader checks with no failures or skips. Lint has zero errors (22 debug / 23 QA warnings). The installable artifact is `output/BookCover-BC17-image-fix.apk`, SHA-256 `6f192c2d6ffdbabbf2ccc7c7181d0d805ded0df007d597eedc990c74cfa1b7eb`. This combined build was installed in place; the app version label remains 0.4.0-prototype. This does not claim that the separate BC-18 corpus acceptance run has completed.
