@@ -1,0 +1,12 @@
+Copyright (c) 2026 Frank. All rights reserved.
+
+BookCover's source code, documentation and sample books are not licensed for
+copying, modification or distribution without the copyright holder's written
+permission.
+
+Third-party components keep their own licences, including:
+- Readium Kotlin Toolkit: BSD 3-Clause (app/src/main/assets/READIUM-LICENSE.txt)
+- OpenDyslexic font: CC BY 3.0 over Bitstream Vera
+  (app/src/main/assets/OPENDYSLEXIC-LICENSE.txt)
+- AndroidX and Jetpack Compose: Apache License 2.0
+- jsoup: MIT License
