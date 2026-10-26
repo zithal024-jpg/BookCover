@@ -98,7 +98,11 @@ time, building and testing after each.
 
 **Next stages (summary):** 2, core reading (publisher-styles toggle, line
 spacing/margins, EPUB test corpus, chapter progress, RTL-aware taps, volume-key
-page turns). 3, UX refinement (slim reader bar, split settings, cover
+page turns). Owner-reported bug for the margins work (2026-10-26): changing text
+size looks like zooming; the page's side margins get thinner or thicker instead
+of text reflowing inside fixed margins. Likely cause (unverified): Readium CSS
+caps line length in `rem`, which scales with `--USER__fontSize`, so the text
+column widens with the font (`EpubSession.preferences()`). 3, UX refinement (slim reader bar, split settings, cover
 thumbnails, one theme that follows dark mode, accessibility). 4, foldable
 features (move state out of `MainActivity`, survive fold/unfold without reload,
 two-page spread when unfolded, battery measurement, in-book search). 5,
