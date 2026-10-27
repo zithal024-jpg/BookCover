@@ -1,10 +1,47 @@
 # BC-25: guarded builds, QA tests and matching package evidence
 
-This bounded slice integrates checkout-aware paths, resource reservations and
-source/output receipts into `Build.ps1`, `Test-Device.ps1` and `Package-Review.py`.
-Full CI and AGP migration remain separate work. No app/Kotlin or Gradle
-configuration change is included. BC-10's owner-confirmed acceptance is retained;
-this work does not imply a separate manual TalkBack/Accessibility Scanner audit.
+This work integrates checkout-aware paths, resource reservations and source/output
+receipts into `Build.ps1`, `Test-Device.ps1` and `Package-Review.py`, plus clean-run
+CI and the modern AGP configuration described below. The earlier integration's
+owner-confirmed acceptance is retained; it does not imply a separate manual
+TalkBack/Accessibility Scanner audit of later changes.
+
+## CI and AGP 10 readiness
+
+`.github/workflows/android.yml` runs on pushes, pull requests and manual dispatch:
+
+- An Ubuntu 24.04 runner uses JDK 17, SDK platform `android-37.0`, build tools
+  36.0.0 and the checksum-pinned Gradle 9.7.0 wrapper. A clean, uncached build runs
+  `assembleDebug testQaUnitTest lintDebug lintQa assembleQaAndroidTest`. The test
+  APK's own manifest must identify `com.bookcover.diagnostic.qa.test` and target
+  only `com.bookcover.diagnostic.qa`. CI never runs connected instrumentation.
+- A Windows runner executes the resource and orchestration fixtures in clean
+  Windows PowerShell 5.1 processes, plus the standard-library Python packaging
+  tests. Native process exit codes are preserved when logs are captured.
+- Action revisions are pinned to full commit hashes, repository permissions are
+  read-only, and credentials are not persisted by checkout. Only generated test,
+  lint and manifest reports are retained for seven days. APKs, signing keys, SDK
+  files, dependency caches and the owner's phone data are not uploaded. Jobs use
+  disposable paths; local BUILD/PHONE reservations remain a local-machine gate.
+
+The project retains AGP 9.3.3 and Compose compiler 2.4.20. It now uses AGP's
+built-in Kotlin and modern DSL defaults: `org.jetbrains.kotlin.android` is removed
+from both build files, and `android.builtInKotlin=false` / `android.newDsl=false`
+are removed from `gradle.properties`. The Compose plugin resolves Kotlin compiler
+2.4.20 too; the configured Java/Kotlin target stays 17. QA package isolation and
+`testBuildType = "qa"` are unchanged.
+
+As checked on 2026-10-26, the [official Google Maven index](https://dl.google.com/dl/android/maven2/com/android/tools/build/gradle/maven-metadata.xml)
+has no AGP 10 artifact. This completes the compatibility migration that Google's
+[AGP roadmap](https://developer.android.com/build/releases/gradle-plugin-roadmap)
+and [built-in Kotlin guide](https://developer.android.com/build/migrate-to-built-in-kotlin)
+prescribe on AGP 9.x; it does not claim a build with an unreleased AGP 10 version.
+The current [AGP 9.3 tool requirements](https://developer.android.com/build/releases/agp-9-3-0-release-notes)
+are compatible with the retained JDK, SDK and Gradle versions.
+
+Local build, QA-APK assembly and workflow checks are recorded in the completion
+tracker. A hosted CI pass must be verified after the workflow commit is pushed;
+local checks and static workflow validation do not prove a GitHub-hosted run.
 
 ## One-time adoption and ordinary builds
 
@@ -82,8 +119,8 @@ someone deliberately bypassing the scripts.
 
 ## Automatic receipts and packaging
 
-Before each operation, the helper fingerprints build input bytes in `app/`,
-`gradle/`, `scripts/` and root Gradle/wrapper files. It includes uncommitted source
+Before each operation, the helper fingerprints build/tool input bytes in `app/`,
+`gradle/`, `scripts/`, `.github/` and root Gradle/wrapper files. It includes uncommitted source
 inputs, excludes output/cache/docs/local configuration, rejects input symlinks
 and private key files, and permits only the two generated sample EPUBs. Git and
 an SDK are not needed to fingerprint a fixture. Documentation may change without

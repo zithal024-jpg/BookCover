@@ -122,7 +122,7 @@ function New-EvidenceFixture {
     $buildRun = Start-BookCoverRun -Context $context -BuildLease $lease -Kind Build
     Write-TestText -Path $context.BuiltApkPath -Text 'This is a fake APK; no Android package is built or installed.'
     Write-TestText -Path $context.ApkPath -Text ([IO.File]::ReadAllText($context.BuiltApkPath))
-    $hash = (Get-FileHash -LiteralPath $context.ApkPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $hash = (Get-BCFileRecord $context.ApkPath).Sha256
     Write-TestText -Path $context.ChecksumPath -Text ("{0}  {1}`n" -f $hash, $context.ApkName)
     $unitFile = Join-Path $context.UnitResultsPath 'TEST-host-unit.xml'
     Write-TestText -Path $unitFile -Text @'
@@ -532,6 +532,24 @@ try {
         Assert-Throws { Get-TestPackage $fixture $manifest } 'Package selection accepted changed build inputs'
     }
 
+    Invoke-HostCheck 'workflow source is frozen and edits invalidate prior package evidence' {
+        $fixture = New-EvidenceFixture
+        $workflowPath = Join-Path $fixture.Case.Checkout '.github\workflows\android.yml'
+        Write-TestText -Path $workflowPath -Text "name: Host fixture CI`non: workflow_dispatch`n"
+        $run = Start-BookCoverRun -Context $fixture.Context -BuildLease $fixture.Lease -Kind Build
+        Complete-BookCoverRun -Context $fixture.Context -BuildLease $fixture.Lease -Run $run -ExitCode 0 -OperationStopped | Out-Null
+        $fixture.Snapshot = $run.SourceSnapshotId
+        $workflowFiles = @($run.SourceSnapshot.Files | Where-Object { $_.Path -ceq '.github/workflows/android.yml' })
+        Assert-Equal $workflowFiles.Count 1 'The workflow was omitted from the automatic source snapshot'
+        $manifest = Write-TestManifest $fixture
+        $package = Get-TestPackage $fixture $manifest
+        Assert-Equal @($package.SourceSnapshot.Files | Where-Object { $_.Path -ceq '.github/workflows/android.yml' }).Count 1 'Package source evidence omitted the workflow'
+        Write-TestText -Path $workflowPath -Text "name: Changed host fixture CI`non: workflow_dispatch`n"
+        $changed = Get-BookCoverSourceSnapshot -Context $fixture.Context
+        Assert-True ($changed.SourceSnapshotId -cne $fixture.Snapshot) 'Changing the workflow did not change the source digest'
+        Assert-Throws { Get-TestPackage $fixture $manifest } 'A workflow edit left earlier package evidence selectable'
+    }
+
     Invoke-HostCheck 'evidence rejects distribution APK that differs from the built APK' {
         $fixture = New-EvidenceFixture
         Write-TestText -Path $fixture.Context.BuiltApkPath -Text 'Different fake built APK.'
@@ -546,7 +564,7 @@ try {
                 'missing' { Remove-Item -LiteralPath $fixture.Context.ChecksumPath }
                 'wrong-hash' { Write-TestText -Path $fixture.Context.ChecksumPath -Text ("{0}  {1}`n" -f ('0' * 64), $fixture.Context.ApkName) }
                 'wrong-filename' {
-                    $hash = (Get-FileHash -LiteralPath $fixture.Context.ApkPath -Algorithm SHA256).Hash.ToLowerInvariant()
+                    $hash = (Get-BCFileRecord $fixture.Context.ApkPath).Sha256
                     Write-TestText -Path $fixture.Context.ChecksumPath -Text ("{0}  BookCover-prototype.apk`n" -f $hash)
                 }
                 'malformed' { Write-TestText -Path $fixture.Context.ChecksumPath -Text 'not a SHA-256 sidecar' }

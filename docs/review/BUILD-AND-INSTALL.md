@@ -32,6 +32,8 @@ $env:Path = "$env:JAVA_HOME\bin;$env:ANDROID_HOME\platform-tools;$env:Path"
 
 On the shared Windows development machine, use `scripts/Build.ps1` or `Build BookCover.cmd`. The helper requires tools under `%LOCALAPPDATA%\BookCoverBuild` (or an explicit `-ToolRoot`) and an initialized shared resource registry; see [the task-resource guide](../BC-25-TASK-RESOURCES.md). It reserves BUILD, isolates generated output/cache/Gradle home by checkout and task, and prints the exact APK/checksum/evidence paths. `-TaskId core -Plan` shows the paths without running tools. It no longer updates `BookCover-prototype.apk`; old arbitrary output/cache overrides are rejected.
 
+The repository's [CI workflow](../../.github/workflows/android.yml) runs a clean Linux build, unit tests, both lint tasks and QA test-APK assembly on push/pull request, plus Windows host-script checks. It verifies the compiled instrumentation target without connecting a phone. Build files use built-in Kotlin and the modern AGP DSL; the legacy opt-out flags are removed. See [CI and migration details](../BC-25-TASK-RESOURCES.md#ci-and-agp-10-readiness) for retained versions and validation limits.
+
 For an isolated reviewer output/cache directory, pass explicit locations:
 
 ```powershell

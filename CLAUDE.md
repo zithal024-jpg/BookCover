@@ -150,5 +150,9 @@ unless the owner asks.
   the book from its own saved locator instead.
 - Build directory redirected to `%LOCALAPPDATA%` (`build.gradle.kts`): OneDrive
   workaround.
-- `android.builtInKotlin=false` and `android.newDsl=false` in
-  `gradle.properties`: AGP 9 compatibility flags; migrate before AGP 10.
+- AGP 9.3.3 uses built-in Kotlin and the modern Android DSL; the legacy Kotlin
+  Android plugin and both opt-out flags have been removed for AGP 10 readiness.
+  The Compose plugin keeps Kotlin/Compose compiler versions at 2.4.20. AGP 10
+  itself is not yet published in Google Maven. `.github/workflows/android.yml`
+  checks a clean Linux build, unit tests, lint and the isolated QA test APK;
+  a separate Windows job checks the host scripts. See `docs/BC-25-TASK-RESOURCES.md`.

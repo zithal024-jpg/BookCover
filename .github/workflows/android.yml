@@ -1,0 +1,162 @@
+name: Android and host checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Clean Android build, unit tests and lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Keep all generated files in disposable runner folders
+        run: |
+          printf 'GRADLE_USER_HOME=%s/gradle-user-home\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'BOOKCOVER_BUILD_ROOT=%s/bookcover-build\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+
+      - name: Set up Java 17 without caches
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache-jdk: false
+
+      - name: Ensure the required Android SDK packages
+        run: |
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$sdkmanager"
+          printf 'y\n%.0s' {1..100} > "$RUNNER_TEMP/android-license-answers.txt"
+          "$sdkmanager" --sdk_root="$ANDROID_HOME" --licenses \
+            < "$RUNNER_TEMP/android-license-answers.txt" > /dev/null
+          "$sdkmanager" --sdk_root="$ANDROID_HOME" --install \
+            'platforms;android-37.0' 'build-tools;36.0.0' \
+            < "$RUNNER_TEMP/android-license-answers.txt"
+
+      # CI builds the isolated QA test APK but never installs or executes it.
+      # Physical-device tests remain behind scripts/Test-Device.ps1 on Windows.
+      - name: Build both APKs, run unit tests and lint
+        run: |
+          bash ./gradlew --no-daemon --no-build-cache --no-configuration-cache --stacktrace \
+            --project-cache-dir "$RUNNER_TEMP/gradle-project-cache" \
+            "-Pbookcover.buildRoot=$BOOKCOVER_BUILD_ROOT" \
+            clean assembleDebug testQaUnitTest lintDebug lintQa assembleQaAndroidTest
+
+      - name: Verify the assembled test APK targets only the QA app
+        run: |
+          test_apk="$BOOKCOVER_BUILD_ROOT/app/outputs/apk/androidTest/qa/app-qa-androidTest.apk"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print "$test_apk" \
+            > "$RUNNER_TEMP/qa-test-manifest.xml"
+          python3 - "$RUNNER_TEMP/qa-test-manifest.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          manifest = ET.parse(sys.argv[1]).getroot()
+          expected_target = 'com.bookcover.diagnostic.qa'
+          if manifest.get('package') != expected_target + '.test':
+              raise SystemExit('The test APK has an unexpected application ID.')
+          instrumentation = manifest.findall('instrumentation')
+          target_key = '{http://schemas.android.com/apk/res/android}targetPackage'
+          if len(instrumentation) != 1 or instrumentation[0].get(target_key) != expected_target:
+              raise SystemExit('The test APK must target only the isolated QA app.')
+          print('Verified QA instrumentation target:', expected_target)
+          PY
+
+      - name: Preserve only generated test and lint reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-reports
+          retention-days: 7
+          if-no-files-found: warn
+          include-hidden-files: false
+          overwrite: false
+          path: |
+            ${{ runner.temp }}/bookcover-build/app/test-results/testQaUnitTest/*.xml
+            ${{ runner.temp }}/bookcover-build/app/reports/tests/testQaUnitTest/**
+            ${{ runner.temp }}/bookcover-build/app/reports/lint-results-debug.xml
+            ${{ runner.temp }}/bookcover-build/app/reports/lint-results-debug.html
+            ${{ runner.temp }}/bookcover-build/app/reports/lint-results-qa.xml
+            ${{ runner.temp }}/bookcover-build/app/reports/lint-results-qa.html
+            ${{ runner.temp }}/qa-test-manifest.xml
+
+  host:
+    name: Windows PowerShell 5.1 and Python host checks
+    runs-on: windows-2022
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python for standard-library tests
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+
+      - name: Prepare host report folder and verify Windows PowerShell
+        run: |
+          if ($PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5) {
+              throw 'Host resource checks must run under Windows PowerShell 5.1.'
+          }
+          New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 'host-test-reports') -Force | Out-Null
+
+      - name: Test resource coordination with disposable fixtures
+        if: ${{ !cancelled() }}
+        shell: cmd
+        run: |
+          "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/tests/Test-TaskResources.ps1 > "%RUNNER_TEMP%\host-test-reports\task-resources.log" 2>&1
+          set "host_test_exit=%ERRORLEVEL%"
+          type "%RUNNER_TEMP%\host-test-reports\task-resources.log"
+          exit /b %host_test_exit%
+
+      - name: Test build and device wrappers with intercepted tools
+        if: ${{ !cancelled() }}
+        shell: cmd
+        run: |
+          "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/tests/Test-TaskIntegration.ps1 > "%RUNNER_TEMP%\host-test-reports\task-integration.log" 2>&1
+          set "host_test_exit=%ERRORLEVEL%"
+          type "%RUNNER_TEMP%\host-test-reports\task-integration.log"
+          exit /b %host_test_exit%
+
+      - name: Test explicit review packaging with disposable fixtures
+        if: ${{ !cancelled() }}
+        shell: cmd
+        run: |
+          python -B -m unittest discover -s scripts/tests -p test_package_review.py -v > "%RUNNER_TEMP%\host-test-reports\package-review.log" 2>&1
+          set "package_test_exit=%ERRORLEVEL%"
+          type "%RUNNER_TEMP%\host-test-reports\package-review.log"
+          exit /b %package_test_exit%
+
+      - name: Preserve only host test logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-host-reports
+          retention-days: 7
+          if-no-files-found: warn
+          include-hidden-files: false
+          overwrite: false
+          path: |
+            ${{ runner.temp }}/host-test-reports/task-resources.log
+            ${{ runner.temp }}/host-test-reports/task-integration.log
+            ${{ runner.temp }}/host-test-reports/package-review.log

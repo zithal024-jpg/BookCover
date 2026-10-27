@@ -333,7 +333,7 @@ function Get-BookCoverSourceSnapshot {
     $excluded = @('build', '.gradle', '.kotlin', '__pycache__', 'node_modules', 'output', '.git', 'captures')
     $paths = [Collections.Generic.List[string]]::new()
     $directories = [Collections.Generic.Queue[string]]::new()
-    foreach ($name in @('app', 'gradle', 'scripts')) {
+    foreach ($name in @('app', 'gradle', 'scripts', '.github')) {
         $directory = Join-Path $Context.CheckoutRoot $name
         if ([IO.Directory]::Exists($directory)) { $directories.Enqueue($directory) }
     }
