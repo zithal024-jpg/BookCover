@@ -76,6 +76,18 @@ internal fun readerMessage(action: ReaderAction, error: Throwable): String = whe
     }
 }
 
+/** A few words for one file in a batch import summary, e.g. "broken.epub (not a readable EPUB)" (BC-27). */
+internal fun shortFailureReason(reason: FailureReason): String = when (reason) {
+    FailureReason.LIBRARY_PROTECTED -> "library list unreadable"
+    FailureReason.NOT_A_BACKUP, FailureReason.NOT_EPUB -> "not a readable EPUB"
+    FailureReason.PROTECTED_BOOK -> "copy-protected"
+    FailureReason.TOO_LARGE -> "over 200 MB"
+    FailureReason.NO_CHAPTERS -> "no chapters to show"
+    FailureReason.UNREADABLE_FILE, FailureReason.BACKUP_NOT_WRITTEN -> "couldn't be read"
+    FailureReason.REMOTE_BLOCKED -> "needs the internet"
+    FailureReason.UNKNOWN -> "unexpected problem"
+}
+
 /** For the diagnostic log: action, reason and exception types, without messages that may name a book or file. */
 internal fun diagnosticSummary(action: ReaderAction, error: Throwable): String =
     "$action failed (${failureReason(error)}): " +

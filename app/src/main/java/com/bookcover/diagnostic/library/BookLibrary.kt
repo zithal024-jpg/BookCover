@@ -9,6 +9,7 @@ import android.graphics.ImageDecoder
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
@@ -20,8 +21,9 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.security.MessageDigest
-import java.util.zip.ZipFile
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
@@ -41,6 +43,9 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
         fun forApp(context: Context): BookLibrary = shared ?: synchronized(this) {
             shared ?: context.applicationContext.let { app -> BookLibrary(app, ReadiumEngine(app)) }.also { shared = it }
         }
+
+        /** Import copies being written now, by absolute path, across every instance in this process. Guarded by itself. */
+        private val activeImports = mutableSetOf<String>()
     }
 
     private val directory = File(context.filesDir, "library").apply { mkdirs() }
@@ -58,8 +63,56 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
     ) { override fun sizeOf(key: String, value: Bitmap) = value.byteCount }
 
     suspend fun load(): LibraryIndex.LoadResult = withContext(Dispatchers.IO) {
-        lock.withLock { index.load().also { mutableBooks.value = it.records } }
+        lock.withLock {
+            val removed = runCatching { cleanAbandonedImports() }.getOrDefault(0)
+            index.load().also { mutableBooks.value = it.records }.copy(abandonedImportsRemoved = removed)
+        }
     }
+
+    /**
+     * Deletes `import-*.epub` copies that no running import owns, left behind when the app was killed
+     * mid-import (BC-27). Books, covers, the library list and any other file are never touched.
+     */
+    internal fun cleanAbandonedImports(): Int = synchronized(activeImports) {
+        val active = activeImports.mapNotNull { path -> File(path).takeIf { it.parentFile?.absolutePath == directory.absolutePath }?.name }.toSet()
+        abandonedImportTemps(directory.list().orEmpty().toList(), active).count { name ->
+            File(directory, name).let { it.isFile && it.delete() }
+        }
+    }
+
+    /** Creates and registers an import copy in one step, so cleanup can never see it unregistered. */
+    internal fun newImportTemp(): File = synchronized(activeImports) {
+        File.createTempFile("import-", ".epub", directory).also { activeImports += it.absolutePath }
+    }
+
+    internal fun finishImportTemp(file: File) = synchronized(activeImports) {
+        file.delete()
+        activeImports -= file.absolutePath
+    }
+
+    private val importGate = ImportGate()
+
+    /**
+     * Imports several books one at a time (BC-27): each succeeds or fails on its own and is saved as soon as it
+     * is added, so a bad book never undoes the others. Returns null, doing nothing, if another batch is running.
+     */
+    suspend fun importAll(uris: List<Uri>, cancellation: ImportCancellation = ImportCancellation(),
+                          onProgress: (ImportProgress) -> Unit = {}): ImportSummary? = importGate.runExclusive {
+        val names = withContext(Dispatchers.IO) { uris.mapIndexed { position, uri -> displayName(uri) ?: "Book ${position + 1}" } }
+        val positions = uris.indices.toList()
+        runImportBatch(positions, { names[it] }, cancellation, onProgress) { position ->
+            val (book, added) = import(uris[position])
+            if (added) ImportOutcome.Added(book.title) else ImportOutcome.Duplicate(book.title)
+        }
+    }
+
+    /** The file name the picker shows, for the summary only; never logged. */
+    private fun displayName(uri: Uri): String? = runCatching {
+        if (uri.scheme == "file") return@runCatching uri.lastPathSegment
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
+        }
+    }.getOrNull()?.takeIf { it.isNotBlank() }
 
     suspend fun import(uri: Uri): Pair<BookRecord, Boolean> = withContext(Dispatchers.IO) {
         val input = context.contentResolver.openInputStream(uri) ?: throw IOException("Could not read the selected file")
@@ -71,13 +124,14 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
     }
 
     private suspend fun importStream(input: InputStream, collection: String): Pair<BookRecord, Boolean> {
-        val temporary = File.createTempFile("import-", ".epub", directory)
+        val temporary = newImportTemp()
         try {
             val digest = MessageDigest.getInstance("SHA-256")
             temporary.outputStream().use { output ->
                 val buffer = ByteArray(32 * 1024)
                 var total = 0L
                 while (true) {
+                    currentCoroutineContext().ensureActive() // Stop importing: abandon the copy promptly.
                     val read = input.read(buffer)
                     if (read < 0) break
                     total += read
@@ -85,12 +139,8 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
                     output.write(buffer, 0, read); digest.update(buffer, 0, read)
                 }
             }
-            ZipFile(temporary).use { zip ->
-                require(zip.getEntry("META-INF/container.xml") != null) { "Choose a valid EPUB file" }
-                val entries = zip.entries().asSequence().toList()
-                require(entries.size <= 20_000 && entries.all { it.size in 0..(100L * 1024 * 1024) } &&
-                    entries.sumOf { it.size } <= 500L * 1024 * 1024) { "This EPUB's expanded content exceeds the prototype's import limit" }
-            }
+            checkEpubArchive(temporary)
+            currentCoroutineContext().ensureActive()
             val id = digest.digest().joinToString("") { "%02x".format(it) }
             book(id)?.let { return it to false }
             val publication = engine.open(temporary)
@@ -110,7 +160,7 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
                 }
                 return record to true
             } finally { publication.close() }
-        } finally { temporary.delete() }
+        } finally { finishImportTemp(temporary) }
     }
 
     suspend fun updatePosition(id: String, locator: Locator) = change(id) {

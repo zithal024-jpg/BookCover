@@ -46,11 +46,12 @@ class MainActivity : FragmentActivity() {
     private var coverBookId: String? = null
     private val preferences by lazy { getSharedPreferences("reader", 0) }
 
-    private val importBook = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) work(ReaderAction.IMPORT) {
-            val (book, added) = library.import(uri)
-            message = if (added) "Imported ${book.title}. Tap its cover to read." else "${book.title} is already in your library."
-        }
+    // BC-27: one or many books; progress, Stop and the final summary while they import one at a time.
+    private var importProgress by mutableStateOf<ImportProgress?>(null)
+    private var importSummary by mutableStateOf<ImportSummary?>(null)
+    private var importCancellation: ImportCancellation? = null
+    private val importBook = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) importBooks(uris)
     }
     private val selectCover = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val id = coverBookId
@@ -124,7 +125,8 @@ class MainActivity : FragmentActivity() {
                     onExportBackup = { exportLibrary.launch("BookCover-library-${java.time.LocalDate.now()}.json") },
                     onRestoreBackup = { restoreLibrary.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
                     onDiagnostics = { showDiagnostics = true }, libraryTheme = libraryTheme,
-                    onLibraryTheme = { libraryTheme = it; preferences.edit().putString("libraryTheme", it).apply() })
+                    onLibraryTheme = { libraryTheme = it; preferences.edit().putString("libraryTheme", it).apply() },
+                    importProgress = importProgress, onStopImport = { importCancellation?.cancel() })
                 else EpubReaderScreen(current, books.firstOrNull { it.id == current.book.id } ?: current.book,
                     exterior.active, exterior.busy, exterior.stopPending, exterior.available && !busy,
                     message + "\n" + exterior.status,
@@ -140,6 +142,7 @@ class MainActivity : FragmentActivity() {
                     }
                     }, onRemoveBookmark = { value -> work(ReaderAction.BOOKMARK) { library.removeBookmark(current.book.id, value) } },
                     libraryTheme = libraryTheme, coverSeed = seed)
+                importSummary?.let { ImportSummaryDialog(it, onDismiss = { importSummary = null }) }
                 if (showDiagnostics) AlertDialog(onDismissRequest = { showDiagnostics = false }, title = { Text("Device diagnostics") },
                     text = { Text(exterior.diagnostics() + "\n" + DiagnosticLog.report(), modifier = Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), style = MaterialTheme.typography.bodySmall) },
                     confirmButton = { TextButton(onClick = { showDiagnostics = false }) { Text("Close") } })
@@ -153,6 +156,8 @@ class MainActivity : FragmentActivity() {
                     library.importSample("samples/river-maps.epub")
                     preferences.edit().putBoolean("samplesInstalled", true).apply()
                 }
+                if (loaded.abandonedImportsRemoved > 0)
+                    DiagnosticLog.record("Removed ${loaded.abandonedImportsRemoved} unfinished import copies left by an interrupted import")
                 if (loaded.recoveredFromBackup || loaded.skipped > 0)
                     DiagnosticLog.record("Library index recovered: backup=${loaded.recoveredFromBackup}, skipped=${loaded.skipped}")
                 message = when {
@@ -175,6 +180,30 @@ class MainActivity : FragmentActivity() {
     internal val busyForTests: Boolean get() = busy
     internal val showsLibraryForTests: Boolean get() = session == null && reopeningBookId == null
     internal fun openBookForTests(book: BookRecord) = openBook(book)
+
+    internal val importProgressForTests: ImportProgress? get() = importProgress
+    internal val importSummaryForTests: ImportSummary? get() = importSummary
+    internal fun importBooksForTests(uris: List<android.net.Uri>) = importBooks(uris)
+    internal fun stopImportForTests() = importCancellation?.cancel()
+
+    /** Imports the picked books; refused while any other library task, including another import, is running. */
+    private fun importBooks(uris: List<android.net.Uri>) {
+        if (busy) { message = "BookCover is still busy with your library. Wait for it to finish, then import again."; return }
+        val cancellation = ImportCancellation()
+        importCancellation = cancellation
+        work(ReaderAction.IMPORT) {
+            try {
+                val summary = library.importAll(uris, cancellation) { importProgress = it; message = importProgressMessage(it) }
+                if (summary == null) { message = "An import is already running. Wait for it to finish, then try again."; return@work }
+                summary.failed.forEach { DiagnosticLog.record(diagnosticSummary(ReaderAction.IMPORT, it.error) + "; document details omitted") }
+                message = importSummaryMessage(summary)
+                if (uris.size > 1) importSummary = summary
+            } finally {
+                importProgress = null
+                if (importCancellation === cancellation) importCancellation = null
+            }
+        }
+    }
 
     private fun openBook(book: BookRecord) {
         if (busy || session != null) return

@@ -30,6 +30,7 @@ internal fun LibraryScreen(
     onImport: () -> Unit, onOpen: (BookRecord) -> Unit, onMove: (BookRecord, String) -> Unit,
     onRemove: (BookRecord) -> Unit, onExportBackup: () -> Unit, onRestoreBackup: () -> Unit, onDiagnostics: () -> Unit,
     libraryTheme: String, onLibraryTheme: (String) -> Unit,
+    importProgress: ImportProgress? = null, onStopImport: () -> Unit = {},
 ) {
     var query by remember { mutableStateOf("") }
     var collection by remember { mutableStateOf("All") }
@@ -77,7 +78,8 @@ internal fun LibraryScreen(
                         modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "Sort by $name" })
                 }
             }
-            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (importProgress != null) ImportProgressRow(importProgress, onStopImport)
+            else if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (message.isNotBlank()) Text(message, modifier = Modifier.padding(vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
             val recent = books.filter { it.lastReadAt > 0 }.maxByOrNull { it.lastReadAt }
             if (recent != null && query.isBlank() && collection == "All") {

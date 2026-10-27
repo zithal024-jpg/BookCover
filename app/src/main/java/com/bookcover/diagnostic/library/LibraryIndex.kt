@@ -30,7 +30,8 @@ internal fun readBookRecords(array: JSONArray): Pair<List<BookRecord>, Int> {
  * as `books.last-good.json`, and a damaged index is copied aside before it is first overwritten.
  */
 internal class LibraryIndex(private val directory: File, private val clock: () -> Long = System::currentTimeMillis) {
-    data class LoadResult(val records: List<BookRecord>, val skipped: Int = 0, val recoveredFromBackup: Boolean = false)
+    data class LoadResult(val records: List<BookRecord>, val skipped: Int = 0, val recoveredFromBackup: Boolean = false,
+                          val abandonedImportsRemoved: Int = 0)
 
     private val primary = File(directory, "books.json")
     // Older Android AtomicFile versions leave the previous index here during a write.

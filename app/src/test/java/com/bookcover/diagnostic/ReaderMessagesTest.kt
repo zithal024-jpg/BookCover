@@ -97,9 +97,20 @@ class ReaderMessagesTest {
         assertFalse(summary, summary.contains("My Book"))
     }
 
+    @Test fun batchImportReasonsAreShortAndPlain() {
+        for (error in samples) {
+            val reason = shortFailureReason(failureReason(error))
+            technical.forEach { word -> assertFalse("'$reason' contains $word", reason.lowercase().contains(word)) }
+            assertTrue("'$reason' too long", reason.length <= 40)
+        }
+        assertEquals("not a readable EPUB", shortFailureReason(FailureReason.NOT_EPUB))
+        assertEquals("copy-protected", shortFailureReason(FailureReason.PROTECTED_BOOK))
+        assertEquals("over 200 MB", shortFailureReason(FailureReason.TOO_LARGE))
+    }
+
     /** Guards the mapper against new error texts added to the library code without a reader message. */
     @Test fun everyErrorTextThrownByTheLibraryCodeHasASpecificMessage() {
-        val sources = listOf("BookLibrary.kt", "ReadiumEngine.kt", "LibraryIndex.kt", "LibraryBackup.kt").map { name ->
+        val sources = listOf("BookLibrary.kt", "EpubArchiveCheck.kt", "ReadiumEngine.kt", "LibraryIndex.kt", "LibraryBackup.kt").map { name ->
             listOf(File("src/main/java/com/bookcover/diagnostic/library/$name"),
                 File("app/src/main/java/com/bookcover/diagnostic/library/$name")).first { it.isFile }.readText()
         }
