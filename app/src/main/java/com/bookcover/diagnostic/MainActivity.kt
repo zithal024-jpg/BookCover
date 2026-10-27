@@ -31,7 +31,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-class MainActivity : FragmentActivity() {
+// The QA-only process-recovery probe subclasses this activity without replacing its reader lifecycle.
+open class MainActivity : FragmentActivity() {
     private lateinit var engine: ReadiumEngine
     private lateinit var library: BookLibrary
     private lateinit var exterior: ExteriorCoverController

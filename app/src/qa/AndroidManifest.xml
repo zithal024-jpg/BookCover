@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
+        <!-- Only the QA reader process is killed; the default-process test runner stays alive. -->
+        <activity android:name=".testing.ProcessRecoveryActivity" android:exported="false"
+            android:process=":process_recovery" android:taskAffinity="${applicationId}.process_recovery"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|density"
+            android:resizeableActivity="true" android:theme="@style/Theme.BookCover" />
         <!-- Isolated QA renderer harness; absent from user debug/release builds and not exported. -->
         <activity android:name=".testing.ReaderTestActivity" android:exported="false"
             android:resizeableActivity="true" android:theme="@style/Theme.BookCover" />
