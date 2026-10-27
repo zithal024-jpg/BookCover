@@ -8,8 +8,12 @@ import android.view.Window
 internal fun Activity.installReadingKeyHandler(reader: () -> EpubSession?) {
     val original = window.callback
     window.callback = object : Window.Callback by original {
-        override fun dispatchKeyEvent(event: KeyEvent): Boolean =
-            reader()?.dispatchKeyEvent(event) == true || original.dispatchKeyEvent(event)
+        override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+            if (reader()?.dispatchKeyEvent(event) != true) return original.dispatchKeyEvent(event)
+            // A consumed page key skips Activity.dispatchKeyEvent, which reports other keys itself.
+            onUserInteraction()
+            return true
+        }
     }
 }
 
