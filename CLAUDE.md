@@ -19,6 +19,30 @@ Readium Kotlin Toolkit 3.4.0. Application ID `com.bookcover.diagnostic`.
   ask them to look. Never claim the cover display works because an API call
   returned successfully.
 
+## Autonomous working agreement
+
+- Opus and Codex independently choose tasks within the owner's authorized scope,
+  priorities and dependencies, and implement, validate and integrate locally
+  without routine PM assignment or approval. Independent work may run in parallel
+  when it does not conflict on shared files, devices or other resources.
+- Check for actual conflicts before changing shared files or using shared
+  resources. Routine path claims and PM request/grant/acknowledgment loops are
+  unnecessary. Resolve uncertain ownership or active conflicts before proceeding;
+  preserve others' uncommitted work and never infer release from silence.
+- Keep supported build/device helpers, their locks and required release evidence,
+  and owner phone availability. Never bypass safeguards, steal a resource or stop
+  another worker's process. Registry initialization still requires prior release.
+- The implementer updates the existing tracker row once at completion, with the
+  commit and verification, or on a material blocker. Keep a short handoff only for
+  transfer or resumption; no duplicate PM logs or timed status reports are needed.
+- Preserve the data, privacy, security and isolated-QA rules below. Report checks
+  accurately; only the owner's physical observation verifies the outside cover.
+- This agreement supersedes conflicting PM-only writer roles, assignment/path
+  ceremonies, manual approval/reservation paperwork, recurring status logs and
+  former component-only limits in coordination documents. It does not lift an
+  explicit pause or authorize push, publication, release, destructive actions or
+  decisions reserved to the owner; required safety confirmations remain.
+
 ## Build and test (Windows, this PC)
 
 Build tools live in `%LOCALAPPDATA%\BookCoverBuild` (JDK in `java\`, Android
@@ -32,8 +56,8 @@ That is deliberate: OneDrive breaks Android's resource merger.
   Generated output/cache/Gradle home and APK names are checkout/task-specific;
   use `-TaskId core` (default `local`) and `-Plan` to see the paths. The command
   prints the exact APK and source-bound evidence paths; it no longer overwrites
-  `output\BookCover-prototype.apk`. A coordinator must explicitly initialize the
-  shared resource registry after previous holders release: see
+  `output\BookCover-prototype.apk`. A working agent may explicitly initialize the
+  shared resource registry only after previous holders release: see
   `docs/BC-25-TASK-RESOURCES.md`. Missing/uncertain ownership fails closed.
 - **On-phone tests:** only through
   `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-Device.ps1 -TaskId core -Serial DEVICE_SERIAL -PhoneReleaseEvidence 'RECORDED RELEASE AND OWNER AVAILABILITY'`
@@ -91,47 +115,44 @@ The full review is the Expert Panel Review: read
 file is the shared status list for Claude Code, Codex and the owner: check it
 before starting (another agent may already be on an issue) and update its row,
 with the commit and how it was verified, in the same commit as the work. Work in
-stage order, one issue at a time, building and testing after each.
+the owner's priority and dependency order, validating each meaningful change.
+Independent tasks may proceed in parallel under the agreement above.
 
-**Stage 1: Stabilization (do this first)**
-- BC-04: the `.git` folder exists but has zero commits. Commit the current
-  state first, then push to a private remote. Move baselines and APKs out of Git.
-- BC-02: `BookLibrary.load()` throws on a bad index or one bad record; the list
-  stays empty, and the next save overwrites `books.json`, erasing the library.
-  Refuse writes until a successful load, skip bad records individually, and keep
-  a last-good backup. Write the failing unit test first.
-- BC-01: remove the Anna's Archive search shortcut (`LibraryScreen.kt`,
-  `MainActivity.kt` `onSearchWeb`).
-- BC-03 / BC-12: no project LICENSE (the owner chooses it); the bundled
-  OpenDyslexic font ships without its OFL licence text.
-- BC-05: add export/import of the library index and bookmarks via the system
-  file picker.
-- BC-09: unit tests for `BookLibrary` (import, duplicate, remove, corrupt index,
-  cover replace); lifecycle tests (rotation, fold, process death) in the QA app.
-- BC-16: delete the dead code listed above. BC-14: debounce position saves and
-  move `DiagnosticLog` writes off the main thread.
-- Gate: no known data-loss path, export round-trips, all tests pass.
-- Status 2026-10-26: all Stage 1 items done and the gate met (43 JVM tests, 15
-  on-phone QA tests, backup round trip and position survival confirmed on the
-  owner's phone). Private repo: github.com/zithal024-jpg/BookCover.
+**Current status (2026-10-27):** stabilization is complete, including protected
+library-index loading, backup export/import, the removed web-search shortcut,
+library/lifecycle tests, dead-code removal and background saves/logging. Git
+history and the private remote are established at
+https://github.com/zithal024-jpg/BookCover; build output and personal data stay
+outside Git. The owner chose all rights reserved (`LICENSE`); bundled font and
+library notices are recorded under BC-12 (OpenDyslexic uses CC BY 3.0 over
+Bitstream Vera, not OFL).
 
-**Next stages (summary):** 2, core reading (publisher-styles toggle, line
-spacing/margins, EPUB test corpus, chapter progress, RTL-aware taps, volume-key
-page turns). Fixed 2026-10-26: text size used to look like zooming on the inner
+Publisher styles, spacing/margins, the generated EPUB corpus, chapter navigation,
+RTL taps, volume-key turns, themes, accessibility controls and grouped settings
+are implemented. C1 text-size and H3 compact-controls follow-ups have recorded QA
+and an in-place installation; pending owner observations remain in the tracker.
+BC-29 offline in-book search is QA-verified. CI and AGP readiness work is recorded
+under BC-25. Read each tracker row for its exact evidence and remaining limits;
+these summaries do not establish a new build, phone observation or resource release.
+
+**Remaining work:** fold/unfold without reload and state extraction (BC-07/15),
+two-page spread (BC-19), screen-on/battery work (BC-22), permission audit (BC-24),
+the remaining friendly-error phone check (BC-26), documentation consolidation
+(BC-28), and release choices/signing/final application ID (BC-11). Follow the
+owner's priorities and the live tracker rather than treating completed stages as
+new assignments.
+
+**Reader constraints to preserve:** text size used to look like zooming on the inner
 screen because Readium CSS caps lines at `40rem`, which grows with
 `--USER__fontSize`. `EpubSession` now overrides `--RS__maxLineLength` to `800px`
 (owner found 640px left too much empty space; `RsProperties.maxLineLength`
 accepts only rem). Guarded by `ReadingLayoutTest`,
-which needs the phone physically unfolded and is skipped otherwise. 3, UX refinement (slim reader bar, split settings, cover
-thumbnails, one theme that follows dark mode, accessibility). Owner-reported
+which needs the phone physically unfolded and is skipped otherwise. Owner-reported
 (2026-10-26): rotating while reading briefly flashes the library before the page
 returns. Cause: recreation starts with no session, so `MainActivity` draws
 `LibraryScreen` until the saved book reopens. Quick mitigation done the same day
 (`reopeningBookId` in `MainActivity` shows a reader-coloured page; guarded by
-`ReaderLifecycleTest`); the full fix, no reload at all, is the Stage 4 item below. 4, foldable
-features (move state out of `MainActivity`, survive fold/unfold without reload,
-two-page spread when unfolded, battery measurement, in-book search). 5,
-release (final app ID, release signing, R8, current targetSdk, CI, docs).
+`ReaderLifecycleTest`); the full fix, no reload at all, remains BC-07/15.
 
 Do not start PDF, cloud sync, online catalogs, or brightness/AOD experiments
 unless the owner asks.

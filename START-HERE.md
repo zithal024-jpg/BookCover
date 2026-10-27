@@ -1,3 +1,24 @@
+# Start with BookCover
+
+BookCover is now a local EPUB reader, version 0.4.0-prototype. The original
+diagnostic and Kindle-handoff instructions are preserved below as history.
+
+1. Read [the project overview](README.md) and the
+   [completion tracker](docs/review/EXPERT-PANEL-REVIEW.md) for current status.
+2. For a fresh build, use [the development guide](docs/DEVELOPMENT.md) and its
+   supported build helper. Use the exact APK (Android installer) path printed by
+   the successful build; old filenames under `output/` are historical artifacts.
+3. To update the owner's app, use the tested main APK with the same signing key
+   and install it over the existing app. Keep its library and settings: never
+   uninstall it or clear its data. If Android reports a signature mismatch, stop
+   and ask for help. Developer installation commands are in [CLAUDE.md](CLAUDE.md#build-and-test-windows-this-pc).
+4. Phone testing requires owner availability and the isolated QA app through
+   `scripts/Test-Device.ps1`; see the [task-resource guide](docs/BC-25-TASK-RESOURCES.md).
+   Only the owner looking at the physical outside screen verifies cover display.
+
+<details>
+<summary>Original diagnostic and Kindle-handoff guide (historical)</summary>
+
 # Put BookCover Test on your phone
 
 **This guide describes the original diagnostic APK and provides the manual APK-install steps.** For the current 0.2 sample-reader test, use [PHONE-TEST-READER.md](PHONE-TEST-READER.md) and the filename **BookCover-reader-test.apk**. The original Kindle-handoff test failed in the user's test; the new test stays inside BookCover.
@@ -60,3 +81,5 @@ The report includes the phone's model and software build automatically. You may 
 Repeat once to establish that success is repeatable. Then run separate short tests for lock/unlock, fold/unfold, and Power saving mode. BookCover intentionally stops for screen-off and for host-activity destruction/recreation. Return to it and start a fresh session after those events; automatic resumption is not part of this prototype.
 
 If public support is absent or the Kindle handoff fails, we will investigate the report before adding features. No emulator result can establish that the Samsung physical exterior panel works.
+
+</details>

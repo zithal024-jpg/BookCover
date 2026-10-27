@@ -1,3 +1,36 @@
+# Building and maintaining BookCover
+
+For current scope and safety rules, read [CLAUDE.md](../CLAUDE.md) and the
+[completion tracker](review/EXPERT-PANEL-REVIEW.md). The
+[task-resource guide](BC-25-TASK-RESOURCES.md) is the detailed reference for
+guarded builds, QA tests and matching package evidence.
+
+From the repository folder on this Windows PC:
+
+```powershell
+# Read-only: show the task-specific paths first.
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Build.ps1 -TaskId local -Plan
+# Build the app, run JVM tests and lint, with the helper's BUILD lock.
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Build.ps1 -TaskId local
+```
+
+The build runs `assembleDebug testQaUnitTest lintDebug lintQa`. It uses the prepared
+tools under `%LOCALAPPDATA%\BookCoverBuild` and prints exact task-specific APK,
+checksum and source-evidence paths. Generated output and caches stay outside this
+OneDrive folder. `Build BookCover.cmd` is the interactive wrapper and pauses at
+the end; agents should call `scripts/Build.ps1` directly.
+
+Phone tests run only through `scripts/Test-Device.ps1`, with the matching task ID,
+an explicit device serial, recorded previous-holder release and owner availability.
+It acquires BUILD then PHONE and targets `com.bookcover.diagnostic.qa`. Never run
+connected tests against the owner's main app, uninstall it or clear its data.
+Use the current helper examples in the task-resource guide; old output/cache
+arguments below are historical. Only physical owner observation verifies the
+outside cover. Ordinary work follows the [autonomous agreement](../CLAUDE.md#autonomous-working-agreement).
+
+<details>
+<summary>Earlier toolchain, rebuild and diagnostic architecture notes (historical)</summary>
+
 # Building and maintaining BookCover Test
 
 **Current 0.4.0 instructions:** use [the task-resource guide](BC-25-TASK-RESOURCES.md) for reservation setup, task-specific paths and exact commands. Build BookCover.cmd runs `assembleDebug testQaUnitTest lintDebug lintQa` and prints the APK/evidence paths. Native checks run only through `scripts/Test-Device.ps1` with explicit serial and PHONE availability, targeting the isolated `.qa` application. Earlier commands/version descriptions below describe history and must not be used to retarget tests at a user's main installation.
@@ -53,3 +86,5 @@ For visual editing later, download [Android Studio from Google](https://develope
 ## Real-device diagnostics
 
 The in-app Save diagnostic report is the preferred first method. If it is insufficient, adb is already available in `%LOCALAPPDATA%\BookCoverBuild\sdk\platform-tools`. USB debugging and Samsung USB drivers may be needed for adb, and require separate guided phone steps. We have not enabled Developer Options or changed phone settings. Do not interpret an empty adb device list as evidence of display support or failure.
+
+</details>
