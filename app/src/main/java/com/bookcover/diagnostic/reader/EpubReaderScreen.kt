@@ -21,6 +21,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -40,6 +41,7 @@ import com.bookcover.diagnostic.library.readerControlsColorScheme
 import com.bookcover.diagnostic.ui.SettingsSection
 import com.bookcover.diagnostic.ui.SettingsSwitchRow
 import kotlinx.coroutines.delay
+import org.readium.r2.navigator.R as NavigatorR
 
 /** Page colour for a reading theme; also used for the plain screen shown while a book reopens. */
 internal fun readerBackground(theme: String?): Color =
@@ -71,6 +73,9 @@ internal fun EpubReaderScreen(
     var sheet by remember(session) { mutableStateOf(ReaderSheet.NONE) }
     var bookmarkDraft by remember(session) { mutableStateOf<BookmarkDraft?>(null) }
     var footerHeight by remember(session) { mutableStateOf(48.dp) }
+    // Readium keeps its own bottom margin inside reflowable pages; the progress row sits in that margin
+    // instead of reserving a second band below it. Fixed-layout pages have no such margin.
+    val pageMargin = if (session.supportsTypography) dimensionResource(NavigatorR.dimen.readium_navigator_epub_vertical_padding) else 0.dp
     val density = LocalDensity.current
     val overlayVisible = session.controlsVisible || contentsVisible || bookmarkDraft != null
     val night = session.themeName == "Night"
@@ -120,7 +125,7 @@ internal fun EpubReaderScreen(
                             if (overlayVisible && it.hasFocus()) it.clearFocus()
                             if (it.isAttachedToWindow) session.attach(it)
                         },
-                        modifier = Modifier.fillMaxSize().padding(bottom = footerHeight),
+                        modifier = Modifier.fillMaxSize().padding(bottom = (footerHeight - pageMargin).coerceAtLeast(0.dp)),
                     )
                     if (!overlayVisible) Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().heightIn(min = 48.dp)
                         .onSizeChanged { footerHeight = with(density) { it.height.toDp() } }

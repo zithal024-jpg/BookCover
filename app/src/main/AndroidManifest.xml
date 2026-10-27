@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- BC-24: Readium's transitive Media3 playback dependencies add these. BookCover only
+         opens local EPUBs, never creates a player, and keeps the display on with a window
+         flag (not a CPU wake lock). See docs/BC-24-PERMISSIONS.md for artifact evidence. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" tools:node="remove" />
+
     <application
         android:allowBackup="false"
         android:fullBackupContent="false"
@@ -8,9 +15,14 @@
         android:icon="@drawable/ic_book"
         android:supportsRtl="true"
         android:theme="@style/Theme.BookCover">
+        <!-- Media3's API 36/37 Bluetooth audio-player probe is unused by the EPUB reader.
+             Lint cannot resolve this runtime-only class in the removal rule. -->
+        <activity android:name="androidx.media3.session.BluetoothValidationActivity"
+            tools:node="remove" tools:ignore="MissingClass" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|density"
             android:resizeableActivity="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
