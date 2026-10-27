@@ -27,6 +27,7 @@ import android.view.ViewGroup
 import androidx.fragment.app.FragmentContainerView
 import com.bookcover.diagnostic.R
 import com.bookcover.diagnostic.library.BookRecord
+import com.bookcover.diagnostic.ui.SettingsSection
 
 /** Page colour for a reading theme; also used for the plain screen shown while a book reopens. */
 internal fun readerBackground(theme: String?): Color =
@@ -136,93 +137,99 @@ internal fun EpubReaderScreen(
                                 TextButton(onClick = { session.next() }, enabled = !session.typographyUpdating,
                                     modifier = Modifier.testTag("reader-next-page").heightIn(min = 48.dp)) { Text("Next page") }
                             }
-                            Text("Typography", style = MaterialTheme.typography.titleMedium)
-                            if (!session.supportsTypography) {
-                                Text("Fixed-layout EPUB: the publisher positions the page contents. Font, spacing, margin and alignment changes are unavailable for this book.", style = MaterialTheme.typography.bodySmall)
-                            }
-                            val canChangeType = session.supportsTypography && !session.typographyUpdating
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text("Publisher styles", style = MaterialTheme.typography.labelLarge)
-                                    Text("Use the book's fonts and paragraph formatting.", style = MaterialTheme.typography.bodySmall)
+                            SettingsSection("Text") {
+                                if (!session.supportsTypography) {
+                                    Text("Fixed-layout EPUB: the publisher positions the page contents. Font, spacing, margin and alignment changes are unavailable for this book.", style = MaterialTheme.typography.bodySmall)
                                 }
-                                Switch(checked = session.comfort.publisherStyles, onCheckedChange = session::changePublisherStyles,
-                                    enabled = canChangeType, modifier = Modifier.semantics { contentDescription = "Use publisher styles" })
+                                val canChangeType = session.supportsTypography && !session.typographyUpdating
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Publisher styles", style = MaterialTheme.typography.labelLarge)
+                                        Text("Use the book's fonts and paragraph formatting.", style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    Switch(checked = session.comfort.publisherStyles, onCheckedChange = session::changePublisherStyles,
+                                        enabled = canChangeType, modifier = Modifier.semantics { contentDescription = "Use publisher styles" })
+                                }
+                                if (session.comfort.publisherStyles && session.supportsTypography) {
+                                    Text("Turn off publisher styles to use the custom settings below. Your saved choices are kept.", style = MaterialTheme.typography.bodySmall)
+                                }
+                                val typeEnabled = canChangeType && !session.comfort.publisherStyles
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                                    OutlinedButton(onClick = { session.changeFont(session.fontScale - 0.1) },
+                                        enabled = typeEnabled && ReadingTextSize.percent(session.fontScale) > ReadingTextSize.MIN_PERCENT,
+                                        modifier = Modifier.semantics { contentDescription = "Decrease text size" }) { Text("A−") }
+                                    Text("${if (session.comfort.publisherStyles) "Saved text size" else "Text size"}: ${ReadingTextSize.percent(session.fontScale)}%",
+                                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp), style = MaterialTheme.typography.labelLarge)
+                                    OutlinedButton(onClick = { session.changeFont(session.fontScale + 0.1) },
+                                        enabled = typeEnabled && ReadingTextSize.percent(session.fontScale) < ReadingTextSize.MAX_PERCENT,
+                                        modifier = Modifier.semantics { contentDescription = "Increase text size" }) { Text("A+") }
+                                }
+                                var draftSize by remember(session.fontScale) { mutableFloatStateOf(session.fontScale.toFloat()) }
+                                Slider(value = draftSize, onValueChange = { draftSize = it },
+                                    onValueChangeFinished = { if (draftSize.toDouble() != session.fontScale) session.changeFont(draftSize.toDouble()) },
+                                    valueRange = 0.8f..2.2f, steps = 13, enabled = typeEnabled,
+                                    modifier = Modifier.semantics { contentDescription = "EPUB text size" })
+                                ReadingFont.entries.forEach { font ->
+                                    FilterChip(selected = session.fontId == font.id, onClick = { session.changeFontFamily(font.id) },
+                                        enabled = typeEnabled, label = { Text(font.label) })
+                                }
+                                Text("Line spacing", style = MaterialTheme.typography.labelLarge)
+                                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    ReadingComfort.lineSpacingChoices.forEach { spacing ->
+                                        FilterChip(selected = session.comfort.lineSpacing == spacing,
+                                            onClick = { session.changeLineSpacing(spacing) }, enabled = typeEnabled,
+                                            label = { Text("${spacing}×") },
+                                            modifier = Modifier.semantics { contentDescription = "Line spacing $spacing" })
+                                    }
+                                }
+                                Text("Side margins", style = MaterialTheme.typography.labelLarge)
+                                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    ReadingMargins.entries.forEach { margin ->
+                                        FilterChip(selected = session.comfort.margins == margin, onClick = { session.changePageMargins(margin.id) },
+                                            enabled = typeEnabled, label = { Text(margin.label) })
+                                    }
+                                }
+                                Text("Alignment", style = MaterialTheme.typography.labelLarge)
+                                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    ReadingAlignment.entries.forEach { alignment ->
+                                        FilterChip(selected = session.comfort.alignment == alignment,
+                                            onClick = { session.changeTextAlignment(alignment.id) }, enabled = typeEnabled,
+                                            label = { Text(alignment.label) })
+                                    }
+                                }
+                                if (session.typographyUpdating) Text("Reflowing text and restoring your reading position…", style = MaterialTheme.typography.bodySmall)
                             }
-                            if (session.comfort.publisherStyles && session.supportsTypography) {
-                                Text("Turn off publisher styles to use the custom settings below. Your saved choices are kept.", style = MaterialTheme.typography.bodySmall)
+                            SettingsSection("Page turning", showDivider = true) {
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Edge-tap page turns", style = MaterialTheme.typography.labelLarge)
+                                        Text("Optional narrow edges follow the book's reading direction. Swipes always work.", style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    Switch(checked = session.edgeTaps, onCheckedChange = session::changeEdgeTaps,
+                                        modifier = Modifier.semantics { contentDescription = "Enable edge-tap page turns" })
+                                }
+                                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("volume-key-page-turns")
+                                    .semantics { contentDescription = "Volume-key page turns" }
+                                    .toggleable(value = session.volumeKeys, role = Role.Switch, onValueChange = session::changeVolumeKeys),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Volume-key page turns", style = MaterialTheme.typography.labelLarge)
+                                        Text("Volume down: next page. Volume up: previous page. Off keeps normal volume control.", style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    Switch(checked = session.volumeKeys, onCheckedChange = null)
+                                }
+                                Text("Keyboard: Page Down and Page Up follow book order. Left and right arrows follow the book's reading direction. Keys turn pages while controls are closed.",
+                                    style = MaterialTheme.typography.bodySmall)
                             }
-                            val typeEnabled = canChangeType && !session.comfort.publisherStyles
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                                OutlinedButton(onClick = { session.changeFont(session.fontScale - 0.1) },
-                                    enabled = typeEnabled && ReadingTextSize.percent(session.fontScale) > ReadingTextSize.MIN_PERCENT,
-                                    modifier = Modifier.semantics { contentDescription = "Decrease text size" }) { Text("A−") }
-                                Text("${if (session.comfort.publisherStyles) "Saved text size" else "Text size"}: ${ReadingTextSize.percent(session.fontScale)}%",
-                                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp), style = MaterialTheme.typography.labelLarge)
-                                OutlinedButton(onClick = { session.changeFont(session.fontScale + 0.1) },
-                                    enabled = typeEnabled && ReadingTextSize.percent(session.fontScale) < ReadingTextSize.MAX_PERCENT,
-                                    modifier = Modifier.semantics { contentDescription = "Increase text size" }) { Text("A+") }
-                            }
-                            var draftSize by remember(session.fontScale) { mutableFloatStateOf(session.fontScale.toFloat()) }
-                            Slider(value = draftSize, onValueChange = { draftSize = it },
-                                onValueChangeFinished = { if (draftSize.toDouble() != session.fontScale) session.changeFont(draftSize.toDouble()) },
-                                valueRange = 0.8f..2.2f, steps = 13, enabled = typeEnabled,
-                                modifier = Modifier.semantics { contentDescription = "EPUB text size" })
-                            ReadingFont.entries.forEach { font ->
-                                FilterChip(selected = session.fontId == font.id, onClick = { session.changeFontFamily(font.id) },
-                                    enabled = typeEnabled, label = { Text(font.label) })
-                            }
-                            Text("Line spacing", style = MaterialTheme.typography.labelLarge)
-                            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                ReadingComfort.lineSpacingChoices.forEach { spacing ->
-                                    FilterChip(selected = session.comfort.lineSpacing == spacing,
-                                        onClick = { session.changeLineSpacing(spacing) }, enabled = typeEnabled,
-                                        label = { Text("${spacing}×") },
-                                        modifier = Modifier.semantics { contentDescription = "Line spacing $spacing" })
+                            SettingsSection("Page colour", showDivider = true) {
+                                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf("Paper", "Sepia", "Night").forEach { name ->
+                                        FilterChip(selected = session.themeName == name, onClick = { session.changeTheme(name) },
+                                            modifier = Modifier.testTag("reading-theme-$name"), label = { Text(name) })
+                                    }
                                 }
                             }
-                            Text("Side margins", style = MaterialTheme.typography.labelLarge)
-                            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                ReadingMargins.entries.forEach { margin ->
-                                    FilterChip(selected = session.comfort.margins == margin, onClick = { session.changePageMargins(margin.id) },
-                                        enabled = typeEnabled, label = { Text(margin.label) })
-                                }
-                            }
-                            Text("Alignment", style = MaterialTheme.typography.labelLarge)
-                            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                ReadingAlignment.entries.forEach { alignment ->
-                                    FilterChip(selected = session.comfort.alignment == alignment,
-                                        onClick = { session.changeTextAlignment(alignment.id) }, enabled = typeEnabled,
-                                        label = { Text(alignment.label) })
-                                }
-                            }
-                            if (session.typographyUpdating) Text("Reflowing text and restoring your reading position…", style = MaterialTheme.typography.bodySmall)
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text("Edge-tap page turns", style = MaterialTheme.typography.labelLarge)
-                                    Text("Optional narrow edges follow the book's reading direction. Swipes always work.", style = MaterialTheme.typography.bodySmall)
-                                }
-                                Switch(checked = session.edgeTaps, onCheckedChange = session::changeEdgeTaps,
-                                    modifier = Modifier.semantics { contentDescription = "Enable edge-tap page turns" })
-                            }
-                            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("volume-key-page-turns")
-                                .semantics { contentDescription = "Volume-key page turns" }
-                                .toggleable(value = session.volumeKeys, role = Role.Switch, onValueChange = session::changeVolumeKeys),
-                                verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text("Volume-key page turns", style = MaterialTheme.typography.labelLarge)
-                                    Text("Volume down: next page. Volume up: previous page. Off keeps normal volume control.", style = MaterialTheme.typography.bodySmall)
-                                }
-                                Switch(checked = session.volumeKeys, onCheckedChange = null)
-                            }
-                            Text("Keyboard: Page Down and Page Up follow book order. Left and right arrows follow the book's reading direction. Keys turn pages while controls are closed.",
-                                style = MaterialTheme.typography.bodySmall)
-                            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                listOf("Paper", "Sepia", "Night").forEach { name ->
-                                    FilterChip(selected = session.themeName == name, onClick = { session.changeTheme(name) },
-                                        modifier = Modifier.testTag("reading-theme-$name"), label = { Text(name) })
-                                }
-                            }
+                            HorizontalDivider()
                             TextButton(onClick = onChooseCover) { Text("Choose cover image (stops outside cover)") }
                             Button(onClick = { session.controlsVisible = false }, modifier = Modifier.fillMaxWidth()) { Text("Resume reading") }
                         }

@@ -5,12 +5,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -39,6 +35,8 @@ internal fun LibraryScreen(
     var collection by remember { mutableStateOf("All") }
     var sort by remember { mutableStateOf("Recent") }
     var settings by remember { mutableStateOf(false) }
+    // In memory only: diagnostics hide again when the app restarts.
+    var developerOptions by remember { mutableStateOf(false) }
     var moving by remember { mutableStateOf<BookRecord?>(null) }
     var removing by remember { mutableStateOf<BookRecord?>(null) }
     var collectionName by remember { mutableStateOf("") }
@@ -136,45 +134,8 @@ internal fun LibraryScreen(
         text = { Text("Removes this app's copy, cover, bookmarks and progress. Your original file remains in Files.") },
         confirmButton = { TextButton(onClick = { onRemove(book); collection = "All"; removing = null }) { Text("Remove") } },
         dismissButton = { TextButton(onClick = { removing = null }) { Text("Cancel") } }) }
-    if (settings) AlertDialog(onDismissRequest = { settings = false }, title = { Text("Library settings") }, text = {
-        Column(Modifier.testTag("library-settings-scroll").heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Library theme", style = MaterialTheme.typography.titleMedium)
-            Text("Automatic follows the cover of your most recently read book. A selected theme stays in use until you choose Automatic again.",
-                style = MaterialTheme.typography.bodySmall)
-            Column(Modifier.selectableGroup()) { LibraryThemeChoice.entries.forEach { choice ->
-                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                    .selectable(selected = LibraryThemeChoice.fromId(libraryTheme) == choice,
-                        onClick = { onLibraryTheme(choice.id) }, role = Role.RadioButton),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    RadioButton(selected = LibraryThemeChoice.fromId(libraryTheme) == choice, onClick = null)
-                    Text(choice.label, modifier = Modifier.padding(start = 12.dp))
-                }
-            } }
-            HorizontalDivider()
-            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                .toggleable(value = autoCover, role = Role.Switch, onValueChange = onAutoCover),
-                verticalAlignment = Alignment.CenterVertically) {
-                Text("Start outside cover when opening a book", modifier = Modifier.weight(1f))
-                Switch(checked = autoCover, onCheckedChange = null)
-            }
-            Text("Outside cover timer")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(30, 60, 0).forEach { minutes -> FilterChip(timer == minutes, { onTimer(minutes) },
-                    label = { Text(if (minutes == 0) "Manual" else "$minutes min") }, modifier = Modifier.heightIn(min = 48.dp)
-                        .semantics { contentDescription = if (minutes == 0) "Outside cover timer: manual" else "Outside cover timer: $minutes minutes" }) }
-            }
-            Text("Keep BookCover in front while reading. Tap the middle of a page to show controls. Swipe left or right to turn pages.", style = MaterialTheme.typography.bodySmall)
-            HorizontalDivider()
-            Text("Library backup", style = MaterialTheme.typography.titleMedium)
-            Text("Saves reading positions, bookmarks and collections to a file you choose. Book files are not included; keep your EPUBs. " +
-                "To restore after reinstalling, import your EPUBs first.", style = MaterialTheme.typography.bodySmall)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                TextButton(onClick = { settings = false; onExportBackup() }, enabled = !busy) { Text("Save backup") }
-                TextButton(onClick = { settings = false; onRestoreBackup() }, enabled = !busy) { Text("Restore backup") }
-            }
-            HorizontalDivider()
-            TextButton(onClick = { settings = false; onDiagnostics() }) { Text("Device diagnostics") }
-            Text("EPUB engine: Readium 3.4.0 · BSD 3-Clause\nOpenDyslexic font by Abelardo Gonzalez · CC BY 3.0, based on Bitstream Vera\nBookCover 0.4.0 prototype", style = MaterialTheme.typography.bodySmall)
-        }
-    }, confirmButton = { TextButton(onClick = { settings = false }) { Text("Done") } })
+    if (settings) LibrarySettingsDialog(busy = busy, autoCover = autoCover, timer = timer, onAutoCover = onAutoCover,
+        onTimer = onTimer, libraryTheme = libraryTheme, onLibraryTheme = onLibraryTheme,
+        onExportBackup = onExportBackup, onRestoreBackup = onRestoreBackup, onDiagnostics = onDiagnostics,
+        developerOptions = developerOptions, onDeveloperOptions = { developerOptions = true }, onDismiss = { settings = false })
 }
