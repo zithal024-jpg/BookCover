@@ -342,14 +342,16 @@ class NativeReaderTest {
         launch()
         assertTrue("A fresh reader respects publisher styles", main { reader.comfort.publisherStyles })
         val authored = comfortMetrics()
+        // The fixture sets every paragraph, the poem included, to 18px; publisher styles keep such book
+        // sizes, so growth is measured on the heading, whose size follows the reader's text size.
         main { reader.changeFont(1.5) }
         waitFor("150% text applies with publisher styles on") {
-            !main { reader.typographyUpdating } && comfortMetrics().getDouble("poemFont") > authored.getDouble("poemFont") * 1.45
+            !main { reader.typographyUpdating } && comfortMetrics().getDouble("headingFont") > authored.getDouble("headingFont") * 1.45
         }
         assertTrue("Changing size does not turn publisher styles off", main { reader.comfort.publisherStyles })
         val large = comfortMetrics()
         assertEquals("Poetry stays centred", "center", large.getString("poemAlign"))
-        assertEquals("The poem's 3em indent grows with the text", 3.0, large.getDouble("poemIndent") / large.getDouble("poemFont"), 0.05)
+        assertEquals("The poem keeps its 3em indent", 3.0, large.getDouble("poemIndent") / large.getDouble("poemFont"), 0.05)
         assertEquals("The book's poem font is kept", authored.getString("poemFamily"), large.getString("poemFamily"))
 
         js("readium.scrollToId('paragraph-35'); true")
@@ -357,7 +359,7 @@ class NativeReaderTest {
         val anchorBefore = firstVisibleParagraph()
         main { reader.changeFont(1.4) }
         waitFor("140% text applies") { !main { reader.typographyUpdating } &&
-            abs(comfortMetrics().getDouble("poemFont") / authored.getDouble("poemFont") - 1.4) < 0.05 }
+            abs(comfortMetrics().getDouble("headingFont") / authored.getDouble("headingFont") - 1.4) < 0.05 }
         assertTrue("Reading stays near the same paragraph", abs(firstVisibleParagraph() - anchorBefore) <= 2)
         main { reader.changePublisherStyles(false) }
         waitFor("custom formatting applies") { !main { reader.typographyUpdating } && comfortMetrics().getString("poemAlign") == "start" }
@@ -365,12 +367,12 @@ class NativeReaderTest {
         main { reader.changePublisherStyles(true) }
         waitFor("publisher formatting returns") { !main { reader.typographyUpdating } && comfortMetrics().getString("poemAlign") == "center" }
         assertEquals(1.4, main { reader.fontScale }, 0.001)
-        assertEquals(1.4, comfortMetrics().getDouble("poemFont") / authored.getDouble("poemFont"), 0.05)
+        assertEquals(1.4, comfortMetrics().getDouble("headingFont") / authored.getDouble("headingFont"), 0.05)
         scenario!!.close(); scenario = null; launch()
         assertEquals("140% survives reopening", 1.4, main { reader.fontScale }, 0.001)
         assertTrue(main { reader.comfort.publisherStyles })
         waitFor("the reopened book shows 140% text") {
-            abs(comfortMetrics().getDouble("poemFont") / authored.getDouble("poemFont") - 1.4) < 0.05
+            abs(comfortMetrics().getDouble("headingFont") / authored.getDouble("headingFont") - 1.4) < 0.05
         }
         assertEquals("center", comfortMetrics().getString("poemAlign"))
         assertTrue("CSS application succeeded, rather than only saving controls", host.reports.isEmpty())
@@ -436,6 +438,7 @@ class NativeReaderTest {
         var v=getComputedStyle(document.getElementById('poem'));
         return {lineHeight:parseFloat(s.lineHeight),alignment:s.textAlign,padding:parseFloat(b.paddingLeft),
             textWidth:p.getBoundingClientRect().width,poemIndent:parseFloat(v.textIndent),poemFont:parseFloat(v.fontSize),
+            headingFont:parseFloat(getComputedStyle(document.getElementById('heading')).fontSize),
             poemAlign:v.textAlign,poemFamily:v.fontFamily,maxLine:getComputedStyle(document.documentElement).getPropertyValue('--RS__maxLineLength').trim()};})()"""))
 
     private fun metrics(): JSONObject = JSONObject(js("""(function(){
