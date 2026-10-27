@@ -13,6 +13,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.bookcover.diagnostic.reader.EpubSession
+import com.bookcover.diagnostic.reader.visibleReadingAnchor
 import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -338,13 +339,38 @@ class NativeReaderTest {
     @Test fun comfortControlsChangeRealLayoutAndPreserveMidChapterPosition() {
         launch()
         js("readium.scrollToId('paragraph-35'); true")
+        settledPageOffset()
         val before = comfortMetrics()
         fun nearAnchor(control: String, action: () -> Unit) {
             val paragraph = firstVisibleParagraph()
+            val anchor = main { reader.fragment.visibleReadingAnchor() } ?: error("No rendered reading anchor")
+            val selector = anchor.locations["cssSelector"] as? String ?: error("No generated paragraph selector")
+            val quote = anchor.text.highlight?.takeIf { it.isNotBlank() } ?: error("No rendered passage")
+            fun passageVisible(): Boolean = js("""(function(){
+                var e=document.querySelector(${JSONObject.quote(selector)}), quote=${JSONObject.quote(quote)};
+                if(!e) return false;
+                var walker=document.createTreeWalker(e,NodeFilter.SHOW_TEXT), node;
+                while((node=walker.nextNode())) {
+                    var start=node.data.indexOf(quote); if(start<0) continue;
+                    var range=document.createRange(); range.setStart(node,start); range.setEnd(node,start+1);
+                    return Array.from(range.getClientRects()).some(function(r){
+                        return r.width>0 && r.height>0 && r.right>1 && r.left<innerWidth-1 && r.bottom>1 && r.top<innerHeight-1;
+                    });
+                }
+                return false;
+            })()""") == "true"
+            assertTrue("$control starts with its saved passage actually on screen", passageVisible())
             main { action() }
             waitFor("comfort layout settles") { !main { reader.typographyUpdating } }
             val after = firstVisibleParagraph()
-            assertTrue("$control retains nearby paragraph: before=$paragraph, after=$after", abs(after - paragraph) <= 2)
+            // A new page height or spacing can fit more earlier paragraphs above the saved word.
+            // Verify that word itself stays visible rather than counting the page's earlier blocks.
+            if (!passageVisible()) {
+                val geometry = js("""(function(){var e=document.querySelector(${JSONObject.quote(selector)});
+                    return {scrollX:scrollX,width:innerWidth,height:innerHeight,
+                    rects:e ? Array.from(e.getClientRects()).slice(0,8).map(function(r){return {left:r.left,top:r.top,right:r.right,bottom:r.bottom};}) : []};})()""")
+                fail("$control keeps the exact saved passage visible: before=$paragraph, after=$after; anchor=${anchor.toJSON()}; generatedGeometry=$geometry")
+            }
         }
         nearAnchor("Line spacing") { reader.changeLineSpacing(2.0) }
         assertTrue(comfortMetrics().getDouble("lineHeight") > before.getDouble("lineHeight") * 1.2)

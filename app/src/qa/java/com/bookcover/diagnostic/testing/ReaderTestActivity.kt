@@ -43,9 +43,10 @@ class ReaderTestActivity : FragmentActivity() {
         super.getSharedPreferences(if (name == "reader") TEST_PREFERENCES else name, mode)
 
     override fun attachBaseContext(newBase: Context) {
-        super.attachBaseContext(newBase.createConfigurationContext(Configuration(newBase.resources.configuration).apply {
-            fontScale = fontScaleForTests
-        }))
+        val scale = fontScaleForTests
+        super.attachBaseContext(if (scale > 0f) newBase.createConfigurationContext(Configuration(newBase.resources.configuration).apply {
+            fontScale = scale
+        }) else newBase)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -116,7 +117,7 @@ class ReaderTestActivity : FragmentActivity() {
 
     companion object {
         const val EXTRA_FIXED_LAYOUT = "fixedLayout"
-        @Volatile internal var fontScaleForTests = 1f
+        @Volatile internal var fontScaleForTests = 0f
         const val EXTRA_READING_PROGRESSION = "readingProgression"
         const val EXTRA_LANGUAGE = "language"
         const val EXTRA_IMAGE_PAGES = "imagePages"

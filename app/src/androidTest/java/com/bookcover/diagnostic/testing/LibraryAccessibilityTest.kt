@@ -66,7 +66,8 @@ class LibraryAccessibilityTest {
         click("Collection: Samples", forward = false)
         waitFor("the collection exposes selected state") { find("Collection: Samples")?.let(::selected) == true }
         click("Settings", forward = false)
-        assertTrue("The automatic theme exposes selected state", selected(reveal("Automatic (Book Cover)", dialog = true)))
+        val automatic = reveal("Automatic (Book Cover)", dialog = true)
+        assertTrue("The automatic theme exposes selected state; ${selectionDiagnostics(automatic)}", selected(automatic))
         click("Paper · light", dialog = true)
         waitFor("the new theme is selected") { find("Paper · light")?.let(::selected) == true }
         assertEquals("paper", main { host.themeId })
@@ -129,7 +130,26 @@ class LibraryAccessibilityTest {
         return find(label)!!
     }
 
-    private fun selected(node: AccessibilityNodeInfo): Boolean = node.isSelected || (node.isCheckable && node.isChecked)
+    private fun selected(node: AccessibilityNodeInfo): Boolean {
+        if (node.isSelected || (node.isCheckable && node.isChecked)) return true
+        // Android/Compose may announce a radio row's Selected semantics through its state
+        // description rather than isSelected. Check only this exact row's declared state.
+        val state = node.stateDescription?.toString().orEmpty()
+        return state.contains("selected", ignoreCase = true) &&
+            !state.contains("not selected", ignoreCase = true) && !state.contains("unselected", ignoreCase = true)
+    }
+
+    private fun selectionDiagnostics(node: AccessibilityNodeInfo): String {
+        fun describe(candidate: AccessibilityNodeInfo?): String {
+            if (candidate == null) return "absent"
+            return "class=${candidate.className},text=${candidate.text},label=${candidate.contentDescription}," +
+                "click=${candidate.isClickable},selected=${candidate.isSelected},checkable=${candidate.isCheckable}," +
+                "checked=${candidate.isChecked},state=${candidate.stateDescription},role=${candidate.extras.getCharSequence("AccessibilityNodeInfo.roleDescription")}," +
+                "bounds=${Rect().also(candidate::getBoundsInScreen)}"
+        }
+        val children = (0 until minOf(node.childCount, 6)).joinToString("; ") { index -> describe(node.getChild(index)) }
+        return "row={${describe(node)}}; parent={${describe(node.parent)}}; children=[$children]"
+    }
 
     private fun fullyVisible(node: AccessibilityNodeInfo): Boolean {
         if (!node.isVisibleToUser) return false
@@ -157,7 +177,8 @@ class LibraryAccessibilityTest {
         // Resolve the action owner so assertions inspect its selected/checkable state too.
         var owner: AccessibilityNodeInfo? = labeledNode
         while (owner != null && owner.packageName?.toString() == target.packageName) {
-            if (owner.isClickable || owner.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK }) return owner
+            if (owner.isClickable || owner.isCheckable || owner.isSelected || owner.stateDescription != null ||
+                owner.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK }) return owner
             owner = owner.parent
         }
         return labeledNode
@@ -193,7 +214,7 @@ class LibraryAccessibilityTest {
             if (text.isNotBlank() || description.isNotBlank() || node.isScrollable) {
                 val bounds = Rect().also(node::getBoundsInScreen)
                 nodes += "text=${text.take(90)},label=${description.take(110)},id=${node.viewIdResourceName}," +
-                    "click=${node.isClickable},selected=${node.isSelected},checked=${node.isChecked}," +
+                    "click=${node.isClickable},selected=${node.isSelected},checked=${node.isChecked},state=${node.stateDescription}," +
                     "visible=${node.isVisibleToUser},bounds=$bounds,actions=${node.actionList.map { it.id }}"
             }
             for (index in 0 until node.childCount) node.getChild(index)?.let(::inspect)

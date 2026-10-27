@@ -52,7 +52,7 @@ class ReadingKeysAccessibilityTest {
 
     @After fun cleanUp() {
         scenario?.close()
-        ReaderTestActivity.fontScaleForTests = 1f
+        ReaderTestActivity.fontScaleForTests = 0f
         target.getSharedPreferences(ReaderTestActivity.TEST_PREFERENCES, Context.MODE_PRIVATE).edit().clear().commit()
         automation.serviceInfo = automation.serviceInfo.apply { flags = previousFlags }
     }
@@ -187,14 +187,15 @@ class ReadingKeysAccessibilityTest {
         click("reader-show-controls")
         scrollTo("volume-key-page-turns")
         val volume = findTag("volume-key-page-turns")!!
-        assertTrue("Volume setting exposes its purpose", volume.contentDescription?.contains("volume", ignoreCase = true) == true)
-        assertTrue("Volume setting exposes a checkable state", volume.isCheckable)
-        assertFalse(volume.isChecked)
+        assertTrue("Volume setting exposes its purpose; ${controlDiagnostics(volume)}",
+            controlLabel(volume).contains("Volume-key page turns", ignoreCase = true))
+        assertEquals("Volume setting exposes its off state; ${controlDiagnostics(volume)}", false, checked(volume))
         click("volume-key-page-turns")
         waitFor("accessibility toggles volume turns") { main { reader.volumeKeys } }
-        assertTrue(findTag("volume-key-page-turns")!!.isChecked)
+        waitFor("the volume control announces its on state") { findTag("volume-key-page-turns")?.let(::checked) == true }
         scrollTo("reading-theme-Paper")
-        assertTrue("Paper exposes its selected state", selected(findTag("reading-theme-Paper")!!))
+        val paper = findTag("reading-theme-Paper")!!
+        assertTrue("Paper exposes its selected state; ${controlDiagnostics(paper)}", selected(paper))
         click("reading-theme-Sepia")
         waitFor("Sepia becomes selected") { main { reader.themeName == "Sepia" } && selected(findTag("reading-theme-Sepia")!!) }
         assertFalse("The old theme no longer announces selected", selected(findTag("reading-theme-Paper")!!))
@@ -223,30 +224,138 @@ class ReadingKeysAccessibilityTest {
 
     private fun click(tag: String) {
         waitFor("$tag is reachable through accessibility") { findTag(tag)?.let(::visible) == true }
-        assertTrue("$tag has an accessibility click action", findTag(tag)!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        val tagged = findTag(tag)!!
+        val owner = actionOwner(tagged)
+        assertNotNull("$tag has a scoped accessibility click owner; ${controlDiagnostics(tagged)}", owner)
+        assertTrue("$tag has an accessibility click action; ${controlDiagnostics(tagged)}",
+            owner!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
         instrumentation.waitForIdleSync()
     }
 
     private fun scrollTo(tag: String) {
-        waitFor("scrolling reveals $tag") {
-            if (findTag(tag)?.let(::visible) == true) return@waitFor true
-            findTag("reader-controls-scroll")?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
-            SystemClock.sleep(120)
-            false
+        var scanForward = true
+        try {
+            waitFor("scrolling reveals $tag") {
+                val targetNode = findTag(tag)
+                if (targetNode?.let(::visible) == true) return@waitFor true
+                // Reopening Controls can retain its previous scroll position. Ask this exact
+                // control to reveal itself before choosing a directional panel scroll.
+                targetNode?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
+                instrumentation.waitForIdleSync()
+                if (findTag(tag)?.let(::visible) == true) return@waitFor true
+                val panel = findTag("reader-controls-scroll")
+                if (panel != null) {
+                    val panelBounds = Rect().also(panel::getBoundsInScreen)
+                    val targetBounds = findTag(tag)?.let { Rect().also(it::getBoundsInScreen) }
+                    val forward = if (targetBounds != null && !targetBounds.isEmpty)
+                        targetBounds.exactCenterY() >= panelBounds.top else scanForward
+                    scanForward = forward
+                    val desired = if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+                        else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+                    val opposite = if (forward) AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+                        else AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+                    val scrollables = controlNodes(panel).filter { it.isScrollable }
+                    fun owner(action: Int) = scrollables.firstOrNull { candidate ->
+                        candidate.actionList.any { it.id == action }
+                    }
+                    val desiredOwner = owner(desired)
+                    if (desiredOwner != null) desiredOwner.performAction(desired)
+                    else owner(opposite)?.let { fallback ->
+                        // Offscreen controls can disappear from Android's accessibility tree.
+                        // At a panel boundary reverse the scan, keeping that direction until
+                        // the requested tag appears or the other boundary is reached.
+                        scanForward = opposite == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+                        fallback.performAction(opposite)
+                    }
+                }
+                SystemClock.sleep(120)
+                false
+            }
+        } catch (failure: AssertionError) {
+            val requested = findTag(tag)?.let(::controlDiagnostics) ?: "absent"
+            val panel = nodeDiagnostics(findTag("reader-controls-scroll"))
+            throw AssertionError("${failure.message}; target={$requested}; panel={$panel}", failure)
         }
     }
 
     private fun assertLabelAndTarget(tag: String, label: String) {
-        val node = findTag(tag)!!
-        assertTrue("$tag announces $label", node.contentDescription?.contains(label) == true || node.text?.contains(label) == true)
+        val tagged = findTag(tag)!!
+        assertTrue("$tag announces $label; ${controlDiagnostics(tagged)}", controlLabel(tagged).contains(label))
+        val node = actionOwner(tagged) ?: error("$tag has no accessibility action owner; ${controlDiagnostics(tagged)}")
         val bounds = Rect().also(node::getBoundsInScreen)
         val minimum = main { 48f * host.resources.displayMetrics.density } - 1
         assertTrue("$tag is at least 48dp wide", bounds.width() >= minimum)
         assertTrue("$tag is at least 48dp high", bounds.height() >= minimum)
     }
 
-    private fun selected(node: AccessibilityNodeInfo): Boolean = node.isSelected || (node.isCheckable && node.isChecked) ||
-        node.stateDescription?.toString()?.lowercase()?.let { it == "selected" } == true
+    /** A tag may identify the wrapper while Android exposes labels and state on its children. */
+    private fun controlNodes(node: AccessibilityNodeInfo): List<AccessibilityNodeInfo> {
+        val nodes = mutableListOf<AccessibilityNodeInfo>()
+        fun collect(candidate: AccessibilityNodeInfo, depth: Int) {
+            nodes += candidate
+            if (depth >= 6 || candidate.className?.toString() == "android.webkit.WebView") return
+            for (index in 0 until candidate.childCount) candidate.getChild(index)?.let { collect(it, depth + 1) }
+        }
+        collect(node, 0)
+        return nodes
+    }
+
+    // Label evidence is confined to the tagged control, never its containing panel or siblings.
+    private fun controlLabel(node: AccessibilityNodeInfo): String = controlNodes(node).flatMap {
+        listOfNotNull(it.contentDescription?.toString(), it.text?.toString())
+    }.joinToString(" ")
+
+    private fun actionOwner(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        fun clickable(candidate: AccessibilityNodeInfo) = candidate.isClickable ||
+            candidate.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK }
+        controlNodes(node).firstOrNull(::clickable)?.let { return it }
+        // Some Compose wrappers are children of the clickable semantics owner. Only accept an
+        // ancestor with these same bounds, so a broad settings panel can never satisfy the test.
+        val bounds = Rect().also(node::getBoundsInScreen)
+        var parent = node.parent
+        repeat(2) {
+            val candidate = parent ?: return null
+            if (Rect().also(candidate::getBoundsInScreen) != bounds) return null
+            if (clickable(candidate)) return candidate
+            parent = candidate.parent
+        }
+        return null
+    }
+
+    private fun checked(node: AccessibilityNodeInfo): Boolean? {
+        val candidates = controlNodes(node) + listOfNotNull(actionOwner(node))
+        candidates.firstOrNull { it.isCheckable }?.let { return it.isChecked }
+        return candidates.firstNotNullOfOrNull { candidate ->
+            when (candidate.stateDescription?.toString()?.trim()?.lowercase()) {
+                "on", "checked" -> true
+                "off", "not checked", "unchecked" -> false
+                else -> null
+            }
+        }
+    }
+
+    private fun selected(node: AccessibilityNodeInfo): Boolean =
+        (controlNodes(node) + listOfNotNull(actionOwner(node))).any { candidate ->
+        val state = candidate.stateDescription?.toString().orEmpty()
+        candidate.isSelected || (candidate.isCheckable && candidate.isChecked) ||
+            (state.contains("selected", ignoreCase = true) && !state.contains("not selected", ignoreCase = true) &&
+                !state.contains("unselected", ignoreCase = true))
+    }
+
+    /** Only generated QA control labels and geometry, scoped to the tag plus immediate relatives. */
+    private fun controlDiagnostics(node: AccessibilityNodeInfo): String {
+        val descendants = controlNodes(node).drop(1).take(12).joinToString("; ", transform = ::nodeDiagnostics)
+        return "tag={${nodeDiagnostics(node)}}; parent={${nodeDiagnostics(node.parent)}}; children=[$descendants]"
+    }
+
+    private fun nodeDiagnostics(candidate: AccessibilityNodeInfo?): String {
+        if (candidate == null) return "absent"
+        return "id=${candidate.viewIdResourceName},class=${candidate.className},text=${candidate.text}," +
+            "label=${candidate.contentDescription},click=${candidate.isClickable},selected=${candidate.isSelected}," +
+            "checkable=${candidate.isCheckable},checked=${candidate.isChecked},state=${candidate.stateDescription}," +
+            "visible=${candidate.isVisibleToUser},bounds=${Rect().also(candidate::getBoundsInScreen)}," +
+            "actions=${candidate.actionList.map { it.id }}"
+    }
 
     private fun visible(node: AccessibilityNodeInfo): Boolean {
         if (!node.isVisibleToUser) return false
