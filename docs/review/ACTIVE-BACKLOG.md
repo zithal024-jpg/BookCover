@@ -41,9 +41,15 @@ redesign silently disappeared. Before installing anything on the owner's phone:
    reader and outer cover, not only the feature under test.
 4. **Update the record below** in the same change as the install evidence.
 
-**Currently installed on `RFGL710TARJ`** (from tracker records, not re-read from the
-phone): F3 build `db379d4`, APK SHA-256 `769bc7cc…7726c622`, installed in place
-2026-10-27 14:51 (UTC−4) by Argon. It lacks S2 Library Home (`224b907`).
+**Currently installed on `RFGL710TARJ`:** integration merge `7ce3066` (local `main`
+`cf2c339` + GitHub `main` `af0695b`, including S2, F1–F4, BC-26, BC-28), APK SHA-256
+`17ea4c8f…19915e400`, installed in place 2026-10-27 16:29 (UTC−4) by Opus at the
+owner's request. Read back from the phone: installed `base.apk` hash matches,
+`versionCode` 6, `firstInstallTime` unchanged (2026-10-26 14:35). It replaced the F3
+build `db379d4` (installed 14:51), which `7ce3066` contains. Before install: 248 unit
+tests and lint passed; emulator Library Home, accessibility and BC-26 tests passed;
+`ReaderProcessDeathTest` is intermittent on the emulator (3 of 7 combined runs passed)
+with reader code identical to `db379d4`. Owner whole-app check pending.
 
 ## Active queue
 
