@@ -80,7 +80,7 @@ Use only the protected Windows device-test script. Keep the explicitly available
     -PhoneReleaseEvidence 'RECORDED PREVIOUS-HOLDER RELEASE AND OWNER AVAILABILITY'
 ```
 
-Use the same task ID as the matching build. The script reserves BUILD then PHONE and enforces the isolated QA target before any device operation. Do not bypass it with a direct connected-test Gradle command on another host.
+Use the same task ID as the matching build. Optional `-TestClass <fqcn[,fqcn...]>` runs focused QA test classes, and `-ToolRoot <path>` can be supplied to `Build.ps1` or `Test-Device.ps1` if `java` and `sdk` were provisioned inside a packaged Windows terminal's virtualized `%LOCALAPPDATA%\Packages\<PackageFamily>\LocalCache\Local\BookCoverBuild`. The script reserves BUILD then PHONE and enforces the isolated QA target before any device operation. Do not bypass it with a direct connected-test Gradle command on another host.
 
 **Never retarget connected instrumentation at the user's main app/package.** An earlier connected-debug run in this cycle triggered AGP uninstall cleanup and reset the main app's private data; the original provider-held EPUB files were not removed. See RESULTS.md for the actual incident/recovery record and any lost historical locators. The final QA variant is designed to prevent repeating that target mix-up. Connected test cleanup may remove the isolated QA app and its disposable data.
 
@@ -91,23 +91,25 @@ QA native XML reports are under the module output's `outputs/androidTest-results
 BookCover requires Android 11/API 30 or later. A phone/emulator without an available WindowArea rear presentation can evaluate the library and EPUB reader, but cannot establish the Samsung two-panel result.
 
 1. Enable USB debugging on a test device, connect it and authorize the computer. Device setup is a human action; do not assume ADB availability grants access to unrelated phone content.
-2. Check the connection, install the supplied or rebuilt APK, then launch:
+2. Check the connection, install the exact task-specific APK printed by `scripts\Build.ps1` (`output\BookCover-<task>-<hash>.apk`; note that `/path/to/BookCover-prototype.apk` is only for historical/archived review packages), then launch:
 
 ```sh
 adb devices -l
-adb -s DEVICE_SERIAL install -r /path/to/BookCover-prototype.apk
+adb -s DEVICE_SERIAL install -r output/BookCover-<task>-<hash>.apk
 adb -s DEVICE_SERIAL shell am start -n com.bookcover.diagnostic/.MainActivity
 ```
 
-The installed package name remains `com.bookcover.diagnostic`; its launcher label is **BookCover**. Existing compatible app data should remain when a same-key upgrade is installed with `-r`.
+The installed package name remains `com.bookcover.diagnostic`; its launcher label is **BookCover**. Existing compatible app data, imported books, covers, bookmarks, and Reading Streak history remain intact when a same-key upgrade is installed with `-r`.
 
-**Signing difference:** private signing keys are intentionally absent. A reviewer rebuild generates/uses the reviewer's own local Android debug key, which normally differs from the key used for the packaged APK or the user's existing installation. Android rejects an update signed with a different key. Do not uninstall the user's app or delete its books/progress to force an update. Use a separate emulator/device, or build a deliberately separate review application ID in a separate copy of the project. Retaining a single signing identity for later updates is a release-management task outside this archive.
+**Signing difference and failed-update recovery (never uninstall as the default fix):** Private signing keys are intentionally absent from repository archives. A reviewer rebuild generates/uses the local Android debug key, which differs from another machine's key. If `adb install -r` or the Android package installer fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE` ("package conflicts with an existing package") or `INSTALL_FAILED_VERSION_DOWNGRADE`:
+- **Stop immediately. Never uninstall `com.bookcover.diagnostic` or run `adb shell pm clear com.bookcover.diagnostic` as a default troubleshooting step**, because uninstalling permanently deletes the user's privately stored EPUB files, custom covers, unexported reading positions/bookmarks, and Reading Streak history (`library/reading-days.json`).
+- Verify the installed signature and `versionCode` with `adb -s DEVICE_SERIAL shell dumpsys package com.bookcover.diagnostic | grep -E "Signatures|versionCode"`, and rebuild with the matching signing key (or evaluate on a separate emulator/device or separate review `applicationId`).
 
-Manual installation is also possible by copying an APK to a test device, opening it from Files and allowing that installer source as needed. No Play Store publishing is performed by these instructions.
+Manual installation is also possible by copying the exact task APK to a test device, opening it from Files and choosing **Update** when prompted. No Play Store publishing is performed by these instructions.
 
 ## Evaluate the application
 
-Open a bundled original sample from the library, then import a local DRM-free EPUB through **Import EPUB**. The original selected file stays with its provider while BookCover stores its own copy. Use the final acceptance plan to test size/family reflow, position recovery, optional edge taps, native swipes, selection/links, fixed-layout behavior, automatic/manual library themes, persistence, contents/bookmarks and cover Start/Stop.
+Open a bundled original sample from the library, then import one or more local DRM-free EPUBs through **Import EPUB** (multi-select batch import is supported as of `BC-27`). The original selected files stay with their provider while BookCover stores private copies. Use the acceptance plan and [README.md](../../README.md) to evaluate size/family reflow, publisher styles, position recovery, optional edge taps (including RTL), volume-key turns, native swipes, in-book search (`BC-29`), Reading Streak (`RS-1`), fixed-layout behavior, automatic/manual library and page themes, contents/named bookmarks, cover Start/Stop, and **Settings → Backup → Export backup / Restore backup** (which exports/restores reading positions, bookmarks, and collections matched by SHA-256 book ID; EPUB files, custom covers, and Reading Streak `reading-days.json` are not included in the JSON backup).
 
 For the exterior-screen test, fully unfold a compatible phone and physically observe both panels while reading and changing settings. Android/Samsung may offer a consent dialog. Keep BookCover foreground. Capture human observation separately from session callbacks. An emulator or a screenshot alone cannot prove the user's physical panel stayed visible throughout an interaction sequence.
 

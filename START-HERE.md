@@ -1,20 +1,30 @@
 # Start with BookCover
 
-BookCover is now a local EPUB reader, version 0.4.0-prototype. The original
+BookCover is now a local EPUB reader, version 0.4.0-prototype (`versionCode` 6). The original
 diagnostic and Kindle-handoff instructions are preserved below as history.
 
-1. Read [the project overview](README.md) and the
+1. Read [the project overview](README.md), the
+   [active work queue](docs/review/ACTIVE-BACKLOG.md), and the
    [completion tracker](docs/review/EXPERT-PANEL-REVIEW.md) for current status.
 2. For a fresh build, use [the development guide](docs/DEVELOPMENT.md) and its
-   supported build helper. Use the exact APK (Android installer) path printed by
-   the successful build; old filenames under `output/` are historical artifacts.
-3. To update the owner's app, use the tested main APK with the same signing key
-   and install it over the existing app. Keep its library and settings: never
-   uninstall it or clear its data. If Android reports a signature mismatch, stop
-   and ask for help. Developer installation commands are in [CLAUDE.md](CLAUDE.md#build-and-test-windows-this-pc).
-4. Phone testing requires owner availability and the isolated QA app through
-   `scripts/Test-Device.ps1`; see the [task-resource guide](docs/BC-25-TASK-RESOURCES.md).
-   Only the owner looking at the physical outside screen verifies cover display.
+   supported build helper (`scripts/Build.ps1`). Use the exact APK (`output\BookCover-<task>-<hash>.apk`)
+   path printed by the successful build; old filenames under `output/` are historical artifacts.
+3. To update the owner's or a tester's app (`com.bookcover.diagnostic`), install in place over
+   the existing app (`adb install -r "<EXACT_APK_PATH>"` or **Update** from the phone's Files app)
+   using the same signing key. Keep its library and settings: **never uninstall it or clear its data**
+   as a troubleshooting step, because doing so permanently deletes privately stored EPUBs, covers,
+   unexported reading positions/bookmarks, and Reading Streak history. If Android reports a
+   signature mismatch (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`) or failed update, stop and check the
+   signing certificate—see [Tester Installation and Safe In-Place Update Guide](README.md#tester-installation-and-safe-in-place-update-guide)
+   and [CLAUDE.md](CLAUDE.md#build-and-test-windows-this-pc).
+4. Use **Settings → Backup → Export backup** to save a JSON backup of reading positions,
+   named bookmarks, and collections matched by SHA-256 book ID. Note that EPUB book files,
+   custom cover images, and Reading Streak history (`library/reading-days.json`) are not stored
+   inside the JSON backup; see [Backup, Restore, and Storage Behavior & Known Limitations](README.md#backup-restore-and-storage-behavior--known-limitations).
+5. Automated device testing requires owner availability (for physical phone runs) and targets
+   only the isolated QA app (`com.bookcover.diagnostic.qa`) through `scripts/Test-Device.ps1`;
+   see [the task-resource guide](docs/BC-25-TASK-RESOURCES.md). Only the owner looking at the
+   physical outside screen verifies exterior cover display.
 
 <details>
 <summary>Original diagnostic and Kindle-handoff guide (historical)</summary>

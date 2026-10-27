@@ -1,32 +1,50 @@
 # Building and maintaining BookCover
 
-For current scope and safety rules, read [CLAUDE.md](../CLAUDE.md) and the
+For current scope, release readiness, and safety rules, read [README.md](../README.md),
+[CLAUDE.md](../CLAUDE.md), the [active work queue](review/ACTIVE-BACKLOG.md), and the
 [completion tracker](review/EXPERT-PANEL-REVIEW.md). The
 [task-resource guide](BC-25-TASK-RESOURCES.md) is the detailed reference for
-guarded builds, QA tests and matching package evidence.
+guarded builds, isolated QA tests, and matching package evidence.
 
 From the repository folder on this Windows PC:
 
 ```powershell
-# Read-only: show the task-specific paths first.
+# Read-only: show the task-specific paths and current BUILD/PHONE lock state first.
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Build.ps1 -TaskId local -Plan
 # Build the app, run JVM tests and lint, with the helper's BUILD lock.
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Build.ps1 -TaskId local
 ```
 
 The build runs `assembleDebug testQaUnitTest lintDebug lintQa`. It uses the prepared
-tools under `%LOCALAPPDATA%\BookCoverBuild` and prints exact task-specific APK,
-checksum and source-evidence paths. Generated output and caches stay outside this
-OneDrive folder. `Build BookCover.cmd` is the interactive wrapper and pauses at
-the end; agents should call `scripts/Build.ps1` directly.
+tools under `%LOCALAPPDATA%\BookCoverBuild` and prints exact task-specific APK
+(`output\BookCover-<task>-<hash>.apk`), checksum, and source-evidence manifest paths.
+(If `java` and `sdk` were provisioned inside a packaged Windows app whose LocalAppData
+was virtualized under `%LOCALAPPDATA%\Packages\<PackageFamily>\LocalCache\Local\BookCoverBuild`,
+pass `-ToolRoot "<path-to-BookCoverBuild>"` to `scripts\Build.ps1` and `scripts\Test-Device.ps1`.)
+Generated output and caches stay outside this OneDrive folder. `Build BookCover.cmd`
+is the interactive desktop wrapper and pauses at the end; agents and scripts should
+call `scripts\Build.ps1` directly.
 
-Phone tests run only through `scripts/Test-Device.ps1`, with the matching task ID,
-an explicit device serial, recorded previous-holder release and owner availability.
-It acquires BUILD then PHONE and targets `com.bookcover.diagnostic.qa`. Never run
-connected tests against the owner's main app, uninstall it or clear its data.
-Use the current helper examples in the task-resource guide; old output/cache
-arguments below are historical. Only physical owner observation verifies the
-outside cover. Ordinary work follows the [autonomous agreement](../CLAUDE.md#autonomous-working-agreement).
+Device and emulator instrumentation tests run **only** through `scripts/Test-Device.ps1`:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-Device.ps1 `
+  -TaskId local `
+  -Serial <device-serial> `
+  -PhoneReleaseEvidence "Prior holder released PHONE; device unlocked and available"
+```
+
+`Test-Device.ps1` requires the matching `-TaskId`, an explicit `-Serial`, and a
+non-empty `-PhoneReleaseEvidence` note (plus optional `-TestClass <fqcn[,fqcn...]>`
+for focused QA classes). It acquires `BUILD` then `PHONE`, verifies that the target
+device is online and unlocked, and runs `connectedQaAndroidTest` against
+`com.bookcover.diagnostic.qa` only. **Never run connected tests against the owner's
+main app (`com.bookcover.diagnostic`), uninstall it, or clear its data.** To update
+an installed primary app after validation and owner approval, use `adb -s <serial> install -r "<EXACT_APK_PATH>"`
+and stop immediately if Android reports a signature mismatch (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`).
+Use the current helper examples in [the task-resource guide](BC-25-TASK-RESOURCES.md);
+old output/cache arguments below are historical. Only physical owner observation
+verifies the outside cover. Ordinary work follows the [autonomous agreement](../CLAUDE.md#autonomous-working-agreement).
 
 <details>
 <summary>Earlier toolchain, rebuild and diagnostic architecture notes (historical)</summary>
