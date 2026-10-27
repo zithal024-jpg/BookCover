@@ -51,6 +51,8 @@ class LibraryAccessibilityActivity : FragmentActivity() {
         private set
     internal var restoreRequests = 0
         private set
+    internal lateinit var libraryForTests: BookLibrary
+        private set
     internal var diagnosticRequests = 0
         private set
     private lateinit var settingsPreferences: SharedPreferences
@@ -79,6 +81,7 @@ class LibraryAccessibilityActivity : FragmentActivity() {
         lifecycleScope.launch {
             try {
                 val library = BookLibrary(isolated, ReadiumEngine(isolated))
+                libraryForTests = library
                 library.load()
                 val book = library.importSample("samples/lantern-keeper.epub").first
                 setContent {
