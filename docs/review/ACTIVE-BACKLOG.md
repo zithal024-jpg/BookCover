@@ -26,6 +26,25 @@ below. This document records work, not release readiness.
   uses isolated QA through the supported helper, required resource release evidence
   and owner availability.
 
+## Owner-phone installs
+
+Adopted 2026-10-27 after an in-place F3 install (from a branch without S2) replaced
+the owner-confirmed S2 Library Home build on the phone. No data was lost, but the
+redesign silently disappeared. Before installing anything on the owner's phone:
+
+1. **No-regression check:** confirm the candidate build's commit contains the last
+   installed commit below (`git merge-base --is-ancestor <installed> <candidate>`).
+   If it does not, stop and integrate first.
+2. **Integrated builds only:** install from a build containing current `main`
+   (local and GitHub reconciled), not from a feature branch that is behind it.
+3. **Whole-app owner check:** after installing, ask the owner to glance at Library,
+   reader and outer cover, not only the feature under test.
+4. **Update the record below** in the same change as the install evidence.
+
+**Currently installed on `RFGL710TARJ`** (from tracker records, not re-read from the
+phone): F3 build `db379d4`, APK SHA-256 `769bc7cc…7726c622`, installed in place
+2026-10-27 14:51 (UTC−4) by Argon. It lacks S2 Library Home (`224b907`).
+
 ## Active queue
 
 F1/F4 and S2 can proceed in parallel in separate data/activity and Library UI files.

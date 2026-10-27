@@ -73,7 +73,9 @@ That is deliberate: OneDrive breaks Android's resource merger.
   attached"); rerunning that class passes. Hardening the tests is still to do.
 - **Installing the owner's app:** `adb install -r EXACT_APK_PATH_PRINTED_BY_BUILD`
   updates it in place and keeps the library. adb is at
-  `%LOCALAPPDATA%\BookCoverBuild\sdk\platform-tools\adb.exe`.
+  `%LOCALAPPDATA%\BookCoverBuild\sdk\platform-tools\adb.exe`. Before installing,
+  follow [owner-phone installs](docs/review/ACTIVE-BACKLOG.md#owner-phone-installs):
+  the build must contain the currently installed commit, and the record is updated.
 
 ## Hard safety rules
 
