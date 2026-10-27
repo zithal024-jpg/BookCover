@@ -5,6 +5,7 @@ import android.content.ContextWrapper
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.view.WindowManager
+import android.content.res.Configuration
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.collectAsState
@@ -18,6 +19,7 @@ import com.bookcover.diagnostic.library.BookLibrary
 import com.bookcover.diagnostic.library.ReadiumEngine
 import com.bookcover.diagnostic.reader.EpubReaderScreen
 import com.bookcover.diagnostic.reader.EpubSession
+import com.bookcover.diagnostic.reader.installReadingKeyHandler
 import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.CompletableDeferred
@@ -40,8 +42,15 @@ class ReaderTestActivity : FragmentActivity() {
     override fun getSharedPreferences(name: String?, mode: Int): SharedPreferences =
         super.getSharedPreferences(if (name == "reader") TEST_PREFERENCES else name, mode)
 
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(newBase.createConfigurationContext(Configuration(newBase.resources.configuration).apply {
+            fontScale = fontScaleForTests
+        }))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(null)
+        installReadingKeyHandler { reader }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).apply {
@@ -107,6 +116,7 @@ class ReaderTestActivity : FragmentActivity() {
 
     companion object {
         const val EXTRA_FIXED_LAYOUT = "fixedLayout"
+        @Volatile internal var fontScaleForTests = 1f
         const val EXTRA_READING_PROGRESSION = "readingProgression"
         const val EXTRA_LANGUAGE = "language"
         const val EXTRA_IMAGE_PAGES = "imagePages"

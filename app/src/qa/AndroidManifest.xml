@@ -4,5 +4,7 @@
         <!-- Isolated QA renderer harness; absent from user debug/release builds and not exported. -->
         <activity android:name=".testing.ReaderTestActivity" android:exported="false"
             android:resizeableActivity="true" android:theme="@style/Theme.BookCover" />
+        <activity android:name=".testing.LibraryAccessibilityActivity" android:exported="false"
+            android:resizeableActivity="true" android:theme="@style/Theme.BookCover" />
     </application>
 </manifest>

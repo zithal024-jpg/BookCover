@@ -23,6 +23,7 @@ import com.bookcover.diagnostic.library.*
 import com.bookcover.diagnostic.reader.EpubReaderScreen
 import com.bookcover.diagnostic.reader.EpubSession
 import com.bookcover.diagnostic.reader.readerBackground
+import com.bookcover.diagnostic.reader.installReadingKeyHandler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -82,6 +83,7 @@ class MainActivity : FragmentActivity() {
         // Navigator restoration needs an open Publication. Reopen from our durable locator instead
         // of asking Android's fragment restoration to construct a navigator without its factory.
         super.onCreate(null)
+        installReadingKeyHandler { session }
         DiagnosticLog.init(this)
         library = BookLibrary.forApp(this)
         engine = library.engine

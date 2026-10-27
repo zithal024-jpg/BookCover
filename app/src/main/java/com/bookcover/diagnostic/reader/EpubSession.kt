@@ -12,6 +12,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import android.os.SystemClock
 import android.view.View
+import android.view.KeyEvent
 import com.bookcover.diagnostic.DiagnosticLog
 import com.bookcover.diagnostic.library.BookLibrary
 import com.bookcover.diagnostic.library.BookRecord
@@ -76,6 +77,10 @@ internal class EpubSession(
     var typographyUpdating by mutableStateOf(false)
         private set
     private val readerPreferences = activity.getSharedPreferences("reader", 0)
+    var volumeKeys by mutableStateOf(readerPreferences.getBoolean("volumeKeys", false))
+        private set
+    private val pageKeys = ReadingKeyPolicy()
+    private var keyTurnJob: Job? = null
     var comfort by mutableStateOf(readerPreferences.readingComfort())
         private set
     val supportsTypography = (publication.metadata.layout ?: Layout.REFLOWABLE) == Layout.REFLOWABLE
@@ -354,6 +359,35 @@ internal class EpubSession(
         activity.getSharedPreferences("reader", 0).edit().putBoolean("edgeTaps", enabled).apply()
     }
 
+    fun changeVolumeKeys(enabled: Boolean) {
+        volumeKeys = enabled
+        readerPreferences.edit().putBoolean("volumeKeys", enabled).apply()
+    }
+
+    /** Activity dispatch reaches this before WebView or Android's volume handling. */
+    fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val key = event.readingPageKey() ?: return false
+        if (event.action != KeyEvent.ACTION_DOWN && event.action != KeyEvent.ACTION_UP) return false
+        fun ready() = !closed && fragment.isAdded && !controlsVisible && !typographyUpdating &&
+            activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && activity.hasWindowFocus()
+        return pageKeys.handle(key, down = event.action == KeyEvent.ACTION_DOWN,
+            repeated = event.repeatCount > 0, canNavigate = ready() && event.hasNoModifiers(),
+            volumeEnabled = volumeKeys,
+            rightToLeft = fragment.settings.value.readingProgression == ReadingProgression.RTL) { turn ->
+            if (keyTurnJob?.isActive != true) keyTurnJob = activity.lifecycleScope.launch {
+                // Text selection belongs to the reader's selection toolbar, not page navigation.
+                try {
+                    if (fragment.currentSelection() == null && ready()) {
+                        when (turn) { ReadingPageTurn.NEXT -> next(); ReadingPageTurn.PREVIOUS -> previous() }
+                    }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) {
+                    DiagnosticLog.record("EPUB key turn unavailable: ${error.javaClass.simpleName}")
+                }
+            }
+        }
+    }
+
     fun changeTheme(value: String) {
         themeName = value
         activity.getSharedPreferences("reader", 0).edit().putString("theme", themeName).apply()
@@ -370,6 +404,7 @@ internal class EpubSession(
         closed = true
         locationJob?.cancel()
         chapterJob?.cancel()
+        keyTurnJob?.cancel()
         activity.lifecycle.removeObserver(readingLifecycle)
         fragment.view?.removeOnLayoutChangeListener(layoutListener)
         positions.flush()
