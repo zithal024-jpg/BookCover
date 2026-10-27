@@ -99,8 +99,12 @@ internal class EpubSession(
     // Reading streak: counts only while this reader is attached and the activity is resumed.
     private val readingTime = ReadingTimeTracker()
     private var readingTimeJob: Job? = null
+    private val viewportContinuity = ReadingViewportContinuity<Locator>()
+    private var viewportJob: Job? = null
+    private var restoringViewport = false
+    private var viewportSettled: (() -> Unit)? = null
     private val readingLifecycle = object : DefaultLifecycleObserver {
-        override fun onPause(owner: LifecycleOwner) { readingPace.pause(); search.dismiss(); record(readingTime.pause(SystemClock.elapsedRealtime())) }
+        override fun onPause(owner: LifecycleOwner) { readingPace.pause(); record(readingTime.pause(SystemClock.elapsedRealtime())) }
         override fun onResume(owner: LifecycleOwner) { readingPace.pause(); if (fragment.isAdded && !closed) readingTime.resume(SystemClock.elapsedRealtime()) }
     }
     private val layoutListener = View.OnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
@@ -108,6 +112,7 @@ internal class EpubSession(
             readingPace.pause()
             chapters.invalidateLayout()
             currentLocator?.let(::refreshChapter)
+            if (viewportContinuity.pending != null) restoreViewportWhenSettled()
         }
     }
     private var typographyJob: Job? = null
@@ -139,6 +144,10 @@ internal class EpubSession(
             },
             listener = object : EpubNavigatorFragment.Listener {
                 override fun onJumpToLocator(locator: Locator) {
+                    if (!restoringViewport) {
+                        invalidateViewportAnchor()
+                        viewportContinuity.remember(locator, viewportContinuity.generation)
+                    }
                     readingPace.pause()
                     val fragments = locator.locations.fragments
                     preferredContentsIndex = contentsEntries.indexOfFirst { entry ->
@@ -165,6 +174,7 @@ internal class EpubSession(
                 // A user who navigates during reflow must not be pulled back by an old anchor.
                 if (event.type == DragEvent.Type.Start) {
                     readerActive()
+                    invalidateViewportAnchor()
                     pendingContentsIndex = null
                     if (typographyUpdating) typographyAnchorInvalidated = true
                 }
@@ -187,8 +197,8 @@ internal class EpubSession(
                         controlsVisible = !controlsVisible
                         DiagnosticLog.record("EPUB controls ${if (controlsVisible) "revealed" else "hidden"}; same host activity")
                     }
-                    ReadingTapAction.PREVIOUS -> { pendingContentsIndex = null; fragment.goBackward(animated = true); DiagnosticLog.record("EPUB edge completed tap: backward") }
-                    ReadingTapAction.NEXT -> { pendingContentsIndex = null; fragment.goForward(animated = true); DiagnosticLog.record("EPUB edge completed tap: forward") }
+                    ReadingTapAction.PREVIOUS -> { invalidateViewportAnchor(); pendingContentsIndex = null; fragment.goBackward(animated = true); DiagnosticLog.record("EPUB edge completed tap: backward") }
+                    ReadingTapAction.NEXT -> { invalidateViewportAnchor(); pendingContentsIndex = null; fragment.goForward(animated = true); DiagnosticLog.record("EPUB edge completed tap: forward") }
                     ReadingTapAction.NONE -> return false
                 }
                 return true
@@ -207,10 +217,22 @@ internal class EpubSession(
         }
         locationJob = activity.lifecycleScope.launch {
             fragment.currentLocator.collect { locator ->
-                readerActive()
+                // Automatic repagination/restoration is not a new user page turn.
+                if (viewportContinuity.pending == null) readerActive()
                 currentLocator = locator
                 progress = locator.locations.totalProgression ?: progress
-                if (!typographyUpdating) positions.submit(locator)
+                if (!typographyUpdating && viewportContinuity.pending == null) {
+                    val generation = viewportContinuity.generation
+                    // Keep the last precise passage during this asynchronous query (including
+                    // resume notifications for an unchanged page). Explicit navigation clears it.
+                    val visible = withTimeoutOrNull(1_000) { fragment.visibleReadingAnchor() }
+                        ?: viewportContinuity.anchor ?: locator
+                    val semantic = visible.copy(locations = visible.locations.copy(
+                        totalProgression = locator.locations.totalProgression, position = locator.locations.position))
+                    viewportContinuity.remember(semantic, generation)
+                    if (generation == viewportContinuity.generation && viewportContinuity.pending == null)
+                        positions.submit(semantic)
+                }
                 refreshChapter(locator)
                 DiagnosticLog.record("EPUB position=${(progress * 100).toInt()}%; same host activity")
             }
@@ -253,6 +275,7 @@ internal class EpubSession(
 
     fun goToContents(index: Int) {
         contentsEntries.getOrNull(index)?.let {
+            invalidateViewportAnchor()
             readingPace.pause(); preferredContentsIndex = index
             val destination = chapters.locatorForContents(index)
             pendingContentsIndex = if (destination == null) index else null
@@ -262,8 +285,68 @@ internal class EpubSession(
         }
     }
 
+    /** Called before dispatching a display configuration change; never creates another navigator. */
+    fun viewportChanging(onSettled: () -> Unit) {
+        if (closed || !fragment.isAdded) { onSettled(); return }
+        viewportSettled = onSettled
+        readingPace.pause()
+        viewportContinuity.begin(typographyAnchor ?: currentLocator)
+        restoreViewportWhenSettled()
+    }
+
+    private fun invalidateViewportAnchor() {
+        viewportJob?.cancel()
+        viewportContinuity.navigated()
+        viewportSettled?.invoke(); viewportSettled = null
+    }
+
+    private fun restoreViewportWhenSettled() {
+        viewportJob?.cancel()
+        val generation = viewportContinuity.generation
+        viewportJob = activity.lifecycleScope.launch {
+            try {
+                delay(200) // Coalesce the new window bounds and Compose's density/layout update.
+                activity.lifecycle.currentStateFlow.first { it.isAtLeast(Lifecycle.State.RESUMED) }
+                withTimeoutOrNull(3_000) {
+                    var previous: String? = null
+                    var stable = 0
+                    while (stable < 3 || typographyUpdating) {
+                        val geometry = fragment.evaluateJavascript("[innerWidth,innerHeight,document.fonts.status]")
+                        stable = if (geometry != null && geometry == previous && !geometry.contains("loading")) stable + 1 else 0
+                        previous = geometry
+                        delay(60)
+                    }
+                }
+                val anchor = viewportContinuity.pending?.takeIf {
+                    generation == viewportContinuity.generation && fragment.currentLocator.value.href == it.href
+                } ?: run {
+                    if (generation == viewportContinuity.generation) {
+                        viewportContinuity.navigated()
+                        viewportSettled?.invoke(); viewportSettled = null
+                    }
+                    return@launch
+                }
+                restoringViewport = true
+                val restored = try { fragment.go(anchor, animated = false) } finally { restoringViewport = false }
+                delay(200)
+                viewportContinuity.complete(generation)?.let { positions.submit(it) }
+                currentLocator?.let(::refreshChapter)
+                DiagnosticLog.record("EPUB viewport resized in place; semantic passage restored=$restored")
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                viewportContinuity.complete(generation)
+                DiagnosticLog.record("EPUB viewport restoration failed: ${error.javaClass.simpleName}")
+            } finally {
+                if (generation == viewportContinuity.generation && viewportContinuity.pending == null) {
+                    viewportSettled?.invoke(); viewportSettled = null
+                }
+            }
+        }
+    }
+
     fun goToBookmark(value: String) {
         val locator = runCatching { Locator.fromJSON(JSONObject(value)) }.getOrNull() ?: return
+        invalidateViewportAnchor()
         readingPace.pause()
         pendingContentsIndex = null
         fragment.go(locator, animated = false)
@@ -282,6 +365,7 @@ internal class EpubSession(
             search.navigationFailed()
             return false
         }
+        invalidateViewportAnchor()
         readingPace.pause()
         pendingContentsIndex = null
         preferredContentsIndex = null
@@ -295,7 +379,8 @@ internal class EpubSession(
     }
 
     suspend fun bookmarkLocator(): Locator? {
-        val locator = withTimeoutOrNull(1_000) { fragment.visibleReadingAnchor() } ?: currentLocator ?: return null
+        val locator = withTimeoutOrNull(1_000) { fragment.visibleReadingAnchor() }
+            ?: viewportContinuity.anchor ?: currentLocator ?: return null
         return locator.copy(title = chapterStatus?.title ?: locator.title)
     }
 
@@ -350,7 +435,7 @@ internal class EpubSession(
             try {
                 // Keep the same semantic anchor for the entire adjustment burst, rather than
                 // repeatedly capturing a page that has already moved during repagination.
-                if (typographyAnchor == null) typographyAnchor = fragment.visibleReadingAnchor() ?: currentLocator
+                if (typographyAnchor == null) typographyAnchor = fragment.visibleReadingAnchor() ?: viewportContinuity.anchor ?: currentLocator
                 delay(100)
                 val requested = preferences()
                 val requestedFont = requested.fontFamily?.name.orEmpty()
@@ -447,10 +532,14 @@ internal class EpubSession(
         fragment.submitPreferences(preferences())
     }
 
-    fun next() { pendingContentsIndex = null; fragment.goForward(animated = true); controlsVisible = false }
-    fun previous() { pendingContentsIndex = null; fragment.goBackward(animated = true); controlsVisible = false }
+    fun next() { invalidateViewportAnchor(); pendingContentsIndex = null; fragment.goForward(animated = true); controlsVisible = false }
+    fun previous() { invalidateViewportAnchor(); pendingContentsIndex = null; fragment.goBackward(animated = true); controlsVisible = false }
+    val restorationLocator: Locator? get() = viewportContinuity.pending ?: viewportContinuity.anchor ?: currentLocator
     /** Saves a waiting reading position now, e.g. when the app goes to the background. */
-    fun flushPosition() = positions.flush()
+    fun flushPosition() {
+        restorationLocator?.let(positions::submit)
+        positions.flush()
+    }
 
     private fun readerActive() = record(readingTime.activity(SystemClock.elapsedRealtime()))
 
@@ -474,9 +563,11 @@ internal class EpubSession(
         locationJob?.cancel()
         chapterJob?.cancel()
         keyTurnJob?.cancel()
+        viewportJob?.cancel()
+        viewportSettled = null
         activity.lifecycle.removeObserver(readingLifecycle)
         fragment.view?.removeOnLayoutChangeListener(layoutListener)
-        positions.flush()
+        flushPosition()
         typographyJob?.cancel()
         if (!activity.supportFragmentManager.isDestroyed && fragment.isAdded) {
             runCatching { activity.supportFragmentManager.beginTransaction().remove(fragment).commitNowAllowingStateLoss() }

@@ -1,6 +1,7 @@
 package com.bookcover.diagnostic
 
 import android.os.Bundle
+import android.content.res.Configuration
 import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -45,6 +46,8 @@ class MainActivity : FragmentActivity() {
     private var libraryTheme by mutableStateOf("automatic")
     private var coverBookId: String? = null
     private val preferences by lazy { getSharedPreferences("reader", 0) }
+    private var restoredCover: Pair<Boolean, Long>? = null
+    private var restoredReaderLocator: String? = null
 
     // BC-27: one or many books; progress, Stop and the final summary while they import one at a time.
     private var importProgress by mutableStateOf<ImportProgress?>(null)
@@ -90,11 +93,15 @@ class MainActivity : FragmentActivity() {
         library = BookLibrary.forApp(this)
         engine = library.engine
         exterior = ExteriorCoverController(this, lifecycleScope)
+        restoredCover = savedInstanceState?.takeIf { it.getString("openBook") != null && it.containsKey("coverRequested") }?.let {
+            it.getBoolean("coverRequested") to it.getLong("coverDeadline")
+        }
         autoCover = preferences.getBoolean("autoCover", true)
         timer = preferences.getInt("coverTimer", 30).takeIf { it in listOf(0, 30, 60) } ?: 30
         libraryTheme = savedLibraryTheme(preferences.getString("libraryTheme", null))
         WindowCompat.setDecorFitsSystemWindows(window, false)
         reopeningBookId = savedInstanceState?.getString("openBook")
+        restoredReaderLocator = savedInstanceState?.getString("openLocator").takeIf { reopeningBookId != null }
         if (reopeningBookId != null) setReadingWindow(true)
         setContent {
             val books by library.books.collectAsState()
@@ -129,7 +136,7 @@ class MainActivity : FragmentActivity() {
                     onLibraryTheme = { libraryTheme = it; preferences.edit().putString("libraryTheme", it).apply() },
                     importProgress = importProgress, onStopImport = { importCancellation?.cancel() }, coverColors = coverColors)
                 else EpubReaderScreen(current, books.firstOrNull { it.id == current.book.id } ?: current.book,
-                    exterior.active, exterior.busy, exterior.stopPending, exterior.available && !busy,
+                    exterior.active, exterior.busy || exterior.requested, exterior.stopPending, exterior.available && !busy,
                     message + "\n" + exterior.status,
                     onStartCover = { exterior.start(timer) }, onStopCover = { exterior.stop("reader Stop button") },
                     onHome = ::goHome, onChooseCover = {
@@ -170,6 +177,8 @@ class MainActivity : FragmentActivity() {
             } finally {
                 // Whatever happened, never leave the plain reopening screen in place.
                 reopeningBookId = null
+                restoredCover = null
+                restoredReaderLocator = null
                 if (session == null) setReadingWindow(false)
             }
         }
@@ -215,7 +224,11 @@ class MainActivity : FragmentActivity() {
         val publication = withContext(Dispatchers.IO) { engine.open(library.epubFile(book)) }
         try {
             exterior.artwork = withContext(Dispatchers.IO) { CoverArtwork.from(library.coverBitmap(book)) }
-            val current = EpubSession(this, library.book(book.id) ?: book, publication, library,
+            val record = library.book(book.id) ?: book
+            // The Bundle is the immediate recreation snapshot; disk saves may still be finishing.
+            val restoredRecord = restoredReaderLocator?.takeIf { book.id == reopeningBookId }
+                ?.let { record.copy(locator = it) } ?: record
+            val current = EpubSession(this, restoredRecord, publication, library,
                 preferences.getFloat("fontScale", 1.0f).toDouble(), preferences.getString("theme", "Paper") ?: "Paper",
                 report = { message = it }, initialFontId = preferences.getString("fontId", "serif") ?: "serif",
                 initialEdgeTaps = preferences.getBoolean("edgeTaps", false))
@@ -224,7 +237,10 @@ class MainActivity : FragmentActivity() {
             setReadingWindow(true)
             message = "Swipe left/right to turn pages. Tap the middle for controls."
             DiagnosticLog.record("Opened local EPUB in host activity; metadata omitted")
-            if (autoCover && exterior.available) exterior.start(timer)
+            val previousCover = restoredCover
+            restoredCover = null
+            if (previousCover != null) exterior.restore(previousCover.first, previousCover.second)
+            else if (autoCover && exterior.available) exterior.start(timer)
         } catch (error: Exception) { publication.close(); throw error }
     }
 
@@ -259,7 +275,23 @@ class MainActivity : FragmentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("openBook", session?.book?.id ?: reopeningBookId)
+        outState.putString("openLocator", session?.restorationLocator?.toJSON()?.toString() ?: restoredReaderLocator)
+        outState.putBoolean("coverRequested", exterior.requested)
+        outState.putLong("coverDeadline", exterior.deadline)
+        session?.flushPosition()
         super.onSaveInstanceState(outState)
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        // Freeze the last visible semantic passage before the navigator receives the new viewport.
+        exterior.viewportChanging()
+        session?.viewportChanging { exterior.viewportSettled() } ?: exterior.viewportSettled()
+        super.onConfigurationChanged(newConfig)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        exterior.hostResumed()
     }
 
     override fun onStop() {

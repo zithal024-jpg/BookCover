@@ -1,6 +1,7 @@
 package com.bookcover.diagnostic.reader
 
 import org.json.JSONObject
+import kotlinx.coroutines.delay
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.shared.ExperimentalReadiumApi
 import org.readium.r2.shared.publication.Locator
@@ -12,30 +13,54 @@ import org.readium.r2.shared.publication.Locator
  */
 @OptIn(ExperimentalReadiumApi::class)
 internal suspend fun EpubNavigatorFragment.visibleReadingAnchor(): Locator? {
+    repeat(3) {
+        val anchor = visibleReadingAnchorAttempt()
+        if (anchor != null && (anchor.locations["cssSelector"] == null ||
+                anchor.text.highlight.isNullOrBlank() || anchor.text.before != null)) return anchor
+        // Repagination/resume can move the viewport between the two public DOM queries.
+        // Never publish an unrefined text block whose beginning may be on the previous page.
+        delay(40)
+    }
+    return null
+}
+
+@OptIn(ExperimentalReadiumApi::class)
+private suspend fun EpubNavigatorFragment.visibleReadingAnchorAttempt(): Locator? {
     val block = firstVisibleElementLocator() ?: return null
     val selector = block.locations["cssSelector"] as? String ?: return block
     val result = evaluateJavascript("""
         (function(){try {
             var block=document.querySelector(${JSONObject.quote(selector)});
-            if(!block || !document.caretRangeFromPoint) return null;
+            if(!block) return null;
+            function visible(range) {
+                var rects=range.getClientRects();
+                for(var i=0;i<rects.length;i++) {
+                    var r=rects[i];
+                    if(r.width>0 && r.height>0 && r.right>1 && r.left<innerWidth-1 && r.bottom>1 && r.top<innerHeight-1) return true;
+                }
+                return false;
+            }
             var walker=document.createTreeWalker(block,NodeFilter.SHOW_TEXT), node, count=0;
             while((node=walker.nextNode()) && count++<128) {
                 if(!node.data.trim()) continue;
                 var range=document.createRange(); range.selectNodeContents(node);
-                var rects=range.getClientRects();
-                for(var i=0;i<rects.length && i<512;i++) {
-                    var r=rects[i];
-                    if(r.width<=0 || r.height<=0 || r.right<=1 || r.left>=innerWidth-1 || r.bottom<=1 || r.top>=innerHeight-1) continue;
-                    var x=Math.max(1,r.left)+Math.min(2,(Math.min(innerWidth-1,r.right)-Math.max(1,r.left))/2);
-                    var y=Math.max(1,r.top)+Math.min(r.height/2,(Math.min(innerHeight-1,r.bottom)-Math.max(1,r.top))/2);
-                    var caret=document.caretRangeFromPoint(x,y);
-                    if(!caret || caret.startContainer.nodeType!==Node.TEXT_NODE || !block.contains(caret.startContainer)) continue;
-                    var text=caret.startContainer.data, start=caret.startOffset;
-                    while(start<text.length && /\s/.test(text.charAt(start))) start++;
-                    var quote=text.slice(start,start+64).trimEnd();
-                    if(!quote) continue;
-                    return {before:text.slice(Math.max(0,start-64),start),highlight:quote,after:text.slice(start+quote.length,start+quote.length+64)};
+                if(!visible(range)) continue;
+                // Prefix visibility is monotonic. Locate the first visible character without
+                // caret hit-testing, which can select another column or fail on clipped text/RTL.
+                var text=node.data, low=0, high=text.length-1;
+                while(low<high) {
+                    var mid=Math.floor((low+high)/2);
+                    range.setStart(node,0); range.setEnd(node,mid+1);
+                    if(visible(range)) high=mid; else low=mid+1;
                 }
+                var start=low;
+                while(start<text.length && /\s/.test(text.charAt(start))) start++;
+                if(start>=text.length) continue;
+                range.setStart(node,start); range.setEnd(node,start+1);
+                if(!visible(range)) continue;
+                var quote=text.slice(start,start+64).trimEnd();
+                if(!quote) continue;
+                return {before:text.slice(Math.max(0,start-64),start),highlight:quote,after:text.slice(start+quote.length,start+quote.length+64)};
             }
             return null;
         } catch(e) {return null;}})()

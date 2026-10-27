@@ -10,6 +10,7 @@ import android.graphics.Bitmap
 import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.ImageView
@@ -59,6 +60,9 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
     private var session: WindowAreaSessionPresenter? = null
     private var request = 0
     private var timeout: Runnable? = null
+    private val continuation = CoverSessionContinuation()
+    val requested get() = continuation.requested
+    val deadline get() = continuation.deadline
     var artwork: CoverArtwork? = null
     var active by mutableStateOf(false); private set
     var busy by mutableStateOf(false); private set
@@ -76,12 +80,14 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
         DiagnosticLog.record("Exterior controller; WindowManager extension=${WindowSdkExtensions.getInstance().extensionVersion}; brightness/AOD shelved")
         scope.launch {
             controller.windowAreaInfos.collect { list ->
+                val wasAvailable = available
                 areas = list
                 available = area() != null
                 capability = list.firstOrNull { it.type == WindowAreaInfo.Type.TYPE_REAR_FACING }
                     ?.getCapability(WindowAreaCapability.Operation.OPERATION_PRESENT_ON_AREA)?.status?.toString()
                     ?: "UNSUPPORTED"
                 DiagnosticLog.record("Exterior capability=$capability")
+                if (available && !wasAvailable && continuation.resumePending) resumeCover()
             }
         }
     }
@@ -93,12 +99,40 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
 
     fun start(timerMinutes: Int) {
         if (busy || destroyed || artwork == null) return
+        continuation.start(timerMinutes, SystemClock.elapsedRealtime())
+        openSession()
+    }
+
+    fun restore(wasRequested: Boolean, savedDeadline: Long) {
+        continuation.restore(wasRequested, savedDeadline, SystemClock.elapsedRealtime())
+        resumeCover()
+    }
+
+    fun viewportChanging() = continuation.displayChanging(suspended = !busy)
+    fun viewportSettled() {
+        continuation.displaySettled()
+        if (continuation.resumePending) resumeCover()
+    }
+    fun hostResumed() { if (continuation.resumePending) resumeCover() }
+
+    private fun resumeCover() {
+        if (!continuation.requested || destroyed) return
+        if (continuation.remaining(SystemClock.elapsedRealtime()) == 0L) { stop("cover timer"); return }
+        openSession()
+    }
+
+    private fun openSession() {
+        if (busy || destroyed || !continuation.requested || artwork == null || !activity.lifecycleIsStarted()) return
         val area = area() ?: run { status = "The outside screen isn't available right now. Keep the phone unfolded and try again."; return }
         val token = ++request
+        continuation.presenting()
         busy = true; active = false; stopPending = false
         status = "Opening the outside cover. Accept Android's display dialog if offered."
-        if (timerMinutes > 0) timeout = Runnable { stop("$timerMinutes-minute cover timer") }.also { handler.postDelayed(it, timerMinutes * 60_000L) }
-        DiagnosticLog.record("Exterior start request=$token; timerMinutes=$timerMinutes; same reader activity")
+        timeout?.let(handler::removeCallbacks)
+        timeout = continuation.remaining(SystemClock.elapsedRealtime())?.let { remaining ->
+            Runnable { stop("cover timer") }.also { handler.postDelayed(it, remaining) }
+        }
+        DiagnosticLog.record("Exterior start request=$token; original cover deadline retained; same reader activity")
         try {
             controller.presentContentOnWindowArea(area.token, activity, ContextCompat.getMainExecutor(activity), object : WindowAreaPresentationSessionCallback {
                 override fun onSessionStarted(presenter: WindowAreaSessionPresenter) {
@@ -126,22 +160,27 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
                             }
                         }
                         active = true
-                        status = if (timerMinutes > 0) "Outside cover on · $timerMinutes-minute timer" else "Outside cover on · stop from reading controls"
+                        status = if (continuation.deadline > 0L) "Outside cover on · timer running" else "Outside cover on · stop from reading controls"
                         DiagnosticLog.record("Exterior onSessionStarted request=$token; EPUB reading stays inside same activity")
                     } catch (error: Exception) { DiagnosticLog.record("Exterior render failed: ${error.javaClass.simpleName}"); stop("render error") }
                 }
                 override fun onSessionEnded(t: Throwable?) {
                     DiagnosticLog.record("Exterior onSessionEnded request=$token: ${t?.javaClass?.simpleName ?: "no detailed system reason"}")
                     if (token == request) {
-                        timeout?.let(handler::removeCallbacks); timeout = null; session = null
+                        session = null
                         busy = false; active = false; stopPending = false
                         status = "Outside cover is off. Reading can continue; restart it from controls if needed."
+                        if (continuation.systemEnded(t != null)) resumeCover()
+                        else if (!continuation.requested) { timeout?.let(handler::removeCallbacks); timeout = null }
+                        if (continuation.requested && !busy)
+                            status = "Outside cover paused. It will resume after the display changes; you can stop it from controls."
                     }
                 }
                 override fun onContainerVisibilityChanged(isVisible: Boolean) { DiagnosticLog.record("Exterior visible=$isVisible") }
             })
         } catch (error: Exception) {
             timeout?.let(handler::removeCallbacks); timeout = null
+            continuation.stop()
             busy = false; active = false; stopPending = false
             status = "The outside cover couldn't start. Reading is unaffected; try again from reading controls."
             DiagnosticLog.record("Outside cover could not start: ${error.javaClass.simpleName}")
@@ -149,9 +188,10 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
     }
 
     fun stop(reason: String) {
+        continuation.stop()
+        timeout?.let(handler::removeCallbacks); timeout = null
         if (!busy || stopPending) return
         stopPending = true; active = false
-        timeout?.let(handler::removeCallbacks); timeout = null
         status = "Stopping outside cover…"
         DiagnosticLog.record("Exterior app stop requested: $reason")
         runCatching { session?.close() }.onFailure { DiagnosticLog.record("Exterior close failed: ${it.javaClass.simpleName}") }
@@ -170,3 +210,6 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
         runCatching { activity.unregisterReceiver(screenOff) }
     }
 }
+
+private fun Activity.lifecycleIsStarted() =
+    (this as? androidx.lifecycle.LifecycleOwner)?.lifecycle?.currentState?.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED) == true

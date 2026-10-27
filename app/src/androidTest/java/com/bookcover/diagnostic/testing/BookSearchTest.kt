@@ -140,6 +140,8 @@ class BookSearchTest {
                 main { (reader.fragment.currentLocator.value.locations.progression ?: 0.0) > 0.0 }
         }
         val (location, offset) = settledReadingLocation()
+        val savedPassage = main { reader.restorationLocator!!.toJSON() }
+        val selector = savedPassage.getJSONObject("locations").getString("cssSelector")
         main { reader.flushPosition(); reader.openSearch() }
         timedQuery(SearchEpubFixture.LATE_PHRASE)
         val discarded = results().single()
@@ -153,11 +155,21 @@ class BookSearchTest {
             automation.windows.none { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
         }
         val dismissedLocation = settledReadingLocation()
-        assertEquals("Closing search with the keyboard open leaves the Readium locator unchanged", location, dismissedLocation.first)
+        val original = JSONObject(location)
+        val dismissed = JSONObject(dismissedLocation.first)
+        assertEquals("Closing search stays in the same resource", original.getString("href"), dismissed.getString("href"))
+        // WebView can round the same page's fractional progression when the IME changes height.
+        assertEquals("Closing search keeps the same reading point", original.getJSONObject("locations").getDouble("progression"),
+            dismissed.getJSONObject("locations").getDouble("progression"), 0.0001)
         assertEquals("Closing search with the keyboard open leaves the visible page unchanged", offset, dismissedLocation.second, 1.0)
         assertFalse("A discarded result cannot navigate after dismissal", main { reader.goToSearchResult(discarded) })
         waitFor("the original position saves normally") {
-            main { host.library.book(reader.book.id)?.locator == location }
+            main { host.library.book(reader.book.id)?.locator }?.let { value ->
+                val saved = JSONObject(value)
+                saved.getString("href") == original.getString("href") &&
+                    saved.getJSONObject("locations").optString("cssSelector") == selector &&
+                    saved.getJSONObject("text").optString("highlight").isNotBlank()
+            } == true
         }
         main { reader.openSearch() }
         assertEquals(BookSearchStatus.EMPTY, main { reader.search.state.value.status })
