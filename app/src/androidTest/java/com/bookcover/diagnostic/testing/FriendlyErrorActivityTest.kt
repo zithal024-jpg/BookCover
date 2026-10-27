@@ -24,6 +24,7 @@ import com.bookcover.diagnostic.library.ReadiumEngine
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.UUID
+import java.util.concurrent.TimeoutException
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.*
@@ -166,7 +167,15 @@ class FriendlyErrorActivityTest {
     }
 
     private fun assertVisibleMessage(expected: String) = waitFor("visible message: $expected") {
-        visibleTexts().any { it == expected }
+        if (visibleTexts().none { it == expected }) false
+        else {
+            // Accessibility layout can arrive before the return-to-activity window animation ends.
+            try {
+                instrumentation.waitForIdleSync()
+                instrumentation.uiAutomation.waitForIdle(500, 5_000)
+                visibleTexts().any { it == expected }
+            } catch (_: TimeoutException) { false }
+        }
     }
 
     /** Inspect the rendered Android tree, not messageForTests or readerMessage(). Exclude off-screen nodes. */
@@ -174,10 +183,13 @@ class FriendlyErrorActivityTest {
         val root = instrumentation.uiAutomation.rootInActiveWindow ?: return emptyList()
         if (root.packageName?.toString() != target.packageName) return emptyList()
         val window = Rect().also(root::getBoundsInScreen)
+        val metrics = target.resources.displayMetrics
+        val screen = Rect(0, 0, metrics.widthPixels, metrics.heightPixels)
         val texts = mutableListOf<String>()
         fun visit(node: AccessibilityNodeInfo) {
             val bounds = Rect().also(node::getBoundsInScreen)
-            if (node.isVisibleToUser && !bounds.isEmpty && window.contains(bounds)) node.text?.toString()?.let(texts::add)
+            if (node.isVisibleToUser && !bounds.isEmpty && window.contains(bounds) && screen.contains(bounds))
+                node.text?.toString()?.let(texts::add)
             for (index in 0 until node.childCount) node.getChild(index)?.let(::visit)
         }
         visit(root)
