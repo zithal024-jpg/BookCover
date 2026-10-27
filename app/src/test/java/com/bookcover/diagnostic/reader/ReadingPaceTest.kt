@@ -476,4 +476,45 @@ class ReadingPaceTest {
         assertTrue("Held-out B expected 7..8 min, got $estB", estB in 7..8)
         assertEquals(9, legacyEstB)
     }
+
+    @Test fun veryLongBookWithTinyPageStepsStillLearnsPace() {
+        // 20,000-screen book: each page is 0.00005 of the publication, read every 15s.
+        val pace = ReadingPace()
+        var point = 0.5
+        var now = 0L
+        pace.observe(point, now, true)
+        repeat(4) {
+            point += 0.00005
+            now += 15_000L
+            pace.observe(point, now, true)
+        }
+        // 0.0002/min; 100 screens (0.005) left = 25 minutes.
+        assertEquals(25, pace.remainingMinutes(point, point + 0.005))
+    }
+
+    @Test fun reReadMarkSurvivesControlsPauseButNotAFarJump() {
+        val pace = ReadingPace()
+        // Read to 0.10 at 0.005 per 15s, flip back two pages, open and close controls.
+        var now = 0L
+        for (step in 0..4) pace.observe(0.08 + step * 0.005, now + step * 15_000L, true)
+        now += 60_000L
+        assertEquals(5, pace.remainingMinutes(0.10, 0.20))
+        pace.observe(0.09, now + 5_000L, true)
+        pace.observe(0.09, now + 6_000L, false)
+        // Flipping forward over already-read pages after the pause is still not new reading.
+        pace.observe(0.095, now + 9_500L, true)
+        pace.observe(0.10, now + 13_000L, true)
+        assertEquals(5, pace.remainingMinutes(0.10, 0.20))
+
+        // A far backward jump (Contents) after the pause drops the mark, so slower reading
+        // there counts instead of being ignored until the old position is reached again.
+        val jumped = ReadingPace()
+        for (step in 0..4) jumped.observe(0.40 + step * 0.005, step * 15_000L, true)
+        jumped.observe(0.415, 65_000L, true)
+        jumped.pause()
+        now = 100_000L
+        for (step in 0..6) jumped.observe(0.10 + step * 0.005, now + step * 30_000L, true)
+        val estimate = jumped.remainingMinutes(0.13, 0.23)!!
+        assertTrue("Expected the slower 10-minute pace to dominate, got $estimate", estimate >= 8)
+    }
 }

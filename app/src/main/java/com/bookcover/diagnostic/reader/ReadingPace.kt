@@ -16,7 +16,8 @@ internal class ReadingPace {
         const val MIN_INTERVAL_MILLIS = 3_000L
         const val MAX_INTERVAL_MILLIS = 300_000L
         const val UNCHANGED_POINT_EPSILON = 1e-6
-        const val MIN_INTERVAL_DISTANCE = 0.0002
+        /** One screen of a ~100,000-screen book; larger floors silence estimates in long books. */
+        const val MIN_INTERVAL_DISTANCE = 0.00001
         const val MAX_INTERVAL_DISTANCE = 0.10
         /** At most 1% of the full publication per second (60%/min); rejects coalesced flip bursts. */
         const val MAX_PACE_PER_MILLIS = 0.01 / 1_000.0
@@ -41,11 +42,11 @@ internal class ReadingPace {
     private var previousTime: Long? = null
     private var retraceTarget: Double? = null
 
-    /** Breaks the candidate interval while keeping previously learned pace for this session. */
+    /** Breaks the candidate interval while keeping previously learned pace for this session.
+     * A pending re-read mark survives so opening controls mid-retrace does not count old pages. */
     fun pause() {
         previousPoint = null
         previousTime = null
-        retraceTarget = null
     }
 
     fun observe(point: Double, nowMillis: Long, eligible: Boolean) {
@@ -59,7 +60,14 @@ internal class ReadingPace {
             abs(point - beforePoint) <= UNCHANGED_POINT_EPSILON) return
         previousPoint = point
         previousTime = nowMillis
-        if (beforePoint == null || beforeTime == null || nowMillis <= beforeTime) return
+        if (beforePoint == null || beforeTime == null) {
+            // First point after a break: a jump past or far away from the re-read mark ends it.
+            val target = retraceTarget
+            if (target != null && (point >= target - UNCHANGED_POINT_EPSILON ||
+                    target - point > MAX_INTERVAL_DISTANCE + 1e-9)) retraceTarget = null
+            return
+        }
+        if (nowMillis <= beforeTime) return
 
         val distance = point - beforePoint
         val elapsed = nowMillis - beforeTime
