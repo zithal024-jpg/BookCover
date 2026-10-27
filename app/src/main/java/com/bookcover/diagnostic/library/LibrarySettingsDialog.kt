@@ -37,6 +37,8 @@ internal fun LibrarySettingsDialog(
     developerOptions: Boolean, onDeveloperOptions: () -> Unit, onDismiss: () -> Unit,
 ) {
     var versionTaps by remember { mutableIntStateOf(0) }
+    var showLicences by remember { mutableStateOf(false) }
+    if (showLicences) LicencesScreen(onBack = { showLicences = false })
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Library settings") }, text = {
         Column(Modifier.testTag("library-settings-scroll").heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -78,6 +80,9 @@ internal fun LibrarySettingsDialog(
             SettingsSection("About", showDivider = true) {
                 Text("EPUB engine: Readium 3.4.0 · BSD 3-Clause\nOpenDyslexic font by Abelardo Gonzalez · CC BY 3.0, based on Bitstream Vera",
                     style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = { showLicences = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("library-settings-licences")) {
+                    Text("Licences")
+                }
                 Text("BookCover 0.4.0 prototype", style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.testTag("library-settings-version").clickable(enabled = !developerOptions) {
                         versionTaps += 1
