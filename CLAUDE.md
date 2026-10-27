@@ -100,6 +100,11 @@ That is deliberate: OneDrive breaks Android's resource merger.
     `EpubReaderScreen.kt` (controls), `ReadingTapPolicy.kt`, `ReadingTypography.kt`
   - `cover/ExteriorCoverController.kt`: outer-screen cover via Jetpack
     WindowManager `WindowAreaController` (an experimental API)
+  - `streak/`: reading streak. `ReadingStreak.kt` (5-minute goal, streak rules),
+    `ReadingTimeTracker.kt` (foreground clock, 10-minute idle limit; driven by
+    `EpubSession`), `ReadingDayStore.kt` (`library/reading-days.json`, dated
+    totals only, stored as local dates so a timezone change keeps earned days),
+    `ReadingStreakViews.kt` (Library card under Continue, detail sheet)
 - `app/src/test/`: JVM unit tests. `app/src/androidTest/` + `app/src/qa/`:
   on-phone tests and their isolated host activity.
 - `scripts/GenerateSamples.py` rebuilds the two sample EPUBs; "The Lantern

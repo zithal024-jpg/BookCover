@@ -15,6 +15,14 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.bookcover.diagnostic.library.BookRecord
 import com.bookcover.diagnostic.library.LibraryThemeChoice
 import com.bookcover.diagnostic.library.coverColorThemeId
+import android.graphics.Bitmap
+import java.io.File
+import java.io.FileOutputStream
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
+import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -49,6 +57,80 @@ class LibraryAccessibilityTest {
         scenario?.close()
         LibraryAccessibilityActivity.fontScaleForTests = 1f
         automation.serviceInfo = automation.serviceInfo.apply { flags = previousFlags }
+    }
+
+    @Test fun readingStreakCardFitsLabelsDaysAndOpensDetails() = checkReadingStreak(1f, "reading-streak-100")
+
+    @Test fun readingStreakCardStaysUsableAtTwoHundredPercentText() = checkReadingStreak(2f, "reading-streak-200")
+
+    /** Three completed days and two minutes today, on the folded 360 dp layout; saves screenshots as test output. */
+    private fun checkReadingStreak(fontScale: Float, shot: String) {
+        launch(fontScale)
+        val zone = ZoneId.systemDefault()
+        val today = LocalDate.now(zone)
+        fun hour(date: LocalDate, hour: Int) = date.atTime(hour, 0).atZone(zone).toInstant().toEpochMilli()
+        main { withContext(Dispatchers.IO) {
+            host.libraryForTests.readingDays.apply {
+                listOf(3L, 2L, 1L).forEach { back -> today.minusDays(back).let { add(hour(it, 12), hour(it, 12) + 6 * 60_000L) } }
+                add(hour(today, 0) + 60_000L, hour(today, 0) + 3 * 60_000L)
+            }
+        } }
+        fun streakCard() = findNode { it.viewIdResourceName?.substringAfterLast('/') == "reading-streak" }
+        // Android reports only the visible part of a clipped node, so require clear space on both edges.
+        waitFor("the streak card is entirely in view") {
+            val scroll = findNode { it.viewIdResourceName?.substringAfterLast('/') == "library-scroll" } ?: return@waitFor false
+            val clip = Rect().also(scroll::getBoundsInScreen)
+            val node = streakCard()
+            val bounds = node?.let { Rect().also(it::getBoundsInScreen) }
+            if (node != null && bounds != null && !bounds.isEmpty && bounds.top > clip.top && bounds.bottom < clip.bottom) return@waitFor true
+            if (node != null) node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
+            else scroll.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) // Off-screen nodes are not reported.
+            instrumentation.waitForIdleSync()
+            SystemClock.sleep(150)
+            false
+        }
+        waitFor("the card shows the streak") { findNode { it.text?.contains("3-day streak") == true } != null }
+        val card = streakCard()!!
+        assertTrue("Today's progress is shown", findNode { it.text?.contains("2 of 5 minutes today") == true } != null)
+        val density = main { host.resources.displayMetrics.density }
+        val bounds = Rect().also(card::getBoundsInScreen)
+        assertTrue("The card is a comfortable touch target", bounds.height() / density >= 47.5f)
+        assertTrue("The card fits the 360 dp library width", bounds.width() / density <= 360f)
+        assertTrue("The card is fully visible", fullyVisible(card))
+        saveScreenshot("$shot-card")
+        val dayLabels = mutableListOf<String>()
+        fun collect(node: AccessibilityNodeInfo?) {
+            if (node == null) return
+            node.contentDescription?.toString()?.takeIf { it.contains(", ") }?.let(dayLabels::add)
+            for (i in 0 until node.childCount) collect(node.getChild(i))
+        }
+        collect(card)
+        listOf("Today, 2 of 5 minutes read", "${today.minusDays(1).dayOfWeek.getDisplayName(TextStyle.FULL, Locale.getDefault())}, reading goal completed")
+            .forEach { label -> assertTrue("Day labelled: $label; found $dayLabels", label in dayLabels) }
+        assertTrue("The card opens through accessibility", card.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        waitFor("the streak details open") { find("Reading streak") != null && find("Longest streak") != null }
+        val calendarToday = "Today, " + today.format(DateTimeFormatter.ofPattern("EEEE, MMMM d", Locale.getDefault())) + ", 2 minutes read"
+        waitFor("today is labelled in the calendar") {
+            if (findNode { it.contentDescription?.toString() == calendarToday } != null) return@waitFor true
+            findNode { it.viewIdResourceName?.substringAfterLast('/') == "reading-streak-details" }
+                ?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) // Off-screen cells are not reported.
+            SystemClock.sleep(150)
+            false
+        }
+        reveal("Read for 5 minutes in a day to build your streak.", dialog = true)
+        saveScreenshot("$shot-details")
+        click("Done")
+        assertNull("The details close", find("Reading streak"))
+    }
+
+    /** Written where AGP collects additional test output, when it provides that folder. */
+    private fun saveScreenshot(name: String) {
+        val folder = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir") ?: return
+        instrumentation.waitForIdleSync()
+        SystemClock.sleep(1_200) // Let any entry animation finish.
+        automation.takeScreenshot()?.let { bitmap ->
+            FileOutputStream(File(folder, "$name.png")).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
     }
 
     @Test fun bookOptionsHaveALabelAndA48DpTarget() {

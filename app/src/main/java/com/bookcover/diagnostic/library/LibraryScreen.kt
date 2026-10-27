@@ -20,7 +20,10 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.bookcover.diagnostic.DiagnosticLog
+import com.bookcover.diagnostic.streak.ReadingStreakCard
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
@@ -42,6 +45,14 @@ internal fun LibraryScreen(
     var moving by remember { mutableStateOf<BookRecord?>(null) }
     var removing by remember { mutableStateOf<BookRecord?>(null) }
     var collectionName by remember { mutableStateOf("") }
+    val readingDays by library.readingDays.days.collectAsState()
+    val streakScope = rememberCoroutineScope()
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            try { library.readingDays.load() }
+            catch (error: Exception) { DiagnosticLog.record("Reading days unavailable: ${error.javaClass.simpleName}") }
+        }
+    }
     val collections = listOf("All") + books.map { it.collection }.distinct().sorted()
     val visible = books.filter { (collection == "All" || it.collection == collection) &&
         (it.title.contains(query, true) || it.author.contains(query, true)) }.let {
@@ -89,6 +100,9 @@ internal fun LibraryScreen(
                     Text("Continue · ${recent.title} · ${(recent.progression * 100).toInt()}%", maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
+            // Below Continue and hidden while searching or filtering: the books stay the main thing here.
+            if (query.isBlank() && collection == "All") ReadingStreakCard(readingDays, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
+                onCelebrated = { date -> streakScope.launch(Dispatchers.IO) { runCatching { library.readingDays.markCelebrated(date) } } })
             if (visible.isEmpty() && !busy) Text("Import a DRM-free EPUB from your phone's files to start reading.", modifier = Modifier.padding(24.dp))
             } }
                 items(visible, key = { it.id }) { book ->

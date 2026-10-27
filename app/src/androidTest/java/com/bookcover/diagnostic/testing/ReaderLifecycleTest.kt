@@ -12,6 +12,7 @@ import com.bookcover.diagnostic.MainActivity
 import com.bookcover.diagnostic.library.BookRecord
 import com.bookcover.diagnostic.library.LibraryIndex
 import com.bookcover.diagnostic.reader.EpubSession
+import com.bookcover.diagnostic.streak.ReadingDayStore
 import java.io.File
 import java.util.UUID
 import kotlin.math.abs
@@ -100,6 +101,40 @@ class ReaderLifecycleTest {
         // A restarted process sees only what is on disk.
         val onDisk = LibraryIndex(libraryFolder).load().records.single { it.id == book.id }
         assertEquals(before, onDisk.progression, 0.01)
+    }
+
+    @Test fun readingTimeCountsOnlyWhileTheReaderIsInFront() {
+        val book = launchWithLongBook()
+        // The activity's own pause/resume moments, so the bound does not depend on how ActivityScenario gets there.
+        val transitions = java.util.Collections.synchronizedList(mutableListOf<Pair<Lifecycle.Event, Long>>())
+        onActivity { it.lifecycle.addObserver(androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_RESUME) transitions += event to SystemClock.elapsedRealtime()
+        }) }
+        val opened = SystemClock.elapsedRealtime()
+        openAndMoveInto(book)
+        SystemClock.sleep(3_000)
+        scenario!!.moveToState(Lifecycle.State.CREATED) // The Home button: the time so far is credited.
+        SystemClock.sleep(4_000) // Background time must not count.
+        scenario!!.moveToState(Lifecycle.State.RESUMED)
+        SystemClock.sleep(1_000)
+        scenario!!.close(); scenario = null
+        val closed = SystemClock.elapsedRealtime()
+        // Sum the resumed intervals between opening the book and closing the activity.
+        var foreground = 0L
+        var resumedAt: Long? = opened
+        val events = transitions.toList()
+        events.filter { it.second >= opened }.forEach { (event, at) ->
+            if (event == Lifecycle.Event.ON_PAUSE) { resumedAt?.let { foreground += at - it }; resumedAt = null }
+            else if (resumedAt == null) resumedAt = at
+        }
+        resumedAt?.let { foreground += closed - it }
+        fun onDisk() = ReadingDayStore(File(libraryFolder, "reading-days.json")).load().days.values.sumOf { it.millis }
+        waitFor("reading time is on disk") { onDisk() >= 3_700 }
+        val credited = onDisk()
+        assertTrue("Credited $credited ms; resumed for $foreground ms; transitions $events since $opened", credited <= foreground + 300)
+        assertTrue("Background time is excluded: credited $credited ms of ${closed - opened} ms", credited <= closed - opened - 3_000)
+        assertTrue("Five minutes are not reached, so no day is completed",
+            ReadingDayStore(File(libraryFolder, "reading-days.json")).load().days.values.none { it.completed })
     }
 
     private fun launchWithLongBook(): BookRecord {
