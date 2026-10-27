@@ -2,14 +2,25 @@ package com.bookcover.diagnostic.reader
 
 import android.app.Activity
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.Window
 
-/** Observe hardware keys before focused WebViews, while preserving the window's normal dispatch. */
-internal fun Activity.installReadingKeyHandler(reader: () -> EpubSession?) {
+/**
+ * Observe hardware keys before focused WebViews, while preserving the window's normal dispatch.
+ * [onInput] sees each key and touch-down that reaches this window, without consuming it. It is not
+ * Activity.onUserInteraction, which Android also calls when the user leaves the activity (BC-22).
+ */
+internal fun Activity.installReadingKeyHandler(onInput: () -> Unit = {}, reader: () -> EpubSession?) {
     val original = window.callback
     window.callback = object : Window.Callback by original {
-        override fun dispatchKeyEvent(event: KeyEvent): Boolean =
-            reader()?.dispatchKeyEvent(event) == true || original.dispatchKeyEvent(event)
+        override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+            onInput()
+            return reader()?.dispatchKeyEvent(event) == true || original.dispatchKeyEvent(event)
+        }
+        override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) onInput()
+            return original.dispatchTouchEvent(event)
+        }
     }
 }
 
