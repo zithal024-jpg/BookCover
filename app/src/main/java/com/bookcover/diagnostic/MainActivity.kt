@@ -47,7 +47,7 @@ class MainActivity : FragmentActivity() {
     private val preferences by lazy { getSharedPreferences("reader", 0) }
 
     private val importBook = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) work {
+        if (uri != null) work(ReaderAction.IMPORT) {
             val (book, added) = library.import(uri)
             message = if (added) "Imported ${book.title}. Tap its cover to read." else "${book.title} is already in your library."
         }
@@ -55,7 +55,7 @@ class MainActivity : FragmentActivity() {
     private val selectCover = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val id = coverBookId
         coverBookId = null
-        if (uri != null && id != null) work {
+        if (uri != null && id != null) work(ReaderAction.REPLACE_COVER) {
             library.replaceCover(id, uri)
             library.book(id)?.let { book -> exterior.artwork = withContext(Dispatchers.IO) { CoverArtwork.from(library.coverBitmap(book)) } }
             message = "Cover updated. Start the outside cover again from reading controls."
@@ -63,13 +63,13 @@ class MainActivity : FragmentActivity() {
     }
 
     private val exportLibrary = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-        if (uri != null) work {
+        if (uri != null) work(ReaderAction.SAVE_BACKUP) {
             val count = library.exportBackup(uri)
             message = "Saved reading positions, bookmarks and collections for $count books. The books themselves are not in the backup."
         }
     }
     private val restoreLibrary = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) work {
+        if (uri != null) work(ReaderAction.RESTORE_BACKUP) {
             val result = library.restoreBackup(uri)
             message = when {
                 result.restored == 0 && result.missing == 0 -> "That backup has no books in it."
@@ -119,8 +119,8 @@ class MainActivity : FragmentActivity() {
                     onTimer = { timer = it; preferences.edit().putInt("coverTimer", it).apply() },
                     onImport = { importBook.launch(arrayOf("application/epub+zip", "application/octet-stream", "application/zip")) },
                     onOpen = ::openBook,
-                    onMove = { book, collection -> work { library.move(book.id, collection); message = "Collection updated." } },
-                    onRemove = { book -> work { library.remove(book.id); message = "Local copy removed." } },
+                    onMove = { book, collection -> work(ReaderAction.ORGANIZE) { library.move(book.id, collection); message = "Collection updated." } },
+                    onRemove = { book -> work(ReaderAction.ORGANIZE) { library.remove(book.id); message = "Local copy removed." } },
                     onExportBackup = { exportLibrary.launch("BookCover-library-${java.time.LocalDate.now()}.json") },
                     onRestoreBackup = { restoreLibrary.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
                     onDiagnostics = { showDiagnostics = true }, libraryTheme = libraryTheme,
@@ -133,19 +133,19 @@ class MainActivity : FragmentActivity() {
                         exterior.stop("selecting cover image")
                         coverBookId = current.book.id
                         selectCover.launch(arrayOf("image/*"))
-                    }, onSaveBookmark = { name, existingValue -> work {
+                    }, onSaveBookmark = { name, existingValue -> work(ReaderAction.BOOKMARK) {
                         if (existingValue != null) library.renameBookmark(current.book.id, existingValue, name)
                         else current.bookmarkLocator()?.let { locator -> library.bookmark(current.book.id, locator, name, current.chapterStatus?.title) }
                         message = "Bookmark saved. Open Contents to return to it."
                     }
-                    }, onRemoveBookmark = { value -> work { library.removeBookmark(current.book.id, value) } },
+                    }, onRemoveBookmark = { value -> work(ReaderAction.BOOKMARK) { library.removeBookmark(current.book.id, value) } },
                     libraryTheme = libraryTheme, coverSeed = seed)
                 if (showDiagnostics) AlertDialog(onDismissRequest = { showDiagnostics = false }, title = { Text("Device diagnostics") },
                     text = { Text(exterior.diagnostics() + "\n" + DiagnosticLog.report(), modifier = Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), style = MaterialTheme.typography.bodySmall) },
                     confirmButton = { TextButton(onClick = { showDiagnostics = false }) { Text("Close") } })
             }
         }
-        work {
+        work(ReaderAction.LOAD_LIBRARY) {
             try {
                 val loaded = library.load()
                 if (!preferences.getBoolean("samplesInstalled", false)) {
@@ -178,7 +178,7 @@ class MainActivity : FragmentActivity() {
 
     private fun openBook(book: BookRecord) {
         if (busy || session != null) return
-        work { loadBook(book) }
+        work(ReaderAction.OPEN) { loadBook(book) }
     }
 
     private suspend fun loadBook(book: BookRecord) {
@@ -214,14 +214,15 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    private fun work(action: suspend () -> Unit) {
+    /** Runs [block]; a failure shows a plain message for [action] and logs only technical types (BC-26). */
+    private fun work(action: ReaderAction, block: suspend () -> Unit) {
         lifecycleScope.launch {
             busy = true
-            try { action() }
+            try { block() }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
-                message = error.message?.take(180) ?: "This operation could not be completed."
-                DiagnosticLog.record("EPUB operation failed: ${error.javaClass.simpleName}; document details omitted")
+                message = readerMessage(action, error)
+                DiagnosticLog.record(diagnosticSummary(action, error) + "; document details omitted")
             } finally { busy = false }
         }
     }

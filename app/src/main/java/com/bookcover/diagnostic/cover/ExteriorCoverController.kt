@@ -93,7 +93,7 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
 
     fun start(timerMinutes: Int) {
         if (busy || destroyed || artwork == null) return
-        val area = area() ?: run { status = "Outside display is unavailable in the current phone state."; return }
+        val area = area() ?: run { status = "The outside screen isn't available right now. Keep the phone unfolded and try again."; return }
         val token = ++request
         busy = true; active = false; stopPending = false
         status = "Opening the outside cover. Accept Android's display dialog if offered."
@@ -143,8 +143,8 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
         } catch (error: Exception) {
             timeout?.let(handler::removeCallbacks); timeout = null
             busy = false; active = false; stopPending = false
-            status = "Outside cover could not start: ${error.javaClass.simpleName}"
-            DiagnosticLog.record(status)
+            status = "The outside cover couldn't start. Reading is unaffected; try again from reading controls."
+            DiagnosticLog.record("Outside cover could not start: ${error.javaClass.simpleName}")
         }
     }
 
