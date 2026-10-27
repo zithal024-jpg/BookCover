@@ -18,8 +18,9 @@ internal object EpubCorpus {
     enum class Expect { READS, REJECTED }
 
     /** [knownIssue]: a BC issue this book is expected to fail until fixed; reported as skipped, not passed. */
+    /** [pageCheck]: optional JavaScript that must evaluate to true in the rendered first chapter. */
     class Book(val name: String, val expect: Expect, val marker: String = "", val fixedLayout: Boolean = false,
-               val knownIssue: String? = null, val write: (File) -> Unit) {
+               val knownIssue: String? = null, val pageCheck: String? = null, val write: (File) -> Unit) {
         override fun toString() = name
     }
 
@@ -54,7 +55,9 @@ internal object EpubCorpus {
                 extraBody = "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><mi>x</mi><mo>=</mo><mfrac><mn>1</mn><mn>2</mn></mfrac></math>")
         },
         Book("images-and-svg", Expect.READS, "A chapter with pictures") { pictures(it) },
-        Book("scripts-and-forms", Expect.READS, "Scripts are removed") {
+        // The book's own script must never run, and its form and click handler must be stripped.
+        Book("scripts-and-forms", Expect.READS, "Scripts are removed",
+            pageCheck = "document.title !== 'hacked' && document.querySelectorAll('form').length === 0 && !document.querySelector('[onclick]')") {
             standard(it, "Scripts are removed", properties = "scripted",
                 extraBody = "<script>document.title='hacked'</script><form action=\"x\"><input name=\"q\"/></form><p onclick=\"alert(1)\">Click handlers are removed.</p>")
         },
@@ -69,8 +72,7 @@ internal object EpubCorpus {
         Book("epub2-meta-cover", Expect.READS, "A cover named in metadata") { epub2(it, marker = "A cover named in metadata", metaCover = true) },
         Book("fixed-layout", Expect.READS, fixedLayout = true) { fixed(it) },
         Book("missing-chapter-file", Expect.READS, "The first chapter still opens") { standard(it, "The first chapter still opens", chapters = 2, omitChapter = 1) },
-        // The script-stripping step reads every chapter as UTF-8, so UTF-16 text comes out garbled.
-        Book("utf16-chapter", Expect.READS, "A chapter saved as UTF-16", knownIssue = "BC-18") { standard(it, "A chapter saved as UTF-16", utf16 = true) },
+        Book("utf16-chapter", Expect.READS, "A chapter saved as UTF-16") { standard(it, "A chapter saved as UTF-16", utf16 = true) },
         Book("html-tag-soup", Expect.READS, "Loose HTML still reads") { tagSoup(it) },
         Book("large-150mb", Expect.READS, "A very large book") { large(it) },
         Book("not-a-zip", Expect.REJECTED) { it.writeText("This is a text file pretending to be a book.") },

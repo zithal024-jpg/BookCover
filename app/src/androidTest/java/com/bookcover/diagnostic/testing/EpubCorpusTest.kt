@@ -81,8 +81,23 @@ internal class EpubCorpusTest(private val book: EpubCorpus.Book) {
         val record = runBlocking { library.import(Uri.fromFile(file)).first }
         onActivity { it.openBookForTests(record) }
         val reader = waitForReader(record)
-        if (!book.fixedLayout) waitFor("the first chapter's text is readable") {
-            js(reader, "document.body.innerText.indexOf(${JSONObject.quote(book.marker)}) >= 0") == "true"
+        if (!book.fixedLayout && !within(15_000) {
+                js(reader, "document.body.innerText.indexOf(${JSONObject.quote(book.marker)}) >= 0") == "true"
+            }) {
+            // Say what the page shows instead, so an encoding fault is visible in the report.
+            val shown = runCatching { js(reader, "document.characterSet + ' | ' + document.body.innerText.slice(0, 300)") }.getOrElse { it.toString() }
+            // And the first bytes Readium serves for it: cleaned markup starts "<?xml" or "<html", never a UTF-16 mark.
+            val served = runCatching {
+                onMain {
+                    reader.publication.get(reader.publication.readingOrder.first())?.read()?.fold(
+                        { bytes -> bytes.take(8).joinToString(" ") { "%02X".format(it) } }, { "read failed: ${it.message}" }) ?: "no resource"
+                }
+            }.getOrElse { "probe failed: $it" }
+            fail("The first chapter's text is not readable. Expected \"${book.marker}\"; the page shows: $shown; Readium serves bytes: $served")
+        }
+
+        book.pageCheck?.let { check ->
+            assertEquals("Page check failed: $check (title: ${js(reader, "document.title")})", "true", js(reader, "Boolean($check)"))
         }
 
         val positions = onMain { reader.publication.positions().size }

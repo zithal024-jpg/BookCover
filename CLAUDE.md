@@ -131,6 +131,13 @@ unless the owner asks.
 
 ## Things that look wrong but are deliberate
 
+- `ReadiumEngine` installs the markup filter (script stripping, BC-18 encoding fix)
+  through the `onCreatePublication` argument of each `opener.open(...)` call, with a
+  once-only guard, not through the `PublicationOpener` constructor. Readium 3.4.0
+  never calls the constructor's hook and calls the per-open one twice; until
+  2026-10-26 book scripts therefore ran on the phone. `EpubCorpusTest`'s
+  `scripts-and-forms` book fails if this regresses.
+
 - `super.onCreate(null)` in `MainActivity` and `ReaderTestActivity`: Readium's
   navigator can't be restored by Android's fragment restorer, so the app reopens
   the book from its own saved locator instead.

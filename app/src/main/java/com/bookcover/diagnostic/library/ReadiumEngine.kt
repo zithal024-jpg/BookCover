@@ -33,26 +33,16 @@ internal class ReadiumEngine(context: Context) {
             Try.failure(HttpError.IO(IOException("Remote publication resources are disabled")))
     }
     private val retriever = AssetRetriever(context.contentResolver, http)
-    private val opener = PublicationOpener(
-        DefaultPublicationParser(context, httpClient = http, assetRetriever = retriever, pdfFactory = null),
-        onCreatePublication = {
-            val markupPaths = (manifest.readingOrder + manifest.resources).filter {
-                val type = it.mediaType?.toString().orEmpty()
-                "html" in type || "svg" in type
-            }.map { it.url().toString() }.toSet()
-            container = TransformingContainer(container) { url, resource ->
-                val path = url.toString().substringBefore('?').substringBefore('#')
-                if (url.toString() in markupPaths || listOf(".html", ".xhtml", ".htm", ".svg").any { path.endsWith(it, true) }) {
-                    resource.map { Try.success(passivePublicationMarkup(it)) }
-                } else resource
-            }
-        },
-    )
+    private val opener = PublicationOpener(DefaultPublicationParser(context, httpClient = http, assetRetriever = retriever, pdfFactory = null))
 
     suspend fun open(file: File): Publication {
         val asset = retriever.retrieve(file.toUrl(isDirectory = false)).getOrElse { throw IOException("Could not read this EPUB file") }
-        val publication = opener.open(asset, allowUserInteraction = false)
-            .getOrElse { throw IOException("This file could not be opened as an EPUB") }
+        // Readium 3.4.0's PublicationOpener never calls the constructor's onCreatePublication and calls the
+        // per-open one twice, so the markup filter is passed here and guarded to be installed once.
+        var filtered = false
+        val publication = opener.open(asset, allowUserInteraction = false, onCreatePublication = {
+            if (!filtered) { filtered = true; installMarkupFilter() }
+        }).getOrElse { throw IOException("This file could not be opened as an EPUB") }
         try {
             require(publication.conformsTo(Publication.Profile.EPUB)) { "Please choose an EPUB book" }
             require(!publication.isRestricted) { "This EPUB is protected. The prototype opens DRM-free EPUBs." }
@@ -67,6 +57,20 @@ internal class ReadiumEngine(context: Context) {
         } catch (error: Exception) {
             publication.close()
             throw error
+        }
+    }
+
+    /** Serves every HTML/SVG resource through [passivePublicationMarkup]: scripts stripped, re-encoded as UTF-8. */
+    private fun Publication.Builder.installMarkupFilter() {
+        val markupPaths = (manifest.readingOrder + manifest.resources).filter {
+            val type = it.mediaType?.toString().orEmpty()
+            "html" in type || "svg" in type
+        }.map { it.url().toString() }.toSet()
+        container = TransformingContainer(container) { url, resource ->
+            val path = url.toString().substringBefore('?').substringBefore('#')
+            if (url.toString() in markupPaths || listOf(".html", ".xhtml", ".htm", ".svg").any { path.endsWith(it, true) }) {
+                resource.map { Try.success(passivePublicationMarkup(it)) }
+            } else resource
         }
     }
 }
