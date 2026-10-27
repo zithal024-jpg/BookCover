@@ -110,7 +110,7 @@ open class MainActivity : FragmentActivity() {
         // Keep picker routing/pending results even though navigator fragments cannot be restored.
         coverBookId = savedInstanceState?.getString("pendingCoverBook")
         savedInstanceState?.getBundle("documentPickerResults")?.let(activityResultRegistry::onRestoreInstanceState)
-        installReadingKeyHandler { session }
+        installReadingKeyHandler(onInput = ::readerInput) { session }
         DiagnosticLog.init(this)
         library = BookLibrary.forApp(this)
         engine = library.engine
@@ -320,11 +320,8 @@ open class MainActivity : FragmentActivity() {
         }
     }
 
-    /** Touches and keys dispatched to this window, including consumed page keys; never consumes them. */
-    override fun onUserInteraction() {
-        super.onUserInteraction()
-        applyAwake(screenAwake.input(SystemClock.elapsedRealtime()))
-    }
+    /** Touch-downs and keys dispatched to this window, including consumed page keys; never consumes them. */
+    private fun readerInput() = applyAwake(screenAwake.input(SystemClock.elapsedRealtime()))
 
     // Hooks for the BC-22 lifecycle tests in the QA app.
     internal val screenAwakeForTests: InnerScreenAwake get() = screenAwake
