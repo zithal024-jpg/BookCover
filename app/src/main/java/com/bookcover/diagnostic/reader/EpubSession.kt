@@ -16,6 +16,8 @@ import android.view.KeyEvent
 import com.bookcover.diagnostic.DiagnosticLog
 import com.bookcover.diagnostic.library.BookLibrary
 import com.bookcover.diagnostic.library.BookRecord
+import com.bookcover.diagnostic.streak.ReadingCredit
+import com.bookcover.diagnostic.streak.ReadingTimeTracker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -94,9 +96,12 @@ internal class EpubSession(
     private var chapterResource: Url? = null
     private var preferredContentsIndex: Int? = null
     private var pendingContentsIndex: Int? = null
+    // Reading streak: counts only while this reader is attached and the activity is resumed.
+    private val readingTime = ReadingTimeTracker()
+    private var readingTimeJob: Job? = null
     private val readingLifecycle = object : DefaultLifecycleObserver {
-        override fun onPause(owner: LifecycleOwner) { readingPace.pause(); search.dismiss() }
-        override fun onResume(owner: LifecycleOwner) { readingPace.pause() }
+        override fun onPause(owner: LifecycleOwner) { readingPace.pause(); search.dismiss(); record(readingTime.pause(SystemClock.elapsedRealtime())) }
+        override fun onResume(owner: LifecycleOwner) { readingPace.pause(); if (fragment.isAdded && !closed) readingTime.resume(SystemClock.elapsedRealtime()) }
     }
     private val layoutListener = View.OnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
         if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) {
@@ -159,12 +164,14 @@ internal class EpubSession(
                 // Observe intent only: native Readium/ViewPager remains the sole swipe handler.
                 // A user who navigates during reflow must not be pulled back by an old anchor.
                 if (event.type == DragEvent.Type.Start) {
+                    readerActive()
                     pendingContentsIndex = null
                     if (typographyUpdating) typographyAnchorInvalidated = true
                 }
                 return false
             }
             override fun onTap(event: TapEvent): Boolean {
+                readerActive()
                 val view = fragment.view ?: return false
                 // Readium filters interactive links, active selections and drag gestures before
                 // this callback. Keep its native touch recognizers and selection handling intact.
@@ -193,8 +200,14 @@ internal class EpubSession(
         if (closed || activity.isDestroyed || fragment.isAdded || activity.supportFragmentManager.isStateSaved) return
         activity.supportFragmentManager.beginTransaction().replace(container.id, fragment, "bookcover-epub").commitNow()
         fragment.view?.addOnLayoutChangeListener(layoutListener)
+        if (activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) readingTime.resume(SystemClock.elapsedRealtime())
+        readingTimeJob = activity.lifecycleScope.launch {
+            // Save running time now and then, so a crash or a killed process loses at most this much.
+            while (true) { delay(30_000); record(readingTime.collect(SystemClock.elapsedRealtime())) }
+        }
         locationJob = activity.lifecycleScope.launch {
             fragment.currentLocator.collect { locator ->
+                readerActive()
                 currentLocator = locator
                 progress = locator.locations.totalProgression ?: progress
                 if (!typographyUpdating) positions.submit(locator)
@@ -406,6 +419,7 @@ internal class EpubSession(
     /** Activity dispatch reaches this before WebView or Android's volume handling. */
     fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val key = event.readingPageKey() ?: return false
+        readerActive()
         if (event.action != KeyEvent.ACTION_DOWN && event.action != KeyEvent.ACTION_UP) return false
         fun ready() = !closed && fragment.isAdded && !controlsVisible && !typographyUpdating &&
             activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && activity.hasWindowFocus()
@@ -438,8 +452,23 @@ internal class EpubSession(
     /** Saves a waiting reading position now, e.g. when the app goes to the background. */
     fun flushPosition() = positions.flush()
 
+    private fun readerActive() = record(readingTime.activity(SystemClock.elapsedRealtime()))
+
+    /** Adds credited time to its local dates, off the main thread; each credit is handed over exactly once. */
+    private fun record(credit: ReadingCredit?) {
+        if (credit == null || credit.millis <= 0) return
+        // Place the monotonic interval on the wall clock as of now, so earlier clock changes cannot shift it.
+        val end = System.currentTimeMillis() - (SystemClock.elapsedRealtime() - credit.endElapsed)
+        saveScope.launch(Dispatchers.IO) {
+            try { library.readingDays.add(end - credit.millis, end) }
+            catch (error: Exception) { DiagnosticLog.record("Reading time save failed: ${error.javaClass.simpleName}") }
+        }
+    }
+
     fun close() {
         if (closed) return
+        record(readingTime.pause(SystemClock.elapsedRealtime()))
+        readingTimeJob?.cancel()
         closed = true
         search.close()
         locationJob?.cancel()

@@ -16,6 +16,7 @@ import android.text.TextPaint
 import android.util.AtomicFile
 import android.util.LruCache
 import android.util.Size
+import com.bookcover.diagnostic.streak.ReadingDayStore
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
@@ -51,6 +52,8 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
     private val directory = File(context.filesDir, "library").apply { mkdirs() }
     private val index = LibraryIndex(directory)
     private val coverColors = CoverColorCache(File(directory, "cover-colors.json"))
+    /** Reading-streak days (dated totals only); shared by the reader and the Library card. */
+    val readingDays = ReadingDayStore(File(directory, "reading-days.json"))
     private var loaded = false
     private val lock = Mutex()
     private val mutableBooks = MutableStateFlow<List<BookRecord>>(emptyList())
