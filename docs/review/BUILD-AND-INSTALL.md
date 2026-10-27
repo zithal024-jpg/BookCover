@@ -30,7 +30,7 @@ $env:Path = "$env:JAVA_HOME\bin;$env:ANDROID_HOME\platform-tools;$env:Path"
 .\gradlew.bat assembleDebug testQaUnitTest lintDebug lintQa --console=plain
 ```
 
-`scripts/Build.ps1` is an optional convenience helper. It first looks for this project's prepared tools under `%LOCALAPPDATA%\BookCoverBuild`, otherwise uses JAVA_HOME/ANDROID_HOME, configures the current process, runs build/tests/lint and copies the APK/checksum into `output/`. `Build BookCover.cmd` launches it. On Windows, the root build script defaults generated output to `%LOCALAPPDATA%\BookCoverBuild\project-output`; this is intentional, not a missing APK.
+On the shared Windows development machine, use `scripts/Build.ps1` or `Build BookCover.cmd`. The helper requires tools under `%LOCALAPPDATA%\BookCoverBuild` (or an explicit `-ToolRoot`) and an initialized shared resource registry; see [the task-resource guide](../BC-25-TASK-RESOURCES.md). It reserves BUILD, isolates generated output/cache/Gradle home by checkout and task, and prints the exact APK/checksum/evidence paths. `-TaskId core -Plan` shows the paths without running tools. It no longer updates `BookCover-prototype.apk`; old arbitrary output/cache overrides are rejected.
 
 For an isolated reviewer output/cache directory, pass explicit locations:
 
@@ -61,7 +61,7 @@ These are cross-platform Gradle instructions; the recorded validation platform i
 
 ## Locate artifacts and reports
 
-Without an output override on Unix, the APK is `app/build/outputs/apk/debug/app-debug.apk`. With `bookcover.buildRoot=/some/path`, it is `/some/path/app/outputs/apk/debug/app-debug.apk`. The Windows default therefore places it under `%LOCALAPPDATA%\BookCoverBuild\project-output\app\outputs\apk\debug\`.
+Without an output override on Unix, the APK is `app/build/outputs/apk/debug/app-debug.apk`. With `bookcover.buildRoot=/some/path`, it is `/some/path/app/outputs/apk/debug/app-debug.apk`. The Windows helper prints its checkout/task-specific APK and report paths; use those exact paths.
 
 JUnit XML appears under the module build directory's `test-results/testQaUnitTest/`; the readable report is under `reports/tests/testQaUnitTest/`. The QA unit task exercises the same production source plus the isolated QA source set; selecting `testBuildType="qa"` means `testDebugUnitTest` is not an available task in this configuration. Android lint HTML/XML reports appear under `reports/`; text reports can also be found under `intermediates/lint_intermediate_text_report/{debug,qa}/lintReport{Debug,Qa}/`. The package includes both debug and QA lint reports. Consult Gradle output for actual paths. Lint and JVM tests do not establish physical display behavior or all touch interactions.
 
@@ -71,17 +71,14 @@ After the first successful online build, `--offline` can use the same locally po
 
 The final source defines `testBuildType = "qa"` and an application-ID suffix `.qa`. The native test target is **com.bookcover.diagnostic.qa**, separate from the user's normal **com.bookcover.diagnostic** library. Test-only host code is under `src/qa/` and does not enter the ordinary debug APK.
 
-Keep the test phone unlocked and in the layout being evaluated, then run one of:
+Use only the protected Windows device-test script. Keep the explicitly available phone unlocked, unfolded and untouched; replace the example serial and release evidence with the actual values:
 
 ```powershell
-.\gradlew.bat connectedQaAndroidTest --console=plain
-# Or use the prepared Windows environment helper:
-.\scripts\Test-Device.ps1
+.\scripts\Test-Device.ps1 -TaskId core -Serial DEVICE_SERIAL `
+    -PhoneReleaseEvidence 'RECORDED PREVIOUS-HOLDER RELEASE AND OWNER AVAILABILITY'
 ```
 
-```sh
-sh ./gradlew connectedQaAndroidTest --console=plain
-```
+Use the same task ID as the matching build. The script reserves BUILD then PHONE and enforces the isolated QA target before any device operation. Do not bypass it with a direct connected-test Gradle command on another host.
 
 **Never retarget connected instrumentation at the user's main app/package.** An earlier connected-debug run in this cycle triggered AGP uninstall cleanup and reset the main app's private data; the original provider-held EPUB files were not removed. See RESULTS.md for the actual incident/recovery record and any lost historical locators. The final QA variant is designed to prevent repeating that target mix-up. Connected test cleanup may remove the isolated QA app and its disposable data.
 

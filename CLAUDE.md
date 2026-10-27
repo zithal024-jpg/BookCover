@@ -28,17 +28,24 @@ That is deliberate: OneDrive breaks Android's resource merger.
 - **Build + unit tests + lint:** run the script directly, not the .cmd file
   (`Build BookCover.cmd` ends with `pause` and will hang):
   `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Build.ps1`
-  This runs `assembleDebug testQaUnitTest lintDebug lintQa` and copies the APK
-  to `output\BookCover-prototype.apk`.
+  This runs `assembleDebug testQaUnitTest lintDebug lintQa` with a BUILD reservation.
+  Generated output/cache/Gradle home and APK names are checkout/task-specific;
+  use `-TaskId core` (default `local`) and `-Plan` to see the paths. The command
+  prints the exact APK and source-bound evidence paths; it no longer overwrites
+  `output\BookCover-prototype.apk`. A coordinator must explicitly initialize the
+  shared resource registry after previous holders release: see
+  `docs/BC-25-TASK-RESOURCES.md`. Missing/uncertain ownership fails closed.
 - **On-phone tests:** only through
-  `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-Device.ps1`
+  `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-Device.ps1 -TaskId core -Serial DEVICE_SERIAL -PhoneReleaseEvidence 'RECORDED RELEASE AND OWNER AVAILABILITY'`
+  Use the same task ID as the matching build. An explicit serial and PHONE release
+  evidence are required; the script acquires BUILD then PHONE before any tool call.
   The phone must be connected by USB, unlocked, with USB debugging on.
   Ask the owner to keep it unfolded with the screen on and untouched: folded,
   the tap-injecting `NativeReaderTest` can hang with no focused window, and
   `ReadingLayoutTest` is skipped. Known flakiness: the first reader screen of a
   run, or one right after a fold switch, sometimes times out ("navigator is
   attached"); rerunning that class passes. Hardening the tests is still to do.
-- **Installing the owner's app:** `adb install -r output\BookCover-prototype.apk`
+- **Installing the owner's app:** `adb install -r EXACT_APK_PATH_PRINTED_BY_BUILD`
   updates it in place and keeps the library. adb is at
   `%LOCALAPPDATA%\BookCoverBuild\sdk\platform-tools\adb.exe`.
 
