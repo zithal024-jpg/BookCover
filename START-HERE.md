@@ -17,7 +17,7 @@ diagnostic and Kindle-handoff instructions are preserved below as history.
    signature mismatch (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`) or failed update, stop and check the
    signing certificate—see [Tester Installation and Safe In-Place Update Guide](README.md#tester-installation-and-safe-in-place-update-guide)
    and [CLAUDE.md](CLAUDE.md#build-and-test-windows-this-pc).
-4. Use **Settings → Backup → Export backup** to save a JSON backup of reading positions,
+4. Use **Settings → Backup → Save backup** to save a JSON backup of reading positions,
    named bookmarks, and collections matched by SHA-256 book ID. Note that EPUB book files,
    custom cover images, and Reading Streak history (`library/reading-days.json`) are not stored
    inside the JSON backup; see [Backup, Restore, and Storage Behavior & Known Limitations](README.md#backup-restore-and-storage-behavior--known-limitations).

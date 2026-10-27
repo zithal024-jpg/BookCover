@@ -65,7 +65,7 @@ The primary reader app uses application ID `com.bookcover.diagnostic` (launcher 
 
 ### Updating an existing installation (preserving library data)
 
-1. **Optional precaution before updating:** Open **BookCover → Settings → Backup → Export backup** to save a JSON copy of your reading positions, bookmarks, and collections to Downloads or Documents.
+1. **Optional precaution before updating:** Open **BookCover → Settings → Backup → Save backup** to save a JSON copy of your reading positions, bookmarks, and collections to Downloads or Documents.
 2. **Install via ADB (recommended for developers/testers):** Use `adb install -r` with the exact APK path printed by `Build.ps1`:
    ```powershell
    adb -s <device-serial> install -r "<repo>\output\BookCover-<task>-<hash>.apk"
@@ -84,7 +84,7 @@ The primary reader app uses application ID `com.bookcover.diagnostic` (launcher 
     ```
 - **`INSTALL_FAILED_VERSION_DOWNGRADE`:**
   - The installed app has a higher `versionCode` than the APK being installed. Build from current `main` (`versionCode` 6) rather than an older archive.
-- **If a signing-key migration is ever intentionally chosen by the owner:** First export a metadata backup via **Settings → Backup → Export backup**, confirm you still have the original `.epub` files in `Downloads` or external storage, and note that Reading Streak history (`library/reading-days.json`) is not included in the metadata backup.
+- **If a signing-key migration is ever intentionally chosen by the owner:** First export a metadata backup via **Settings → Backup → Save backup**, confirm you still have the original `.epub` files in `Downloads` or external storage, and note that Reading Streak history (`library/reading-days.json`) is not included in the metadata backup.
 
 ---
 
@@ -92,7 +92,7 @@ The primary reader app uses application ID `com.bookcover.diagnostic` (launcher 
 
 ### Library metadata backup and restore (`Settings → Backup`)
 
-- **What is backed up:** **Export backup** writes a JSON file (`format: "bookcover-library-backup"`, `version: 1`) containing each book's metadata, SHA-256 `id`, collection name, named bookmarks, `lastReadAt` timestamp, whole-book `progression`, and Readium `locator`.
+- **What is backed up:** **Save backup** writes a JSON file (`format: "bookcover-library-backup"`, `version: 1`) containing each book's metadata, SHA-256 `id`, collection name, named bookmarks, `lastReadAt` timestamp, whole-book `progression`, and Readium `locator`.
 - **What is NOT in the backup:**
   - **EPUB book files and custom cover images** are not stored inside the JSON backup file (keeps backups small and free of copyrighted book payloads).
   - **Reading Streak history (`library/reading-days.json`)** is stored locally on the device and is not included in library metadata backups.
@@ -123,7 +123,7 @@ verifies the outer-screen cover.
 
 - **Library (`BC-02`, `BC-04`, `BC-06`, `BC-13`, `BC-27`, `S2`, `F2`):** Library Home with **Continue reading** near the top and a compact Reading Streak summary; single and multi-select EPUB import with cancellation (**Stop importing**); 200 MB file, 100 MB entry, 500 MB expanded and 20,000-entry archive limits; SHA-256 de-duplication; embedded, generated or custom covers; collections, search and sorting; atomic `books.json` replacement with a verified `.bak` copy; cleanup of abandoned import files after failure, cancellation or process death; two bundled original sample books.
 - **Outer-screen cover (`BC-07`):** Jetpack WindowManager `WindowAreaController` rear-display presentation from the same `MainActivity` as the reader, started automatically or manually, with an optional session timer. Fold/unfold, rotation and display-size changes are handled in place (`screenSize|smallestScreenSize|screenLayout|orientation|density`); other recreation, such as a system dark-mode switch or process death, reopens the book at its saved place.
-- **Reading (`BC-08`, `C1`, `BC-23`):** publisher styles (on by default) with 80–220% CSS text size and live size preview; Serif, Sans serif and bundled OpenDyslexic fonts; line spacing, margins and alignment; Paper, Sepia and Night page themes; fixed-layout books keep their publisher layout and disable typography controls.
+- **Reading (`BC-08`, `C1`, `BC-22`, `BC-23`):** publisher styles (on by default) with 80–220% CSS text size and live size preview; Serif, Sans serif and bundled OpenDyslexic fonts; line spacing, margins and alignment; Paper, Sepia and Night page themes; fixed-layout books keep their publisher layout and disable typography controls; **Screen while reading** (2, 5 or 10 minutes, or Always; default 5) lets the inner screen follow Android's timeout after that long without a touch or key.
 - **Navigation (`BC-10`, `BC-14`, `BC-17`, `BC-20`, `BC-29`):** Readium swipes; optional narrow edge taps (mirrored for right-to-left books); optional volume-key page turns; Contents with a current-chapter marker; progress within the current chapter; named bookmarks; offline in-book search. The reading position is saved after 1.5 seconds without movement, and immediately on pause, stop or explicit navigation.
 - **Library look and settings (`BC-12`, `BC-21`, `BC-23`):** 16 library themes (Automatic from the latest cover, 4 fixed light/dark presets and 11 colour themes) plus custom cover colours; separate Reader and Library settings; device diagnostics hidden until the version line is tapped 7 times; bundled third-party licences.
 - **Backup (`BC-05`, `F1/F4`):** JSON metadata backup and restore, described above.
@@ -134,7 +134,7 @@ verifies the outer-screen cover.
 
 The [active backlog](docs/review/ACTIVE-BACKLOG.md) is the single source for remaining work
 and pending owner observations, including `UX §2`, the consolidated accessibility pass,
-`BC-22 / S1` (inner-screen idle timeout and battery measurement), the `BC-26` on-screen
+`BC-22 / S1` (physical screen-off and cover observation, battery measurement), the `BC-26` owner-phone
 check, `BC-15`, `BC-19 / S3`, `BC-20` pace calibration and the owner's `BC-11` release
 decisions (final name, application ID, signing).
 

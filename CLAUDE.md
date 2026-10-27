@@ -101,7 +101,8 @@ That is deliberate: OneDrive breaks Android's resource merger.
     (theme from the latest cover), `ReadiumEngine.kt` (opens EPUBs),
     `PublicationMarkup.kt` (strips scripts from book HTML)
   - `reader/`: `EpubSession.kt` (Readium navigator, typography, position saving),
-    `EpubReaderScreen.kt` (controls), `ReadingTapPolicy.kt`, `ReadingTypography.kt`
+    `EpubReaderScreen.kt` (controls), `ReadingTapPolicy.kt`, `ReadingTypography.kt`,
+    `InnerScreenAwake.kt` (BC-22 "Screen while reading" idle timeout)
   - `cover/ExteriorCoverController.kt`: outer-screen cover via Jetpack
     WindowManager `WindowAreaController` (an experimental API)
   - `streak/`: reading streak. `ReadingStreak.kt` (5-minute goal, streak rules),
