@@ -92,8 +92,9 @@ internal enum class LibraryThemeChoice(val id: String, val label: String, val da
     }
 }
 
-/** Saved "libraryTheme" preference to a known theme id; missing or unknown values mean Automatic. */
-internal fun savedLibraryTheme(stored: String?): String = LibraryThemeChoice.fromId(stored).id
+/** Existing preset ids and valid cover RGB snapshots survive restart; unknown values mean Automatic. */
+internal fun savedLibraryTheme(stored: String?): String =
+    if (coverColorSeed(stored) != null) stored!! else LibraryThemeChoice.fromId(stored).id
 
 /** Color roles remain plain ARGB values so contrast guarantees can be exercised on the JVM. */
 internal data class LibraryPalette(
@@ -114,12 +115,15 @@ internal data class LibraryPalette(
 
 internal fun libraryPalette(themeId: String, coverSeed: Int = DEFAULT_COVER_SEED, systemDark: Boolean = false): LibraryPalette {
     val choice = LibraryThemeChoice.fromId(themeId)
-    return seedPalette(choice.seed ?: vividAccent(coverSeed), choice.isDark(systemDark))
+    return seedPalette(themeAccent(themeId, coverSeed), choice.isDark(systemDark))
 }
 
 /** Reader panels: the library's accent, light or dark to match the page (Night is dark, Paper and Sepia light). */
 internal fun readerControlsPalette(themeId: String, coverSeed: Int = DEFAULT_COVER_SEED, night: Boolean): LibraryPalette =
-    seedPalette(LibraryThemeChoice.fromId(themeId).seed ?: vividAccent(coverSeed), night)
+    seedPalette(themeAccent(themeId, coverSeed), night)
+
+private fun themeAccent(themeId: String, coverSeed: Int): Int = coverColorSeed(themeId)?.let(::vividAccent)
+    ?: LibraryThemeChoice.fromId(themeId).seed ?: vividAccent(coverSeed)
 
 /**
  * Pale or muted covers (blush pink, sand) keep their hue but get enough colour to show as an accent.

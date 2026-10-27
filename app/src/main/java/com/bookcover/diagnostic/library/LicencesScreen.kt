@@ -25,13 +25,13 @@ import kotlinx.coroutines.withContext
  * Full screen over Library settings; Back (button or system gesture) returns to settings.
  */
 @Composable
-internal fun LicencesScreen(onBack: () -> Unit) {
+internal fun LicencesScreen(onBack: () -> Unit, backDescription: String = "Back to Library settings") {
     Dialog(onDismissRequest = onBack, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize().testTag("licences-screen"), color = MaterialTheme.colorScheme.background) {
             Column(Modifier.fillMaxSize().safeDrawingPadding()) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = onBack, modifier = Modifier.heightIn(min = 48.dp).testTag("licences-back")
-                        .semantics { contentDescription = "Back to Library settings" }) { Text("‹ Back") }
+                        .semantics { contentDescription = backDescription }) { Text("‹ Back") }
                     Text("Licences", style = MaterialTheme.typography.titleLarge,
                         modifier = Modifier.padding(start = 8.dp).semantics { heading() })
                 }

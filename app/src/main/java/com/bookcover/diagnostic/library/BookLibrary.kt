@@ -50,6 +50,8 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
 
     private val directory = File(context.filesDir, "library").apply { mkdirs() }
     private val index = LibraryIndex(directory)
+    private val coverColors = CoverColorCache(File(directory, "cover-colors.json"))
+    private var loaded = false
     private val lock = Mutex()
     private val mutableBooks = MutableStateFlow<List<BookRecord>>(emptyList())
     val books = mutableBooks.asStateFlow()
@@ -65,9 +67,22 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
     suspend fun load(): LibraryIndex.LoadResult = withContext(Dispatchers.IO) {
         lock.withLock {
             val removed = runCatching { cleanAbandonedImports() }.getOrDefault(0)
-            index.load().also { mutableBooks.value = it.records }.copy(abandonedImportsRemoved = removed)
+            index.load().also {
+                coverColors.colors(it.records, ::extractColor)
+                loaded = true
+                mutableBooks.value = it.records
+            }.copy(abandonedImportsRemoved = removed)
         }
     }
+
+    /** Current covers only; cached across settings openings, activity recreation and app restarts. */
+    suspend fun bookCoverColors(): List<BookCoverColor> = withContext(Dispatchers.IO) {
+        lock.withLock {
+            if (!loaded) emptyList() else coverColors.colors(mutableBooks.value, ::extractColor)
+        }
+    }
+
+    private fun extractColor(book: BookRecord): Int = coverThemeSeed(thumbnailBitmap(book))
 
     /**
      * Deletes `import-*.epub` copies that no running import owns, left behind when the app was killed
@@ -201,7 +216,7 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
             writePng(coverFile(record), bitmap)
             writePng(thumbnailFile(record), shrink(bitmap))
             forgetThumbnails(id)
-            persist(mutableBooks.value.map { if (it.id == id) it.copy(coverRevision = System.currentTimeMillis()) else it })
+            persist(mutableBooks.value.map { if (it.id == id) it.copy(coverRevision = maxOf(System.currentTimeMillis(), record.coverRevision + 1)) else it })
         }
     }
 

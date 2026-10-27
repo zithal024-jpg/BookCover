@@ -31,6 +31,7 @@ internal fun LibraryScreen(
     onRemove: (BookRecord) -> Unit, onExportBackup: () -> Unit, onRestoreBackup: () -> Unit, onDiagnostics: () -> Unit,
     libraryTheme: String, onLibraryTheme: (String) -> Unit,
     importProgress: ImportProgress? = null, onStopImport: () -> Unit = {},
+    coverColors: List<BookCoverColor> = emptyList(),
 ) {
     var query by remember { mutableStateOf("") }
     var collection by remember { mutableStateOf("All") }
@@ -139,5 +140,6 @@ internal fun LibraryScreen(
     if (settings) LibrarySettingsDialog(busy = busy, autoCover = autoCover, timer = timer, onAutoCover = onAutoCover,
         onTimer = onTimer, libraryTheme = libraryTheme, onLibraryTheme = onLibraryTheme,
         onExportBackup = onExportBackup, onRestoreBackup = onRestoreBackup, onDiagnostics = onDiagnostics,
-        developerOptions = developerOptions, onDeveloperOptions = { developerOptions = true }, onDismiss = { settings = false })
+        developerOptions = developerOptions, onDeveloperOptions = { developerOptions = true }, onDismiss = { settings = false },
+        coverColors = coverColors)
 }

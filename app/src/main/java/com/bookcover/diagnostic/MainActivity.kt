@@ -99,9 +99,10 @@ class MainActivity : FragmentActivity() {
         setContent {
             val books by library.books.collectAsState()
             val recent = books.filter { it.lastReadAt > 0 }.maxByOrNull { it.lastReadAt }
-            val seed by produceState(DEFAULT_COVER_SEED, recent?.id, recent?.coverRevision) {
-                value = recent?.let { book -> withContext(Dispatchers.IO) { coverThemeSeed(library.thumbnailBitmap(book)) } } ?: DEFAULT_COVER_SEED
+            val coverColors by produceState<List<BookCoverColor>>(emptyList(), books.map { it.id to it.coverRevision }) {
+                value = library.bookCoverColors()
             }
+            val seed = coverColors.firstOrNull { it.bookId == recent?.id }?.seed ?: DEFAULT_COVER_SEED
             // Automatic follows the system light/dark setting; a chosen theme keeps its own.
             val systemDark = isSystemInDarkTheme()
             val libraryDark = LibraryThemeChoice.fromId(libraryTheme).isDark(systemDark)
@@ -126,7 +127,7 @@ class MainActivity : FragmentActivity() {
                     onRestoreBackup = { restoreLibrary.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
                     onDiagnostics = { showDiagnostics = true }, libraryTheme = libraryTheme,
                     onLibraryTheme = { libraryTheme = it; preferences.edit().putString("libraryTheme", it).apply() },
-                    importProgress = importProgress, onStopImport = { importCancellation?.cancel() })
+                    importProgress = importProgress, onStopImport = { importCancellation?.cancel() }, coverColors = coverColors)
                 else EpubReaderScreen(current, books.firstOrNull { it.id == current.book.id } ?: current.book,
                     exterior.active, exterior.busy, exterior.stopPending, exterior.available && !busy,
                     message + "\n" + exterior.status,

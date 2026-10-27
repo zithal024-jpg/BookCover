@@ -137,6 +137,31 @@ class BookLibraryTest {
         assertEquals(updated.coverRevision, newLibrary().apply { load() }.book(book.id)!!.coverRevision)
     }
 
+    @Test fun coverColorsFollowActualReplacementSurviveRestartAndReconcileRemoval() = runBlocking {
+        val library = newLibrary().apply { load() }
+        val book = library.import(epub()).first
+        val first = library.bookCoverColors().single()
+        assertEquals(book.id, first.bookId)
+        assertEquals("Importing does not mark a book read", 0L, library.book(book.id)!!.lastReadAt)
+        val pink = 0xFFF8D7E3.toInt()
+        val image = File(directory, "pink-cover.png").apply {
+            outputStream().use { Bitmap.createBitmap(40, 60, Bitmap.Config.ARGB_8888).apply { eraseColor(pink) }
+                .compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+        library.replaceCover(book.id, Uri.fromFile(image))
+        val replaced = library.bookCoverColors().single()
+        assertEquals("Replacement refreshes the extracted source", pink, replaced.seed)
+        val selected = coverColorThemeId(pink)
+        assertEquals(selected, savedLibraryTheme(selected))
+        assertEquals(listOf(replaced), newLibrary().apply { load() }.bookCoverColors())
+        library.remove(book.id)
+        assertTrue(library.bookCoverColors().isEmpty())
+        assertEquals("Active detached color survives source removal", selected, coverColorChoices(emptyList(), selected).single().id)
+        assertEquals("Selection stays usable with a different Automatic seed",
+            libraryPalette(selected, first.seed), libraryPalette(selected, DEFAULT_COVER_SEED))
+        assertTrue(newLibrary().apply { load() }.bookCoverColors().isEmpty())
+    }
+
     @Test fun positionsBookmarksAndCollectionsSurviveReopening() = runBlocking {
         val library = newLibrary().apply { load() }
         val book = library.import(epub()).first

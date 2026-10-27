@@ -5,11 +5,17 @@ import android.content.Intent
 import android.graphics.Rect
 import android.os.Build
 import android.os.SystemClock
+import android.view.InputDevice
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.bookcover.diagnostic.library.BookRecord
+import com.bookcover.diagnostic.library.LibraryThemeChoice
+import com.bookcover.diagnostic.library.coverColorThemeId
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -66,11 +72,14 @@ class LibraryAccessibilityTest {
         click("Collection: Samples", forward = false)
         waitFor("the collection exposes selected state") { find("Collection: Samples")?.let(::selected) == true }
         click("Settings", forward = false)
+        click("Appearance", dialog = true)
         val automatic = reveal("Automatic (Book Cover)", dialog = true)
         assertTrue("The automatic theme exposes selected state; ${selectionDiagnostics(automatic)}", selected(automatic))
         click("Paper · light", dialog = true)
         waitFor("the new theme is selected") { find("Paper · light")?.let(::selected) == true }
         assertEquals("paper", main { host.themeId })
+        click("Back to Library settings", dialog = true)
+        click("Outside cover", dialog = true)
         val coverSwitch = reveal("Start outside cover when opening a book", dialog = true)
         assertTrue("The cover switch is checkable", coverSwitch.isCheckable)
         assertFalse("The cover switch starts off", coverSwitch.isChecked)
@@ -90,15 +99,188 @@ class LibraryAccessibilityTest {
         val options = reveal("Options for ${book.title}")
         assertTrue("The options target remains usable with large text", fullyVisible(options))
         click("Settings", forward = false)
+        click("Appearance", dialog = true)
         click("Paper · light", dialog = true)
         assertEquals("Large text preserves the theme action", "paper", main { host.themeId })
+        click("Plum", dialog = true)
+        assertEquals("The last built-in preset stays reachable with large text", "plum", main { host.themeId })
+        click("${book.title} · #19A6D1", dialog = true)
+        assertEquals("The cover colour stays reachable with large text", coverColorThemeId(LibraryAccessibilityActivity.TEST_COVER_SEED), main { host.themeId })
+        click("Back to Library settings", dialog = true)
+        listOf("Appearance", "Outside cover", "Backup", "About").forEach { category ->
+            assertTrue("$category is reachable with large text", fullyVisible(reveal(category, dialog = true)))
+        }
+        click("Outside cover", forward = false, dialog = true)
+        click("Outside cover timer: manual", dialog = true)
+        assertEquals(0, main { host.timer })
+        click("Back to Library settings", dialog = true)
+        click("About", dialog = true)
+        repeat(7) { click("BookCover 0.4.0 prototype", dialog = true) }
+        assertTrue("The revealed diagnostic action stays reachable with large text", fullyVisible(reveal("Device diagnostics", dialog = true)))
+        click("Back to Library settings", dialog = true)
         click("Done", dialog = true)
-        waitFor("the settings dialog closes") { find("Library settings") == null }
+        waitFor("the settings dialog closes") { find("Done") == null }
+    }
+
+    @Test fun compactCategoriesKeepEveryPresetAndTimerOptionReachable() {
+        launch()
+        click("Settings")
+        listOf("Appearance", "Outside cover", "Backup", "About").forEach { category ->
+            val row = reveal(category, dialog = true)
+            val bounds = Rect().also(row::getBoundsInScreen)
+            assertTrue("$category has a 48 dp target", bounds.height() / main { host.resources.displayMetrics.density } >= 47.5f)
+        }
+        assertNull("The full theme list is absent from the compact first level", find("Paper · light"))
+        assertNull("Backup actions stay inside Backup", find("Save backup"))
+        click("Appearance", forward = false, dialog = true)
+        LibraryThemeChoice.entries.forEach { choice ->
+            click(choice.label, dialog = true)
+            waitFor("${choice.label} remains selectable") { main { host.themeId } == choice.id && find(choice.label)?.let(::selected) == true }
+        }
+        click("Back to Library settings", dialog = true)
+        click("Outside cover", dialog = true)
+        listOf("Outside cover timer: 30 minutes" to 30, "Outside cover timer: 60 minutes" to 60,
+            "Outside cover timer: manual" to 0).forEach { (label, value) ->
+            click(label, dialog = true)
+            waitFor("$label is selected") { main { host.timer } == value && find(label)?.let(::selected) == true }
+        }
+    }
+
+    @Test fun backDismissAndReopenKeepValuesAndRestoreThePreviousLevel() {
+        launch()
+        click("Settings")
+        click("Appearance", dialog = true)
+        click("Paper · light", dialog = true)
+        pressBack()
+        waitFor("Back returns to the compact settings level") { find("Library settings") != null && find("Appearance")?.isClickable == true }
+        assertNull("The picker closes on Back", find("Library theme"))
+        click("Outside cover", dialog = true)
+        click("Start outside cover when opening a book", dialog = true)
+        click("Outside cover timer: 60 minutes", dialog = true)
+        click("Done", dialog = true)
+        waitFor("Done returns to the library") { find("Done") == null && find("Settings") != null }
+        click("Settings")
+        assertEquals("The Appearance summary reflects the chosen theme", "Paper · light", reveal("Appearance", dialog = true).stateDescription?.toString())
+        click("Outside cover", dialog = true)
+        assertTrue(reveal("Start outside cover when opening a book", dialog = true).isChecked)
+        assertTrue(selected(reveal("Outside cover timer: 60 minutes", dialog = true)))
+        pressBack()
+        waitFor("Back returns from Outside cover to the first level") { find("Library settings") != null }
+        pressBack()
+        waitFor("Back from the first level dismisses to the library") { find("Done") == null }
+        click("Settings")
+        click("Appearance", dialog = true)
+        tapOutsideSettings()
+        waitFor("An outside tap dismisses the focused page to the library") { find("Done") == null && find("Settings") != null }
+    }
+
+    @Test fun coverColorSelectionSurvivesActivityRestartWithCoverAndTimerPreferences() {
+        launch()
+        click("Settings")
+        click("Appearance", dialog = true)
+        val label = "${book.title} · #19A6D1"
+        click(label, dialog = true)
+        assertEquals(coverColorThemeId(LibraryAccessibilityActivity.TEST_COVER_SEED), main { host.themeId })
+        assertTrue(selected(reveal(label, dialog = true)))
+        val automatic = reveal("Automatic (Book Cover)", forward = false, dialog = true)
+        assertFalse("A dynamic selection must not also select Automatic", selected(automatic))
+        click("Back to Library settings", dialog = true)
+        click("Outside cover", dialog = true)
+        click("Start outside cover when opening a book", dialog = true)
+        click("Outside cover timer: manual", dialog = true)
+        scenario!!.recreate()
+        scenario!!.onActivity { host = it }
+        book = main { withTimeout(20_000) { host.ready.await() } }
+        waitFor("the recreated library renders") { find("Settings") != null }
+        assertEquals(coverColorThemeId(LibraryAccessibilityActivity.TEST_COVER_SEED), main { host.themeId })
+        assertTrue(main { host.autoCover })
+        assertEquals(0, main { host.timer })
+        click("Settings")
+        click("Appearance", dialog = true)
+        assertTrue("The persisted derived colour is still selected", selected(reveal(label, dialog = true)))
+    }
+
+    @Test fun backupActionsKeepBusyGuardsAndDismissBeforeInvokingCallbacks() {
+        launch()
+        click("Settings")
+        click("Backup", dialog = true)
+        main { host.busy = true }
+        waitFor("both backup actions disable while busy") {
+            find("Save backup")?.isEnabled == false && find("Restore backup")?.isEnabled == false
+        }
+        assertEquals(0, main { host.exportRequests })
+        assertEquals(0, main { host.restoreRequests })
+        main { host.busy = false }
+        waitFor("both backup actions re-enable after work finishes") {
+            find("Save backup")?.isEnabled == true && find("Restore backup")?.isEnabled == true
+        }
+        click("Save backup", dialog = true)
+        waitFor("Save invokes its callback and returns to the library") { main { host.exportRequests } == 1 && find("Done") == null }
+        click("Settings")
+        click("Backup", dialog = true)
+        click("Restore backup", dialog = true)
+        waitFor("Restore invokes its callback and returns to the library") { main { host.restoreRequests } == 1 && find("Done") == null }
+    }
+
+    @Test fun noticesLicencesAndSevenTapDiagnosticEntryRemainAvailable() {
+        launch()
+        click("Settings")
+        click("About", dialog = true)
+        waitFor("About publishes the retained Readium and OpenDyslexic notices") {
+            find("EPUB engine: Readium 3.4.0 · BSD 3-Clause\nOpenDyslexic font by Abelardo Gonzalez · CC BY 3.0, based on Bitstream Vera") != null
+        }
+        assertNull("Diagnostics start hidden", find("Device diagnostics"))
+        click("Licences", dialog = true)
+        click("Show full licence for OpenDyslexic font")
+        waitFor("the bundled font licence text expands") { find("Hide full licence for OpenDyslexic font") != null }
+        click("Back to About", forward = false)
+        waitFor("Licences Back returns to About") { find("About") != null && find("BookCover 0.4.0 prototype") != null }
+        click("Licences", dialog = true)
+        pressBack()
+        waitFor("System Back also returns from Licences to About") { find("About") != null && find("BookCover 0.4.0 prototype") != null }
+        repeat(6) { click("BookCover 0.4.0 prototype", dialog = true) }
+        assertNull("Six taps do not reveal diagnostics", find("Device diagnostics"))
+        click("BookCover 0.4.0 prototype", dialog = true)
+        reveal("Device diagnostics", dialog = true)
+        click("Done", dialog = true)
+        click("Settings")
+        click("About", dialog = true)
+        click("Device diagnostics", dialog = true)
+        waitFor("unlocked diagnostics survive reopen and invoke the callback") { main { host.diagnosticRequests } == 1 && find("Done") == null }
+    }
+
+    private fun pressBack() {
+        waitFor("the current settings dialog receives keyboard Back") {
+            val window = (find("Back to About") ?: find("Done"))?.window
+            window?.isFocused == true && window.isActive
+        }
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        instrumentation.waitForIdleSync()
+    }
+
+    private fun tapOutsideSettings() {
+        val dialogBounds = Rect().also { find("Done")!!.window.getBoundsInScreen(it) }
+        val hostBounds = main { Rect().also { host.window.decorView.getGlobalVisibleRect(it) } }
+        val leftGap = dialogBounds.left - hostBounds.left
+        val topGap = dialogBounds.top - hostBounds.top
+        assertTrue("The dialog leaves a dismissible outside area", leftGap > 4 || topGap > 4)
+        val x = if (leftGap > 4) (hostBounds.left + dialogBounds.left) / 2f else dialogBounds.centerX().toFloat()
+        val y = if (leftGap > 4) dialogBounds.centerY().toFloat() else (hostBounds.top + dialogBounds.top) / 2f
+        val downAt = SystemClock.uptimeMillis()
+        val down = MotionEvent.obtain(downAt, downAt, MotionEvent.ACTION_DOWN, x, y, 0).apply { source = InputDevice.SOURCE_TOUCHSCREEN }
+        val up = MotionEvent.obtain(downAt, downAt + 40, MotionEvent.ACTION_UP, x, y, 0).apply { source = InputDevice.SOURCE_TOUCHSCREEN }
+        try {
+            assertTrue(automation.injectInputEvent(down, true))
+            assertTrue(automation.injectInputEvent(up, true))
+        } finally {
+            down.recycle(); up.recycle()
+        }
+        instrumentation.waitForIdleSync()
     }
 
     private fun launch(fontScale: Float = 1f) {
         LibraryAccessibilityActivity.fontScaleForTests = fontScale
-        val intent = Intent(target, LibraryAccessibilityActivity::class.java)
+        val intent = Intent(target, LibraryAccessibilityActivity::class.java).putExtra("settingsSession", UUID.randomUUID().toString())
         scenario = ActivityScenario.launch<LibraryAccessibilityActivity>(intent).also {
             it.onActivity { activity -> host = activity }
         }
@@ -107,23 +289,62 @@ class LibraryAccessibilityTest {
     }
 
     private fun click(label: String, forward: Boolean = true, dialog: Boolean = false) {
-        val node = reveal(label, forward, dialog)
-        assertTrue("$label exposes an accessibility click", node.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        reveal(label, forward, dialog)
+        // A just-opened dialog or re-enabled control may still have an old accessibility node.
+        // Retry only rejected actions, obtaining a fresh node each time; an accepted click is never repeated.
+        waitFor("$label accepts an enabled accessibility click") {
+            val node = find(label)
+            node != null && fullyVisible(node) && node.isEnabled && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        }
         instrumentation.waitForIdleSync()
+        // Accessibility actions can be accepted before the next frame/window is published.
+        // Wait for the destination itself, so a root summary cannot masquerade as a picker row.
+        when (label) {
+            "Settings", "Back to Library settings" -> waitFor("the compact settings level renders") {
+                find("Library settings") != null && find("Appearance") != null && find("Library theme") == null
+            }
+            "Appearance" -> waitFor("the Appearance picker renders") {
+                find("Library theme") != null || (find("Appearance")?.isClickable == false &&
+                    find("Back to Library settings") != null && find("Library settings") == null)
+            }
+            "Outside cover" -> waitFor("the Outside cover controls render") { find("Outside cover timer") != null }
+            "Backup" -> waitFor("the Backup actions render") { find("Save backup") != null }
+            "About", "Back to About" -> waitFor("the About controls render") {
+                find("EPUB engine: Readium 3.4.0 · BSD 3-Clause\nOpenDyslexic font by Abelardo Gonzalez · CC BY 3.0, based on Bitstream Vera") != null &&
+                    find("Back to About") == null
+            }
+            "Licences" -> waitFor("the Licences window receives focus") {
+                val window = find("Back to About")?.window
+                window?.isFocused == true && window.isActive
+            }
+            "Done" -> waitFor("settings dismisses to the library") { find("Done") == null && find("Settings") != null }
+        }
     }
 
     private fun reveal(label: String, forward: Boolean = true, dialog: Boolean = false): AccessibilityNodeInfo {
+        var scrollForward = forward
         waitFor("$label is fully visible and actionable") {
             val node = find(label)
             if (node != null && fullyVisible(node)) return@waitFor true
             node?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
             instrumentation.waitForIdleSync()
             if (find(label)?.let(::fullyVisible) == true) return@waitFor true
-            val scroll = if (dialog) find("Library settings")?.window?.root?.let { root ->
+            val scroll = if (dialog) find("Done")?.window?.root?.let { root ->
                 descend(root) { it.isScrollable && it.isVisibleToUser }
             }
                 else findNode { it.viewIdResourceName?.substringAfterLast('/') == "library-scroll" }
-            scroll?.performAction(if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
+            if (scroll != null) {
+                val targetBounds = find(label)?.let { Rect().also(it::getBoundsInScreen) }
+                val scrollBounds = Rect().also(scroll::getBoundsInScreen)
+                // A partially clipped target tells us which edge to bring into view.
+                if (targetBounds != null && !targetBounds.isEmpty) {
+                    if (targetBounds.top <= scrollBounds.top && targetBounds.bottom < scrollBounds.bottom) scrollForward = false
+                    else if (targetBounds.bottom >= scrollBounds.bottom && targetBounds.top > scrollBounds.top) scrollForward = true
+                }
+                val accepted = scroll.performAction(if (scrollForward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
+                // At an exhausted edge, search in the other direction instead of staying stuck there.
+                if (!accepted) scrollForward = !scrollForward
+            }
             SystemClock.sleep(100)
             false
         }
