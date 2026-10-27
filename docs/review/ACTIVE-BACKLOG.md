@@ -53,28 +53,54 @@ with reader code identical to `db379d4`. Owner whole-app check 2026-10-27: the o
 reported that the redesigned Library shows, and reading, the outer cover and their
 books all look fine.
 
-**Consolidated candidate (prepared 2026-10-27, NOT installed):** `6b09295` on
+**Consolidated candidate — awaiting Codex verification; NOT accepted, NOT approved
+for install (prepared 2026-10-27):** `6b09295` on
 `claude/bookcover-consolidated-build-98bfcb` = installed `7ce3066`/`87f282e` + BC-22
 (`b85721f`, explicit handoff from its session) + docs corrections. Contains `7ce3066`
 (no-regression rule 1 met). BC-26 and F2 duplicates on Codex branches (`1f29eef`,
 `8e7e891`, `f0d667d`) are identical patches already included; no second copy. Excluded:
 BC-20 calibration (uncommitted WIP in `bc20-pace-calibration`), uncommitted h3 worktree,
-open S2 follow-ups (dismissed message, collection named `All`). APK
-`BookCover-candidate-4b1bfccc9643b36b.apk`, SHA-256 `7c5b54c4…dca83d243`,
-`com.bookcover.diagnostic`, `0.4.0-prototype`, versionCode 6, Android Debug cert
-SHA-256 `c4014c59…205f3929` (identical to the installed APK: in-place update compatible;
-no INTERNET permission). Read-only content review confirmed S2, F1–F4, F3 follow-up
-`db379d4`, BC-26 tests and BC-28 corrections present. `Build.ps1 -TaskId candidate`:
-**262/262 units**, `assembleDebug`, `lintDebug`/`lintQa` 0 errors; source snapshot
-`145b9875…`. Full QA on a disposable foldable emulator: 106/127 passed, 1 skipped,
-20 failed; the 18 reader input/inset/fold failures also fail on baseline `87f282e`
-on the same emulator, and the other 2 are BC-22's `ScreenIdleTest`. On the
-phone-sized emulator, `ReadingKeysAccessibilityTest` 6/6, `ReadingNavigationTest` 5/5
-and `ScreenIdleTest` 3/4 passed (key and touch renewal pass; only the fold step fails,
-and that emulator cannot fold). Swipe, soft-keyboard and nav-bar-inset failures match
-baseline. Fold, swipe and real screen-off behaviour therefore have **no emulator evidence**;
-BC-22's own 27/27 owner-Fold QA applies to identical app code. Codex verification of
-`6b09295`, the owner-approved install, the whole-app check and the battery test are pending.
+open S2 follow-ups (dismissed message, collection named `All`). Read-only content
+review confirmed S2, F1–F4, F3 follow-up `db379d4`, BC-26 tests and BC-28 corrections
+present.
+
+*Build identity* (record commits such as this one are docs-only and are **not** part of it):
+source commit `6b092955d8293e93de59d3b7820f09ae41505e57` (app/build inputs identical
+to `092f6e8e245eb14738f46a330c932750bdcf2ba5`); baseline
+`87f282ede300ecf42f6f52db15fced2683696e70` unchanged. `Build.ps1 -TaskId candidate`
+source snapshot `145b98757469bbb534ce43000e91a7f6df2a50b9e991fc4df1a6996c2af674e1`,
+evidence `145b9875…-88288b53c5894dc9b3d5e3ecf6776ec4.json`. APK
+`BookCover-candidate-4b1bfccc9643b36b.apk`, SHA-256
+`7c5b54c4bfa5514f3224cb24ae845abb585f3f176c668499e955b27dca83d243`;
+`com.bookcover.diagnostic`, `0.4.0-prototype`, versionCode 6; v2 signer `CN=Android Debug`,
+cert SHA-256 `c4014c59942495ab82332093df8eae893655182ac31e7fe5bba84293205f3929`, same as
+the installed APK (`17ea4c8f…19915e400`), so in-place update is compatible; no INTERNET
+permission. **262/262 units**, `assembleDebug`, `lintDebug`/`lintQa` 0 errors.
+
+*Emulator QA* (disposable 7.6in foldable AVD with device states 1/2/3, plus the phone-sized
+`127.0.0.1:5601`; baseline task `baseline-72081f2fe7a81c72`). Full candidate suite on the
+foldable: 106/127 passed, 1 skipped (`ReadingLayoutTest`), 20 failed. All import, backup,
+library, Library Home, accessibility, corpus, BC-26 and both process-death tests passed.
+Dispositions, which Codex should reproduce:
+
+1. `NativeReaderTest` swipe/edge-tap (6): identical failures on baseline on both emulators.
+   Pre-existing emulator gesture-injection limit; not a regression. Needs the physical Fold.
+2. `BookSearchTest` soft-keyboard check (1): fails on baseline on both emulators (baseline
+   also failed one timing test). Pre-existing emulator IME limit.
+3. `ReaderBottomSpaceTest` (2): identical on baseline on both emulators. Pre-existing
+   emulator nav-bar inset; not a regression.
+4. `ReaderContinuityTest` (3) and `ReaderLifecycleTest` fold step (1): identical on baseline.
+   The tests request Samsung fold states 0/3; these emulators cannot satisfy them.
+5. `ReadingKeysAccessibilityTest` (3) and `ReadingNavigationTest` (2): fail identically on
+   baseline on the foldable, and pass 6/6 and 5/5 for the candidate on `5601`.
+6. `ScreenIdleTest` (BC-22, new; no baseline): on the foldable, 2 fail (key renewal; fold
+   step). On `5601`, 3/4 pass, including key and touch renewal; only the fold step fails.
+   **Unresolved by emulator, not shown to be a regression**: the fold step and real
+   screen-off still need phone QA before acceptance.
+
+Fold, swipe and real screen-off have no emulator evidence. BC-22's own 27/27 owner-Fold QA
+was run on identical app code. Pending: Codex verdict, owner approval and PHONE reservation
+for any install, the whole-app check, the cover/screen-off observation and the battery test.
 
 ## Active queue
 
