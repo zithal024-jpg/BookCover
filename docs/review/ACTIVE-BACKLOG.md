@@ -1,0 +1,89 @@
+# BookCover active backlog
+
+This is the **single active work queue** for the owner, Opus and Codex. The
+[BC completion tracker](EXPERT-PANEL-REVIEW.md#completion-tracker) retains detailed
+implementation evidence/history; its existing summaries are not a second assignment
+queue. Reconciled against `main` at `5eed90b` on 2026-10-27 and the owner updates
+below. This document records work, not release readiness.
+
+## Working agreement
+
+- **Record new review findings here FIRST, before drafting or distributing
+  implementation prompts.** Reuse overlapping tasks; preserve BC IDs and review
+  labels. Keep one row per task with priority/status, actual owner when known,
+  scope/acceptance, dependency and evidence.
+- Agents independently choose authorized work and update their relevant row on a
+  material status change, blocker or completion. No routine PM grants. A sent
+  prompt is a proposed assignment until work is confirmed. Check shared files and
+  resources; preserve concurrent changes under [CLAUDE.md](../../CLAUDE.md).
+- Separate implementation from validation and code-supported risks from reproduced
+  defects. Record completion commit and exact checks/limits with the work; retain
+  detailed original-BC evidence in its existing completion row. Move finished queue
+  rows to the brief completed section or link their evidence there. No daily logs
+  or duplicate live statuses elsewhere.
+- `Now`, `Next`, `Later` order this queue; original P1/P2/P3 and review severity stay
+  visible. Dependencies and actual conflicts take precedence. Device validation
+  uses isolated QA through the supported helper, required resource release evidence
+  and owner availability.
+
+## Active queue
+
+F1/F4 and S2 can proceed in parallel in separate data/activity and Library UI files.
+F3 and F2 follow F1/F4 to avoid competing edits. Unassigned work can proceed
+independently where its dependencies and shared files permit.
+
+| ID / source label | Priority / severity | Status | Owner | Scope and acceptance | Dependency | Evidence / source |
+| --- | --- | --- | --- | --- | --- | --- |
+| **F1 / F4** | Now; medium F1, low F4 | Prompt delivered 17:17 UTC; start unconfirmed | Proposed: Codex | Picker return after recreation: require successful library readiness **before opening/truncating the backup destination**; distinguish valid empty from unloaded/failed; surface failure/cancellation; export a consistent snapshot; restore correctly; preserve pending cover book ID; keep operation state accurate through overlap. Regress delayed/failed load, recreation, cancellation and overlapping completion. | `MainActivity.kt` + `BookLibrary.kt`. Do not wait under the lock loading needs or assume atomic SAF destination replacement. | Code review F1/F4 at `5eed90b`: strongly code-supported, **not reproduced**. Initial empty list plus destination mode `wt` can replace a good backup with zero books. Owner reports prompt delivery only. |
+| **S2 / UX §1** (BC-23 follow-up) | Now; substantial | Active; owner confirmed 17:16 UTC | Opus | One Library Home redesign: Continue near top, saved-position reassurance within it, compact count/sort, compact Streak summary opening existing details. Preserve search, filters, all sorts and data. At 360 × 800 dp / 100% system text, Continue plus one cover and complete title fit without scrolling. At 200%, allow scrolling and retain readable actions. Check matching Library states, narrow/wide and light/dark. | Keep existing S2 task; avoid concurrent Library UI edits. | UX images 01–03; proposed acceptance, not results. Existing [S2 brief](PRODUCT-PRIORITIES-2026-10-26.md#s2-library-home-that-gets-the-reader-back-into-the-book). Aesthetic release quality is the owner's goal; calm editorial styling was a suggestion, not a confirmed choice. |
+| **F3** | Next; low | Open; implementation/validation pending | — | Verify both failed/cancelled open paths: close created session, publication and observer when opening/marking fails, including cancellation as `engine.open` returns. Focused exception/cancellation checks must preserve successfully transferred ownership. | After F1/F4; shares `MainActivity.kt`. | Code review F3: code-supported resource leak, not reproduced. One catch-path fix alone does not verify both paths. |
+| **F2** | Next; low | Open; implementation/validation pending | — | Safe interrupted/failed import cleanup. Focused persistence-failure/interruption checks preserve indexed books, positions/bookmarks. Clean only proven abandoned app-owned files; do not delete recoverable books merely because unreferenced or blindly persist an index before files exist. | After F1/F4; shares `BookLibrary.kt` and import tests. | Code review F2: final EPUB/covers precede index persistence; code-supported orphan-storage risk, not reproduced. BC-27 temporary-copy cleanup stays closed. |
+| **UX §2** | Now to verify; conditional substantial | Verification pending; correction conditional | — | Compare fixed-pixel reflowable publisher text, relative-size text and generated sample with publisher styles on/off. Observe body enlargement, passage and existing bookmarks. If exception persists, explain recovery beside toggle; otherwise correct docs and close without product changes. Check narrow/wide, Paper/Night and 100%/200% system text. | Resolve old H3 uncertainty before related reader edits; avoid concurrent changes. | UI says “Text size still applies”; brief records a fixed-pixel exception. Screenshots do **not** reproduce failed resizing. Completed C1 latency fix stays closed. |
+| **UX validation** (BC-10 follow-up) | Next; validation | Pending after changed surfaces settle | — | One consolidated TalkBack, 200% text, actual touch-target and contrast pass: resume/open, enlarge text, select search result, dismiss sheet, inspect Streak. Record measurements/failures before correction tasks. Targets: 48 × 48 dp; 4.5:1 small/regular text, 3:1 qualifying large text. | After S2 and any verified §2 correction; include other changed controls once. | UX acceptance targets, **not measured BookCover failures**; prior QA/formal-audit limits remain in BC-10/23/29. |
+| **BC-22 / S1** | Next; original P2 | Open; implementation/measurement pending | — | Configurable inner-screen idle timeout; meaningful activity keeps reading awake. Record 60-minute battery drain and conditions. Preserve cover Stop/exit/timer behavior. Reconcile S1's proposed timer-semantics change before altering the confirmed countdown. | Reader/cover files; resolve H3 uncertainty before related edits. Measurements need owner availability. | [Original acceptance](EXPERT-PANEL-REVIEW.md#prioritized-issue-register), [S1 proposal](PRODUCT-PRIORITIES-2026-10-26.md#s1-session-aware-screen-timeout-and-cover-timer). At `5eed90b`, `setReadingWindow` keeps screen on for whole open-book session. No battery figure verified. |
+| **BC-26** | Next; original P3 | Implementation done; acceptance unreconciled | — | Reconcile existing QA with visible friendly errors for corrupt EPUB import and non-backup restore. Add only missing isolated checks; preserve data and keep raw exception details out of messages. Record exact evidence or remaining gap. | F1/F4 for backup behavior; existing mapper stays in place. | [Completion evidence](EXPERT-PANEL-REVIEW.md#completion-tracker): mapper/wiring + nine JVM tests done (`e3826ed`); phone check recorded pending. Corpus rejection/logging alone does not prove displayed messages. |
+| **BC-15** | Later; original P2 | Open; state extraction remains | — | Move remaining activity-owned state/logic into a testable holder/repository in bounded steps; preserve session, passage, cover and Streak behavior. Test concurrent operation logic; reuse F1/F4 rather than fixing twice. | After F1/F4 and F3 stabilize `MainActivity.kt`; resolve H3 uncertainty for reader files. | [Original scope/evidence](EXPERT-PANEL-REVIEW.md#completion-tracker). Activity still owns session/busy/message at `5eed90b`. Completed BC-07 continuity is not reopened by maintenance. |
+| **BC-19 / S3** | Later; original P2 | Open enhancement; observation before implementation priority | — | Observe sustained long-real-book reading at preferred size/margins; use results to rank a spread option. If pursued, retain folded single-page reading, safe hinge layout and passage continuity. Do not force two pages to fill width. | Owner observation; H3 uncertainty before reader edits. | [Original spread scope](EXPERT-PANEL-REVIEW.md#prioritized-issue-register), UX “Later”; `ColumnCount.ONE` at `5eed90b`. Wide screenshots alone do not establish harm. |
+| **BC-20** (calibration only) | Later; original P2 | Core done; natural-reading validation pending | — | Observe reading-speed/time-left estimates during natural reading; record usefulness or needed calibration, conditions and owner feedback. Contents, chapter progress and named bookmarks stay complete. | Owner reading observation; H3 uncertainty before related reader edits. | [BC-20 evidence](../BC-20-READING-NAVIGATION.md#validation-record): core owner-confirmed; automated pace policy checked; reading speed explicitly TBD. |
+| **BC-28** | Later; original P3 | Partial; broader consolidation remains | — | Consolidate current README, architecture/contribution/change guidance and clearly archived history: a contributor finds one supported build/test route. Preserve history/safety; no second active tracker. | This queue/pointers complete a subset only. | [BC-28 evidence](EXPERT-PANEL-REVIEW.md#completion-tracker), `90e25bb`: entrypoints refreshed; overlapping historical docs remain. |
+| **BC-11** | Owner decision; original P1 | Decisions pending; engineering unassigned | Owner for decisions | Final name/application ID, signing and release/distribution intent. After owner choices, audit existing release setup and define remaining signed-release acceptance. Keep keys out of Git and preserve installed library. | Owner choices, then relevant fix/validation evidence. Queue authorizes no publication/release. | [BC-11 scope](EXPERT-PANEL-REVIEW.md#prioritized-issue-register); BC-24 already records unsigned-release manifest checks, so original absence of release build cannot be assumed. |
+
+## Shared-file caution and scope limits
+
+Code review reported uncommitted work in
+`C:\Users\Frank\Documents\BookCover-Workareas\h3` on `a8f6d9e`, touching
+`EpubSession.kt`, `EpubReaderScreen.kt`, `ReadingComfortPreferences.kt` and two
+device tests; it was not reviewed. This organizer's read-only status check was
+**denied access**, so present dirty state/ownership is unknown. Preserve it and
+resolve whether it is live before related reader edits; silence is not release.
+Opus's active worktree already has Library QA/screenshot changes; leave them with S2.
+
+Streak backup inclusion is an **owner scope choice**, not a defect or assigned
+implementation. An optional owner-assisted continuous outside-cover demonstration
+(auto/manual start, Stop, timer, exit, fold/passage/bookmark) would add evidence;
+prior confirmed physical checks stay complete. No dashboard, Streak rewards,
+Settings redesign, duplicate search highlighting, online services or PDF work.
+
+## Completed work and evidence
+
+At `5eed90b`, BC-01–29 have **23 Done, four Open and two Partial** summaries;
+remaining portions are queued above, including BC-20 calibration. Keep the
+[detailed history](EXPERT-PANEL-REVIEW.md#completion-tracker). BC-07
+fold/process-death, C1 performance, bottom-gap fix, BC-24 and BC-29 stay closed.
+Reading Streak is owner-confirmed: documentation-only commit `911beba` records it
+on the Streak branch, not yet on this `main` snapshot. Stale “owner pending” notes
+are not new tasks. Formal accessibility coverage is the single validation row above.
+
+## Review sources
+
+- **Code:** *BookCover release-risk review at 5eed90b*, Library file
+  `Pasted text(20261027-171115).txt`, ID `libfile_ef7ea0fb4684819191a7248479e1b529`.
+  Read-only source review; no builds/tests. F1–F4 are source findings, not reproduced
+  results. Suggested mechanisms are not mandated implementations.
+- **UX:** report beginning *No critical issue is established by this evidence*,
+  Library file `Pasted text.md`, ID `libfile_3a3ef9e79e488191b5fa260c42193460`.
+  Supplied brief and numbered generated-sample QA images, 800 × 1000 and
+  360 × 800 dp; these do not demonstrate physical fold/cover behavior.
+- [Review conversation and owner updates](https://chatgpt.com/c/6ae0d7f6-14f8-83e8-9785-4d7e298066c3).
+  Both Library reports were read for this reconciliation. Owner updates establish
+  S2 active at 17:16 UTC and F1/F4 prompt delivery at 17:17 UTC on 2026-10-27.
