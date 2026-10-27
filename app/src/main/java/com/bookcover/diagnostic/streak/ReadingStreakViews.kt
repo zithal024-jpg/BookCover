@@ -4,7 +4,6 @@ import android.provider.Settings
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -39,6 +38,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.bookcover.diagnostic.library.ChevronGlyph
+import com.bookcover.diagnostic.library.homePanelColor
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
@@ -67,18 +68,20 @@ internal fun ReadingStreakCard(records: ReadingDays, onCelebrated: (LocalDate) -
     }
     val settle = if (celebrate) celebration.value else 1f
     val scheme = MaterialTheme.colorScheme
-    Surface(shape = RoundedCornerShape(14.dp), color = scheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, scheme.outlineVariant),
+    // A compact summary row: the books lead on Library Home, the details sheet holds the rest.
+    Surface(shape = RoundedCornerShape(16.dp), color = homePanelColor(),
         modifier = modifier.fillMaxWidth().testTag("reading-streak")
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(16.dp))
             .clickable(role = Role.Button, onClickLabel = "Open reading streak details") { details = true }) {
-        BoxWithConstraints(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        BoxWithConstraints(Modifier.heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 10.dp)) {
             // Side by side when the heading keeps a comfortable width; stacked on narrow screens or large text.
             val fontScale = LocalDensity.current.fontScale
-            if (maxWidth - WEEK_STRIP_WIDTH >= 180.dp * fontScale) Row(verticalAlignment = Alignment.CenterVertically) {
+            if (maxWidth - WEEK_STRIP_WIDTH - 24.dp >= 150.dp * fontScale) Row(verticalAlignment = Alignment.CenterVertically) {
                 StreakHeading(summary, settle, Modifier.weight(1f))
                 Spacer(Modifier.width(12.dp))
                 WeekStrip(records, summary, settle)
+                Spacer(Modifier.width(8.dp))
+                ChevronGlyph(color = scheme.onSurfaceVariant)
             } else Column {
                 StreakHeading(summary, settle)
                 Spacer(Modifier.height(12.dp))
@@ -89,7 +92,7 @@ internal fun ReadingStreakCard(records: ReadingDays, onCelebrated: (LocalDate) -
     if (details) ReadingStreakSheet(records, summary) { details = false }
 }
 
-private val WEEK_STRIP_WIDTH = 30.dp * 7
+private val WEEK_STRIP_WIDTH = 22.dp * 7
 
 internal fun streakTitle(summary: StreakSummary): String = when (summary.state) {
     StreakState.NEW_READER -> "Start your reading streak"
@@ -142,17 +145,17 @@ private fun Ribbon(filled: Float, modifier: Modifier) {
 private fun WeekStrip(records: ReadingDays, summary: StreakSummary, settle: Float, fill: Boolean = false) {
     val locale = currentLocale()
     Row(if (fill) Modifier.fillMaxWidth() else Modifier,
-        horizontalArrangement = if (fill) Arrangement.SpaceBetween else Arrangement.spacedBy(2.dp)) {
+        horizontalArrangement = if (fill) Arrangement.SpaceBetween else Arrangement.Start) {
         for (offset in 6 downTo 0) {
             val date = summary.today.minusDays(offset.toLong())
             val day = records.day(date)
             val isToday = offset == 0
             val label = dayLabel(date, day, summary, locale)
             Column(horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.width(28.dp).semantics(mergeDescendants = true) { contentDescription = label }) {
+                modifier = Modifier.width(22.dp).semantics(mergeDescendants = true) { contentDescription = label }) {
                 DayMark(complete = day.completed, isToday = isToday,
-                    fraction = if (isToday) summary.todayFraction else 0f, settle = if (isToday) settle else 1f)
-                Spacer(Modifier.height(4.dp))
+                    fraction = if (isToday) summary.todayFraction else 0f, settle = if (isToday) settle else 1f, size = 16.dp)
+                Spacer(Modifier.height(2.dp))
                 Text(date.dayOfWeek.getDisplayName(TextStyle.NARROW, locale),
                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal),
                     color = if (isToday) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,

@@ -250,8 +250,9 @@ open class MainActivity : FragmentActivity() {
             closeSession = { it.close() },
             markOpened = { library.markOpened(book.id) },
             commit = { current, artwork ->
-                exterior.artwork = artwork
+                // Take ownership first so a later failure here leaves the session owned and closable.
                 session = current
+                exterior.artwork = artwork
                 setReadingWindow(true)
                 if (reopeningBookId != null) operations.publishInitialMessage("Swipe left/right to turn pages. Tap the middle for controls.")
                 else message = "Swipe left/right to turn pages. Tap the middle for controls."
