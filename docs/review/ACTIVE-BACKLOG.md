@@ -49,7 +49,9 @@ owner's request. Read back from the phone: installed `base.apk` hash matches,
 build `db379d4` (installed 14:51), which `7ce3066` contains. Before install: 248 unit
 tests and lint passed; emulator Library Home, accessibility and BC-26 tests passed;
 `ReaderProcessDeathTest` is intermittent on the emulator (3 of 7 combined runs passed)
-with reader code identical to `db379d4`. Owner whole-app check pending.
+with reader code identical to `db379d4`. Owner whole-app check 2026-10-27: the owner
+reported that the redesigned Library shows, and reading, the outer cover and their
+books all look fine.
 
 ## Active queue
 
