@@ -55,6 +55,7 @@ internal class EpubSession(
     initialFontId: String = "serif",
     initialEdgeTaps: Boolean = false,
 ) {
+    val search = BookSearchController(activity.lifecycleScope, publication)
     private val readingPace = ReadingPace()
     private val chapters = ReadingChapters(publication)
     val contentsEntries get() = chapters.entries
@@ -94,7 +95,7 @@ internal class EpubSession(
     private var preferredContentsIndex: Int? = null
     private var pendingContentsIndex: Int? = null
     private val readingLifecycle = object : DefaultLifecycleObserver {
-        override fun onPause(owner: LifecycleOwner) { readingPace.pause() }
+        override fun onPause(owner: LifecycleOwner) { readingPace.pause(); search.dismiss() }
         override fun onResume(owner: LifecycleOwner) { readingPace.pause() }
     }
     private val layoutListener = View.OnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
@@ -252,6 +253,31 @@ internal class EpubSession(
         fragment.go(locator, animated = false)
     }
 
+    fun openSearch() {
+        if (closed || typographyUpdating) return
+        controlsVisible = true
+        search.open()
+    }
+
+    /** Keep Readium's text locator intact; normal currentLocator collection saves the destination. */
+    fun goToSearchResult(result: BookSearchResult): Boolean {
+        if (closed || !search.isCurrent(result)) return false
+        if (typographyUpdating || !fragment.isAdded) {
+            search.navigationFailed()
+            return false
+        }
+        readingPace.pause()
+        pendingContentsIndex = null
+        preferredContentsIndex = null
+        val navigated = try { fragment.go(result.locator, animated = false) }
+        catch (_: Exception) { false }
+        if (navigated) {
+            search.dismiss()
+            controlsVisible = false
+        } else search.navigationFailed()
+        return navigated
+    }
+
     suspend fun bookmarkLocator(): Locator? {
         val locator = withTimeoutOrNull(1_000) { fragment.visibleReadingAnchor() } ?: currentLocator ?: return null
         return locator.copy(title = chapterStatus?.title ?: locator.title)
@@ -402,6 +428,7 @@ internal class EpubSession(
     fun close() {
         if (closed) return
         closed = true
+        search.close()
         locationJob?.cancel()
         chapterJob?.cancel()
         keyTurnJob?.cancel()

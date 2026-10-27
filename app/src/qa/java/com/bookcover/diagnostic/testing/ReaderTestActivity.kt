@@ -66,7 +66,8 @@ class ReaderTestActivity : FragmentActivity() {
             try {
                 val fixed = intent.getBooleanExtra(EXTRA_FIXED_LAYOUT, false)
                 val fixture = withContext(Dispatchers.IO) {
-                    NativeEpubFixture.write(testDirectory, fixed,
+                    if (intent.getBooleanExtra(EXTRA_SEARCH_FIXTURE, false)) SearchEpubFixture.write(testDirectory).file
+                    else NativeEpubFixture.write(testDirectory, fixed,
                         progression = intent.getStringExtra(EXTRA_READING_PROGRESSION),
                         language = intent.getStringExtra(EXTRA_LANGUAGE) ?: "en",
                         imagePages = intent.getBooleanExtra(EXTRA_IMAGE_PAGES, false),
@@ -117,6 +118,7 @@ class ReaderTestActivity : FragmentActivity() {
 
     companion object {
         const val EXTRA_FIXED_LAYOUT = "fixedLayout"
+        const val EXTRA_SEARCH_FIXTURE = "searchFixture"
         @Volatile internal var fontScaleForTests = 0f
         const val EXTRA_READING_PROGRESSION = "readingProgression"
         const val EXTRA_LANGUAGE = "language"

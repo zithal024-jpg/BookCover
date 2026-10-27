@@ -3,10 +3,13 @@ package com.bookcover.diagnostic.library
 import android.content.Context
 import java.io.File
 import java.io.IOException
+import com.bookcover.diagnostic.reader.bookSearchServiceFactory
+import org.readium.r2.shared.ExperimentalReadiumApi
 import org.readium.r2.shared.publication.Publication
 import org.readium.r2.shared.publication.encryption.encryption
 import org.readium.r2.shared.publication.services.isRestricted
 import org.readium.r2.shared.publication.services.positions
+import org.readium.r2.shared.publication.services.search.searchServiceFactory
 import org.readium.r2.shared.util.Try
 import org.readium.r2.shared.util.asset.AssetRetriever
 import org.readium.r2.shared.util.getOrElse
@@ -21,6 +24,7 @@ import org.readium.r2.shared.util.toUrl
 import org.readium.r2.streamer.PublicationOpener
 import org.readium.r2.streamer.parser.DefaultPublicationParser
 
+@OptIn(ExperimentalReadiumApi::class)
 internal class ReadiumEngine(context: Context) {
     private companion object {
         /** IDPF and Adobe font obfuscation: scrambles embedded fonts only, not DRM. */
@@ -41,7 +45,12 @@ internal class ReadiumEngine(context: Context) {
         // per-open one twice, so the markup filter is passed here and guarded to be installed once.
         var filtered = false
         val publication = opener.open(asset, allowUserInteraction = false, onCreatePublication = {
-            if (!filtered) { filtered = true; installMarkupFilter() }
+            if (!filtered) {
+                filtered = true
+                val searchContainer = container
+                installMarkupFilter()
+                servicesBuilder.searchServiceFactory = bookSearchServiceFactory(searchContainer)
+            }
         }).getOrElse { throw IOException("This file could not be opened as an EPUB") }
         try {
             require(publication.conformsTo(Publication.Profile.EPUB)) { "Please choose an EPUB book" }

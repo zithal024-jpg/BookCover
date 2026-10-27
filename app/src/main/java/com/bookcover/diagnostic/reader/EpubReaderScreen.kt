@@ -77,7 +77,7 @@ internal fun EpubReaderScreen(
     val background = readerBackground(session.themeName)
     // One palette with the library: same accent, light or dark to match the page.
     val scheme = readerControlsColorScheme(libraryTheme, coverSeed, night)
-    // Hiding the controls (page tap, page button) also closes any open sheet.
+    // Hiding the controls (page tap, page button, search result) also closes any open sheet.
     LaunchedEffect(session.controlsVisible) { if (!session.controlsVisible) sheet = ReaderSheet.NONE }
     // The first line is the app's own message (bookmark saved, an error); the rest is cover status,
     // shown only on the Cover sheet. A new message appears briefly as a banner above the bar.
@@ -144,6 +144,8 @@ internal fun EpubReaderScreen(
                     Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         TextButton(onClick = onHome) { Text("Library") }
                         Text(record.title, modifier = Modifier.weight(1f), maxLines = 1, style = MaterialTheme.typography.labelLarge)
+                        TextButton(onClick = session::openSearch, enabled = !session.typographyUpdating,
+                            modifier = Modifier.testTag("open-search").heightIn(min = 48.dp)) { Text("Search") }
                         TextButton(onClick = { session.controlsVisible = false; contentsVisible = false },
                             modifier = Modifier.testTag("reader-hide-controls").heightIn(min = 48.dp)) { Text("Read") }
                     }
@@ -207,6 +209,8 @@ internal fun EpubReaderScreen(
                 bookmarkDraft = null
             })
         }
+        ReaderSearchDialog(controller = session.search, onSelect = { session.goToSearchResult(it) },
+            onClose = session.search::dismiss)
     }
 }
 
