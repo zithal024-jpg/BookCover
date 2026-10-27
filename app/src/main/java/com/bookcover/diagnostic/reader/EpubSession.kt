@@ -7,6 +7,11 @@ import androidx.compose.runtime.setValue
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.FragmentContainerView
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import android.os.SystemClock
+import android.view.View
 import com.bookcover.diagnostic.DiagnosticLog
 import com.bookcover.diagnostic.library.BookLibrary
 import com.bookcover.diagnostic.library.BookRecord
@@ -49,7 +54,18 @@ internal class EpubSession(
     initialFontId: String = "serif",
     initialEdgeTaps: Boolean = false,
 ) {
-    var controlsVisible by mutableStateOf(false)
+    private val readingPace = ReadingPace()
+    private val chapters = ReadingChapters(publication)
+    val contentsEntries get() = chapters.entries
+    var chapterStatus by mutableStateOf<ChapterStatus?>(null)
+        private set
+    private var visibleControls by mutableStateOf(false)
+    var controlsVisible: Boolean
+        get() = visibleControls
+        set(value) {
+            if (visibleControls != value) readingPace.pause()
+            visibleControls = value
+        }
     var progress by mutableDoubleStateOf(book.progression)
     var fontScale by mutableDoubleStateOf(ReadingTextSize.percent(initialFontScale) / 100.0)
         private set
@@ -68,6 +84,21 @@ internal class EpubSession(
     var currentLocator: Locator? = book.locator?.let { runCatching { Locator.fromJSON(JSONObject(it)) }.getOrNull() }
         private set
     private var locationJob: Job? = null
+    private var chapterJob: Job? = null
+    private var chapterResource: Url? = null
+    private var preferredContentsIndex: Int? = null
+    private var pendingContentsIndex: Int? = null
+    private val readingLifecycle = object : DefaultLifecycleObserver {
+        override fun onPause(owner: LifecycleOwner) { readingPace.pause() }
+        override fun onResume(owner: LifecycleOwner) { readingPace.pause() }
+    }
+    private val layoutListener = View.OnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+        if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) {
+            readingPace.pause()
+            chapters.invalidateLayout()
+            currentLocator?.let(::refreshChapter)
+        }
+    }
     private var typographyJob: Job? = null
     private var typographyAnchor: Locator? = null
     private var typographyAnchorInvalidated = false
@@ -93,6 +124,16 @@ internal class EpubSession(
                 readiumCssRsProperties = RsProperties(overrides = mapOf("--RS__maxLineLength" to "800px"))
             },
             listener = object : EpubNavigatorFragment.Listener {
+                override fun onJumpToLocator(locator: Locator) {
+                    readingPace.pause()
+                    val fragments = locator.locations.fragments
+                    preferredContentsIndex = contentsEntries.indexOfFirst { entry ->
+                        entry.link.url().removeFragment() == locator.href.removeFragment() &&
+                            (entry.link.url().fragment?.let { it in fragments } == true ||
+                                (fragments.isEmpty() && entry.title == locator.title))
+                    }.takeIf { it >= 0 }
+                    currentLocator?.let(::refreshChapter)
+                }
                 override fun onExternalLinkActivated(url: AbsoluteUrl) {
                     report("This link points to a website. BookCover does not open web pages.")
                 }
@@ -103,11 +144,15 @@ internal class EpubSession(
             },
         )
         fragment = factory.instantiate(activity.classLoader, EpubNavigatorFragment::class.java.name) as EpubNavigatorFragment
+        activity.lifecycle.addObserver(readingLifecycle)
         fragment.addInputListener(object : InputListener {
             override fun onDrag(event: DragEvent): Boolean {
                 // Observe intent only: native Readium/ViewPager remains the sole swipe handler.
                 // A user who navigates during reflow must not be pulled back by an old anchor.
-                if (event.type == DragEvent.Type.Start && typographyUpdating) typographyAnchorInvalidated = true
+                if (event.type == DragEvent.Type.Start) {
+                    pendingContentsIndex = null
+                    if (typographyUpdating) typographyAnchorInvalidated = true
+                }
                 return false
             }
             override fun onTap(event: TapEvent): Boolean {
@@ -126,8 +171,8 @@ internal class EpubSession(
                         controlsVisible = !controlsVisible
                         DiagnosticLog.record("EPUB controls ${if (controlsVisible) "revealed" else "hidden"}; same host activity")
                     }
-                    ReadingTapAction.PREVIOUS -> { fragment.goBackward(animated = true); DiagnosticLog.record("EPUB edge completed tap: backward") }
-                    ReadingTapAction.NEXT -> { fragment.goForward(animated = true); DiagnosticLog.record("EPUB edge completed tap: forward") }
+                    ReadingTapAction.PREVIOUS -> { pendingContentsIndex = null; fragment.goBackward(animated = true); DiagnosticLog.record("EPUB edge completed tap: backward") }
+                    ReadingTapAction.NEXT -> { pendingContentsIndex = null; fragment.goForward(animated = true); DiagnosticLog.record("EPUB edge completed tap: forward") }
                     ReadingTapAction.NONE -> return false
                 }
                 return true
@@ -138,14 +183,73 @@ internal class EpubSession(
     fun attach(container: FragmentContainerView) {
         if (closed || activity.isDestroyed || fragment.isAdded || activity.supportFragmentManager.isStateSaved) return
         activity.supportFragmentManager.beginTransaction().replace(container.id, fragment, "bookcover-epub").commitNow()
+        fragment.view?.addOnLayoutChangeListener(layoutListener)
         locationJob = activity.lifecycleScope.launch {
             fragment.currentLocator.collect { locator ->
                 currentLocator = locator
                 progress = locator.locations.totalProgression ?: progress
                 if (!typographyUpdating) positions.submit(locator)
+                refreshChapter(locator)
                 DiagnosticLog.record("EPUB position=${(progress * 100).toInt()}%; same host activity")
             }
         }
+    }
+
+    private fun refreshChapter(locator: Locator) {
+        if (closed) return
+        if (chapterResource != locator.href) {
+            chapterResource = locator.href
+            chapterStatus = null // Never leave another resource's chapter marker visible on failure.
+        }
+        chapterJob?.cancel()
+        chapterJob = activity.lifecycleScope.launch {
+            try {
+                delay(80) // Coalesce layout/location notifications; never delay native navigation.
+                if (typographyUpdating || !fragment.isAdded) return@launch
+                val resolved = withTimeoutOrNull(1_500) { chapters.resolve(locator, fragment, supportsTypography, preferredContentsIndex) } ?: return@launch
+                if (closed || currentLocator != locator || typographyUpdating) return@launch
+                val pending = pendingContentsIndex
+                if (pending != null && contentsEntries[pending].link.url().removeFragment() == locator.href.removeFragment()) {
+                    pendingContentsIndex = null
+                    chapters.locatorForContents(pending)?.let { destination ->
+                        // A new resource must render before its subsection geometry is available.
+                        // Refine that explicit jump once, through Readium's supported locator API.
+                        fragment.go(destination, animated = false)
+                        preferredContentsIndex = pending
+                        currentLocator?.let(::refreshChapter)
+                        return@launch
+                    }
+                }
+                readingPace.observe(resolved.globalPoint, SystemClock.elapsedRealtime(),
+                    !controlsVisible && activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+                chapterStatus = ChapterStatus(resolved.title, resolved.progression,
+                    resolved.globalEnd?.let { readingPace.remainingMinutes(resolved.globalPoint, it) }, resolved.currentTocIndex)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { /* Missing TOC/geometry must never interrupt reading or position saving. */ }
+        }
+    }
+
+    fun goToContents(index: Int) {
+        contentsEntries.getOrNull(index)?.let {
+            readingPace.pause(); preferredContentsIndex = index
+            val destination = chapters.locatorForContents(index)
+            pendingContentsIndex = if (destination == null) index else null
+            if (destination != null) fragment.go(destination, animated = false) else fragment.go(it.link, animated = false)
+            preferredContentsIndex = index
+            currentLocator?.let(::refreshChapter)
+        }
+    }
+
+    fun goToBookmark(value: String) {
+        val locator = runCatching { Locator.fromJSON(JSONObject(value)) }.getOrNull() ?: return
+        readingPace.pause()
+        pendingContentsIndex = null
+        fragment.go(locator, animated = false)
+    }
+
+    suspend fun bookmarkLocator(): Locator? {
+        val locator = withTimeoutOrNull(1_000) { fragment.visibleReadingAnchor() } ?: currentLocator ?: return null
+        return locator.copy(title = chapterStatus?.title ?: locator.title)
     }
 
     fun changeFont(value: Double) {
@@ -188,6 +292,8 @@ internal class EpubSession(
 
     private fun applyTypography() {
         if (closed || !fragment.isAdded) return
+        readingPace.pause()
+        chapters.invalidateLayout()
         // Persist the selection immediately, even if the reader leaves before a debounced reflow.
         readerPreferences.saveReadingTypography(comfort, fontScale, fontId)
         typographyJob?.cancel()
@@ -233,6 +339,7 @@ internal class EpubSession(
                 DiagnosticLog.record("EPUB typography CSS reflow; bookStyles=$bookStyles; size=${ReadingTextSize.percent(fontScale)}%; font=$fontId; lineSpacing=${comfort.lineSpacing}; margins=${comfort.margins.id}; alignment=${comfort.alignment.id}; CSS confirmed=$settled; semantic anchor restored=$restored")
                 typographyAnchor = null
                 typographyUpdating = false
+                currentLocator?.let(::refreshChapter)
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) {
                 typographyAnchor = null; typographyUpdating = false
@@ -253,8 +360,8 @@ internal class EpubSession(
         fragment.submitPreferences(preferences())
     }
 
-    fun next() { fragment.goForward(animated = true); controlsVisible = false }
-    fun previous() { fragment.goBackward(animated = true); controlsVisible = false }
+    fun next() { pendingContentsIndex = null; fragment.goForward(animated = true); controlsVisible = false }
+    fun previous() { pendingContentsIndex = null; fragment.goBackward(animated = true); controlsVisible = false }
     /** Saves a waiting reading position now, e.g. when the app goes to the background. */
     fun flushPosition() = positions.flush()
 
@@ -262,6 +369,9 @@ internal class EpubSession(
         if (closed) return
         closed = true
         locationJob?.cancel()
+        chapterJob?.cancel()
+        activity.lifecycle.removeObserver(readingLifecycle)
+        fragment.view?.removeOnLayoutChangeListener(layoutListener)
         positions.flush()
         typographyJob?.cancel()
         if (!activity.supportFragmentManager.isDestroyed && fragment.isAdded) {

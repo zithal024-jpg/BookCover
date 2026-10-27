@@ -7,10 +7,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -25,6 +28,7 @@ internal fun readerBackground(theme: String?): Color =
     when (theme) { "Night" -> Color.Black; "Sepia" -> Color(0xFFFAF4E8); else -> Color.White }
 
 @Composable
+@OptIn(ExperimentalComposeUiApi::class)
 internal fun EpubReaderScreen(
     session: EpubSession,
     record: BookRecord,
@@ -37,10 +41,11 @@ internal fun EpubReaderScreen(
     onStopCover: () -> Unit,
     onHome: () -> Unit,
     onChooseCover: () -> Unit,
-    onBookmark: () -> Unit,
+    onSaveBookmark: (name: String, existingValue: String?) -> Unit,
     onRemoveBookmark: (String) -> Unit,
 ) {
     var contentsVisible by remember(session) { mutableStateOf(false) }
+    var bookmarkDraft by remember(session) { mutableStateOf<BookmarkDraft?>(null) }
     val night = session.themeName == "Night"
     val background = readerBackground(session.themeName)
     val scheme = if (night) darkColorScheme() else lightColorScheme()
@@ -48,7 +53,7 @@ internal fun EpubReaderScreen(
         when { contentsVisible -> contentsVisible = false; session.controlsVisible -> session.controlsVisible = false; else -> onHome() }
     }
     MaterialTheme(colorScheme = scheme) {
-        BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding()) {
+        BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding().semantics { testTagsAsResourceId = true }) {
             Surface(color = background, modifier = Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxSize()) {
                     AndroidView(
@@ -78,41 +83,31 @@ internal fun EpubReaderScreen(
                 }
                 Surface(tonalElevation = 4.dp, modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(12.dp)
                     .heightIn(max = maxHeight * 0.75f)) {
-                    Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        if (contentsVisible) {
-                            Text("Bookmarks", style = MaterialTheme.typography.titleMedium)
-                            if (record.bookmarks.isEmpty()) Text("No bookmarks yet.")
-                            record.bookmarks.forEach { value ->
-                                val locator = remember(value) { runCatching { org.readium.r2.shared.publication.Locator.fromJSON(org.json.JSONObject(value)) }.getOrNull() }
-                                if (locator != null) Row(verticalAlignment = Alignment.CenterVertically) {
-                                    TextButton(onClick = { session.fragment.go(locator, animated = false); contentsVisible = false; session.controlsVisible = false }, modifier = Modifier.weight(1f)) {
-                                        Text("${((locator.locations.totalProgression ?: 0.0) * 100).toInt()}% · ${locator.title ?: "Saved page"}")
-                                    }
-                                    TextButton(onClick = { onRemoveBookmark(value) }) { Text("Remove") }
-                                }
-                            }
-                            Text("Contents", style = MaterialTheme.typography.titleLarge)
-                            fun flatten(links: List<org.readium.r2.shared.publication.Link>, depth: Int = 0): List<Pair<org.readium.r2.shared.publication.Link, Int>> =
-                                links.flatMap { listOf(it to depth) + flatten(it.children, depth + 1) }
-                            val contents = flatten(session.publication.tableOfContents)
-                            if (contents.isEmpty()) Text("This book does not provide a table of contents.")
-                            contents.forEach { (link, depth) ->
-                                TextButton(onClick = { session.fragment.go(link, animated = false); contentsVisible = false; session.controlsVisible = false },
-                                    modifier = Modifier.fillMaxWidth().padding(start = (depth.coerceAtMost(4) * 12).dp)) {
-                                    Text(link.title ?: "Chapter", modifier = Modifier.fillMaxWidth())
-                                }
-                            }
-                            TextButton(onClick = { contentsVisible = false }) { Text("Back to controls") }
-                        } else {
+                    if (contentsVisible) {
+                        ReaderContentsPanel(
+                            session = session, record = record,
+                            onNavigate = { contentsVisible = false; session.controlsVisible = false },
+                            onRename = { value, initialName -> bookmarkDraft = BookmarkDraft(value, initialName) },
+                            onRemove = onRemoveBookmark,
+                            onClose = { contentsVisible = false },
+                        )
+                    } else {
+                        Column(Modifier.testTag("reader-controls-scroll").verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text(record.title, style = MaterialTheme.typography.titleMedium)
+                            ChapterProgressSummary(session.chapterStatus)
                             Text(when { stopPending -> "Stopping outside cover…"; coverActive -> "Outside cover on"; coverBusy -> "Starting outside cover…"; else -> "Outside cover off" },
                                 style = MaterialTheme.typography.labelLarge)
                             Text(message, style = MaterialTheme.typography.bodySmall, maxLines = 3)
                             if (coverBusy) OutlinedButton(onClick = onStopCover, enabled = !stopPending, modifier = Modifier.fillMaxWidth()) { Text("Stop outer cover") }
                             else OutlinedButton(onClick = onStartCover, enabled = canStartCover, modifier = Modifier.fillMaxWidth()) { Text("Start outer cover") }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = { contentsVisible = true }, enabled = !session.typographyUpdating) { Text("Contents") }
-                                OutlinedButton(onClick = onBookmark, enabled = !session.typographyUpdating) { Text("Bookmark") }
+                                OutlinedButton(onClick = { contentsVisible = true }, enabled = !session.typographyUpdating,
+                                    modifier = Modifier.testTag("open-contents")) { Text("Contents") }
+                                OutlinedButton(onClick = {
+                                    bookmarkDraft = BookmarkDraft(null, session.chapterStatus?.title
+                                        ?: session.currentLocator?.title ?: "Bookmark")
+                                }, enabled = !session.typographyUpdating && session.currentLocator != null,
+                                    modifier = Modifier.testTag("add-bookmark")) { Text("Bookmark") }
                             }
                             Text("Typography", style = MaterialTheme.typography.titleMedium)
                             if (!session.supportsTypography) {
@@ -197,6 +192,12 @@ internal fun EpubReaderScreen(
                     }
                 }
             }
+        }
+        bookmarkDraft?.let { draft ->
+            BookmarkNameDialog(draft = draft, onDismiss = { bookmarkDraft = null }, onSave = { name ->
+                onSaveBookmark(name, draft.existingValue)
+                bookmarkDraft = null
+            })
         }
     }
 }

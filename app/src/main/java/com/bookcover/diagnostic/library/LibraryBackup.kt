@@ -40,7 +40,7 @@ internal object LibraryBackup {
         val records = current.map { book ->
             val copy = saved[book.id] ?: return@map book
             val position = if (copy.lastReadAt > book.lastReadAt) copy else book
-            book.copy(collection = copy.collection, bookmarks = (book.bookmarks + copy.bookmarks).distinct(),
+            book.copy(collection = copy.collection, bookmarks = SavedBookmarks.merge(book.bookmarks, copy.bookmarks),
                 lastReadAt = position.lastReadAt, progression = position.progression, locator = position.locator)
         }
         val present = current.map { it.id }.toSet()

@@ -121,10 +121,11 @@ class MainActivity : FragmentActivity() {
                         exterior.stop("selecting cover image")
                         coverBookId = current.book.id
                         selectCover.launch(arrayOf("image/*"))
-                    }, onBookmark = {
-                        current.currentLocator?.let { locator -> work {
-                            library.bookmark(current.book.id, locator); message = "Bookmark saved. Open Contents to return to it."
-                        } }
+                    }, onSaveBookmark = { name, existingValue -> work {
+                        if (existingValue != null) library.renameBookmark(current.book.id, existingValue, name)
+                        else current.bookmarkLocator()?.let { locator -> library.bookmark(current.book.id, locator, name, current.chapterStatus?.title) }
+                        message = "Bookmark saved. Open Contents to return to it."
+                    }
                     }, onRemoveBookmark = { value -> work { library.removeBookmark(current.book.id, value) } })
                 if (showDiagnostics) AlertDialog(onDismissRequest = { showDiagnostics = false }, title = { Text("Device diagnostics") },
                     text = { Text(exterior.diagnostics() + "\n" + DiagnosticLog.report(), modifier = Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), style = MaterialTheme.typography.bodySmall) },

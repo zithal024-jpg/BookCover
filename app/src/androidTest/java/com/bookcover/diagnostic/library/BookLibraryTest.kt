@@ -18,6 +18,7 @@ import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.json.JSONObject
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.util.Url
 import org.readium.r2.shared.util.mediatype.MediaType
@@ -147,6 +148,55 @@ class BookLibraryTest {
         assertEquals(1, saved.bookmarks.size)
         assertEquals("Favourites", saved.collection)
         assertTrue(saved.lastReadAt > 0)
+    }
+
+    @Test fun namedBookmarksDeduplicateRenameAndKeepPreciseTargetsWhenReopened() = runBlocking {
+        val library = newLibrary().apply { load() }
+        val book = library.import(epub()).first
+        val original = locator(0.2).copy(
+            title = "Publisher chapter title",
+            locations = Locator.Locations(progression = 0.3, position = 12, totalProgression = 0.2,
+                otherLocations = mapOf("cssSelector" to "#paragraph-20", "fixtureExtension" to mapOf("keep" to "original"))),
+            text = Locator.Text(before = "Original context", highlight = "The fixture's precise saved passage", after = "Following context"),
+        )
+        library.bookmark(book.id, original, name = "First name", chapterTitle = "The long chapter")
+        // The same semantic text anchor may have a different resource progression after reflow.
+        library.bookmark(book.id, original.copy(title = "Changed metadata",
+            locations = original.locations.copy(progression = 0.31)), name = "Updated name", chapterTitle = "Changed chapter")
+        val single = library.book(book.id)!!.bookmarks.single()
+        assertEquals("Updated name", SavedBookmarks.name(single))
+        assertEquals("The long chapter", SavedBookmarks.chapterTitle(single))
+        assertEquals("An explicit duplicate save must not move the original saved location", 0.3,
+            JSONObject(single).getJSONObject("locations").getDouble("progression"), 0.0)
+
+        // Another point in the same coarse global position is still a separate bookmark.
+        val another = original.copy(
+            locations = original.locations.copy(progression = 0.32,
+                otherLocations = original.locations.otherLocations + ("cssSelector" to "#paragraph-21")),
+            text = Locator.Text(highlight = "Another distinct fixture passage"),
+        )
+        library.bookmark(book.id, another, name = "Second place", chapterTitle = "The long chapter")
+        assertEquals(2, library.book(book.id)!!.bookmarks.size)
+        library.renameBookmark(book.id, single, "Final name")
+
+        val reopened = newLibrary().apply { load() }
+        val saved = reopened.book(book.id)!!.bookmarks
+        assertEquals(2, saved.size)
+        val renamed = saved.single { SavedBookmarks.name(it) == "Final name" }
+        val json = JSONObject(renamed)
+        assertEquals("The long chapter", SavedBookmarks.chapterTitle(renamed))
+        assertEquals(original.href.toString(), json.getString("href"))
+        assertEquals(0.3, json.getJSONObject("locations").getDouble("progression"), 0.0)
+        assertEquals("#paragraph-20", json.getJSONObject("locations").getString("cssSelector"))
+        assertEquals("original", json.getJSONObject("locations").getJSONObject("fixtureExtension").getString("keep"))
+        assertEquals(original.text.highlight, json.getJSONObject("text").getString("highlight"))
+        assertEquals(original.text.before, json.getJSONObject("text").getString("before"))
+        assertEquals(original.text.after, json.getJSONObject("text").getString("after"))
+
+        reopened.removeBookmark(book.id, renamed)
+        val afterRemoval = newLibrary().apply { load() }.book(book.id)!!.bookmarks
+        assertEquals(1, afterRemoval.size)
+        assertEquals("Second place", SavedBookmarks.name(afterRemoval.single()))
     }
 
     @Test fun anUnreadableIndexBlocksChangesAndIsLeftUntouched() = runBlocking {

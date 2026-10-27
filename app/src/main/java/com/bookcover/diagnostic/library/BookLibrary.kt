@@ -119,9 +119,12 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
     }
 
     suspend fun markOpened(id: String) = change(id) { copy(lastReadAt = System.currentTimeMillis()) }
-    suspend fun bookmark(id: String, locator: Locator) = change(id) {
-        val value = locator.toJSON().toString()
-        copy(bookmarks = (bookmarks + value).distinct())
+    suspend fun bookmark(id: String, locator: Locator, name: String? = null, chapterTitle: String? = null) = change(id) {
+        val value = SavedBookmarks.create(locator.toJSON().toString(), name, chapterTitle)
+        copy(bookmarks = SavedBookmarks.upsert(bookmarks, value))
+    }
+    suspend fun renameBookmark(id: String, value: String, name: String) = change(id) {
+        copy(bookmarks = bookmarks.map { if (it == value) SavedBookmarks.rename(it, name) else it })
     }
     suspend fun removeBookmark(id: String, value: String) = change(id) { copy(bookmarks = bookmarks - value) }
     suspend fun move(id: String, collection: String) = change(id) {

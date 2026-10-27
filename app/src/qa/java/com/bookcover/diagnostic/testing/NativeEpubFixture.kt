@@ -11,7 +11,7 @@ import java.util.zip.ZipOutputStream
 /** Original, generated EPUBs: long reflowable prose and a separate fixed-layout document. */
 internal object NativeEpubFixture {
     fun write(directory: File, fixed: Boolean, progression: String? = null, language: String = "en",
-              imagePages: Boolean = false, legacyOverlay: Boolean = false): File {
+              imagePages: Boolean = false, legacyOverlay: Boolean = false, detailedContents: Boolean = false): File {
         val direction = progression ?: if (language in listOf("ar", "he")) "rtl" else "ltr"
         val spineDirection = progression?.let { " page-progression-direction=\"$it\"" }.orEmpty()
         val image = ByteArrayOutputStream().use { bytes ->
@@ -36,7 +36,10 @@ internal object NativeEpubFixture {
             text("META-INF/container.xml", """<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="EPUB/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>""")
             val layout = if (fixed) "<meta property=\"rendition:layout\">pre-paginated</meta>" else ""
             text("EPUB/book.opf", """<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="uid">urn:bookcover:native-test-${if (fixed) "fixed" else "reflow"}</dc:identifier><dc:title>Native renderer fixture</dc:title><dc:creator>BookCover test suite</dc:creator><dc:language>$language</dc:language><meta property="dcterms:modified">2026-10-26T00:00:00Z</meta>$layout</metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="image" href="square.png" media-type="image/png"/><item id="c0" href="chapter0.xhtml" media-type="application/xhtml+xml"/><item id="c1" href="chapter1.xhtml" media-type="application/xhtml+xml"/></manifest><spine$spineDirection><itemref idref="c0"/><itemref idref="c1"/></spine></package>""")
-            text("EPUB/nav.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head><body><nav epub:type="toc"><ol><li><a href="chapter0.xhtml">The long chapter</a></li><li><a href="chapter1.xhtml">The linked chapter</a></li></ol></nav></body></html>""")
+            val contents = if (detailedContents) """<li><a href="chapter0.xhtml#heading">The long chapter</a><ol>${(0 until 90).joinToString("") { "<li><a href=\"chapter0.xhtml#paragraph-$it\">Section ${it + 1}</a></li>" }}</ol></li>"""
+                else """<li><a href="chapter0.xhtml">The long chapter</a></li>"""
+            val finalHref = if (detailedContents) "chapter1.xhtml#linked" else "chapter1.xhtml"
+            text("EPUB/nav.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title></head><body><nav epub:type="toc"><ol>$contents<li><a href="$finalHref">The linked chapter</a></li></ol></nav></body></html>""")
             entry("EPUB/square.png", image)
             if (fixed) {
                 for (index in 0..1) text("EPUB/chapter$index.xhtml", """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Fixed page $index</title><meta name="viewport" content="width=600,height=800"/></head><body style="margin:0;width:600px;height:800px;background:#f5eddb"><h1 style="position:absolute;left:40px;top:60px;font-size:36px">Fixed page $index</h1><p style="position:absolute;left:40px;top:180px;font-size:20px">Publisher layout remains fixed.</p><img src="square.png" style="position:absolute;left:40px;top:260px;width:64px;height:64px"/></body></html>""")

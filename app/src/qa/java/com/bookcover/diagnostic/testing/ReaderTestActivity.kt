@@ -7,6 +7,8 @@ import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.core.view.WindowCompat
@@ -29,6 +31,8 @@ class ReaderTestActivity : FragmentActivity() {
     internal var reader: EpubSession? = null
         private set
     internal val reports = mutableListOf<String>()
+    internal lateinit var library: BookLibrary
+        private set
     private lateinit var testDirectory: File
 
     // EpubSession persists through its FragmentActivity. Redirect only this host's reader settings;
@@ -56,10 +60,11 @@ class ReaderTestActivity : FragmentActivity() {
                         progression = intent.getStringExtra(EXTRA_READING_PROGRESSION),
                         language = intent.getStringExtra(EXTRA_LANGUAGE) ?: "en",
                         imagePages = intent.getBooleanExtra(EXTRA_IMAGE_PAGES, false),
-                        legacyOverlay = intent.getBooleanExtra(EXTRA_LEGACY_OVERLAY, false))
+                        legacyOverlay = intent.getBooleanExtra(EXTRA_LEGACY_OVERLAY, false),
+                        detailedContents = intent.getBooleanExtra(EXTRA_DETAILED_CONTENTS, false))
                 }
                 val engine = ReadiumEngine(isolatedContext)
-                val library = BookLibrary(isolatedContext, engine)
+                library = BookLibrary(isolatedContext, engine)
                 library.load() // The library refuses to save until it has loaded (BC-02).
                 val (book, _) = library.import(android.net.Uri.fromFile(fixture))
                 val publication = withContext(Dispatchers.IO) { engine.open(library.epubFile(book)) }
@@ -73,12 +78,16 @@ class ReaderTestActivity : FragmentActivity() {
                 )
                 reader = session
                 setContent {
+                    val savedBooks by library.books.collectAsState()
                     MaterialTheme {
                         EpubReaderScreen(
-                            session = session, record = book, coverActive = false, coverBusy = false,
+                            session = session, record = savedBooks.firstOrNull { it.id == book.id } ?: book, coverActive = false, coverBusy = false,
                             stopPending = false, canStartCover = false, message = "Native renderer test",
                             onStartCover = {}, onStopCover = {}, onHome = { finish() },
-                            onChooseCover = {}, onBookmark = {}, onRemoveBookmark = {},
+                            onChooseCover = {}, onSaveBookmark = { name, existing -> lifecycleScope.launch {
+                                if (existing != null) library.renameBookmark(book.id, existing, name)
+                                else session.bookmarkLocator()?.let { library.bookmark(book.id, it, name, session.chapterStatus?.title) }
+                            } }, onRemoveBookmark = { value -> lifecycleScope.launch { library.removeBookmark(book.id, value) } },
                         )
                     }
                 }
@@ -102,6 +111,7 @@ class ReaderTestActivity : FragmentActivity() {
         const val EXTRA_LANGUAGE = "language"
         const val EXTRA_IMAGE_PAGES = "imagePages"
         const val EXTRA_LEGACY_OVERLAY = "legacyOverlay"
+        const val EXTRA_DETAILED_CONTENTS = "detailedContents"
         const val TEST_PREFERENCES = "reader-native-instrumentation-test"
     }
 }
