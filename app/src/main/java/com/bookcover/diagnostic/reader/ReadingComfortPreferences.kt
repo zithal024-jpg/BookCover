@@ -22,11 +22,15 @@ internal fun SharedPreferences.saveReadingTypography(comfort: ReadingComfort, fo
         .putFloat("fontScale", fontScale.toFloat()).putString("fontId", fontId).apply()
 }
 
-/** Do not submit saved custom overrides while the book's own formatting is selected. */
+/**
+ * Do not submit saved custom overrides while the book's own formatting is selected. Text size is
+ * not one of them: Readium CSS applies `--USER__fontSize` with or without publisher styles, so the
+ * reader's size always applies and the book keeps its fonts, indents and layout (C1).
+ */
 @OptIn(ExperimentalReadiumApi::class)
 internal fun ReadingComfort.epubPreferences(fontScale: Double, fontId: String, themeName: String) = EpubPreferences(
     fontFamily = if (publisherStyles) null else FontFamily(ReadingFont.fromId(fontId).cssFamily),
-    fontSize = if (publisherStyles) 1.0 else fontScale,
+    fontSize = fontScale,
     lineHeight = if (publisherStyles) null else lineSpacing,
     pageMargins = if (publisherStyles) 1.0 else margins.factor,
     paragraphSpacing = if (publisherStyles) null else 0.6,

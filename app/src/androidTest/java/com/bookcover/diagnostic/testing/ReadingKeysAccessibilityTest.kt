@@ -151,12 +151,14 @@ class ReadingKeysAccessibilityTest {
         val start = settledOffset()
         click("reader-show-controls")
         assertTrue(main { reader.controlsVisible })
+        click("reader-more")
         scrollTo("reader-next-page")
         assertLabelAndTarget("reader-next-page", "Next page")
         click("reader-next-page")
         waitFor("an accessibility click turns to the next page") { offset() > start + 50 }
         val forward = settledOffset()
         click("reader-show-controls")
+        click("reader-more")
         scrollTo("reader-previous-page")
         assertLabelAndTarget("reader-previous-page", "Previous page")
         click("reader-previous-page")
@@ -182,9 +184,33 @@ class ReadingKeysAccessibilityTest {
         }
     }
 
+    /** H3: labelled 48dp bar buttons at 200% text, and the Aa sheet leaves most of the page visible. */
+    @Test fun compactBarIsLabelledAtTwoHundredPercentAndTextSheetLeavesThePageVisible() {
+        launch(fontScale = 2f)
+        click("reader-show-controls")
+        listOf("open-contents" to "Contents", "reader-text-settings" to "Text size and page colour",
+            "add-bookmark" to "Bookmark", "reader-cover" to "Outside cover", "reader-more" to "More reading options").forEach { (tag, label) ->
+            waitFor("$tag is shown") { findTag(tag)?.let(::visible) == true }
+            assertLabelAndTarget(tag, label)
+        }
+        click("reader-text-settings")
+        waitFor("the text sheet opens") { findTag("text-size-increase")?.let(::visible) == true }
+        assertNull("The top bar steps aside while a sheet is open", findTag("reader-top-bar"))
+        assertLabelAndTarget("text-size-increase", "Increase text size")
+        val panel = Rect().also(findTag("reader-controls-panel")!!::getBoundsInScreen)
+        val window = Rect().also { main { host.window.decorView.getGlobalVisibleRect(it) } }
+        assertTrue("At least 55% of the page stays visible above the Aa sheet: panel=$panel window=$window",
+            (panel.top - window.top).toDouble() / window.height() >= 0.55)
+        click("text-size-increase")
+        waitFor("A+ grows the text with publisher styles unchanged") { main { !reader.typographyUpdating && reader.fontScale > 1.05 } }
+        click("reader-sheet-close")
+        waitFor("Done returns to the compact bar") { findTag("reader-more")?.let(::visible) == true }
+    }
+
     @Test fun readingThemeAndVolumeSwitchExposeSelectionAndState() {
         launch()
         click("reader-show-controls")
+        click("reader-more")
         scrollTo("volume-key-page-turns")
         val volume = findTag("volume-key-page-turns")!!
         assertTrue("Volume setting exposes its purpose; ${controlDiagnostics(volume)}",
@@ -193,6 +219,8 @@ class ReadingKeysAccessibilityTest {
         click("volume-key-page-turns")
         waitFor("accessibility toggles volume turns") { main { reader.volumeKeys } }
         waitFor("the volume control announces its on state") { findTag("volume-key-page-turns")?.let(::checked) == true }
+        click("reader-sheet-close")
+        click("reader-text-settings")
         scrollTo("reading-theme-Paper")
         val paper = findTag("reading-theme-Paper")!!
         assertTrue("Paper exposes its selected state; ${controlDiagnostics(paper)}", selected(paper))

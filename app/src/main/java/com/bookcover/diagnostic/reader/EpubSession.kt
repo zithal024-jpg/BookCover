@@ -257,9 +257,9 @@ internal class EpubSession(
         return locator.copy(title = chapterStatus?.title ?: locator.title)
     }
 
+    /** Text size is independent of publisher styles; the book's own formatting stays as chosen. */
     fun changeFont(value: Double) {
         if (!supportsTypography) return
-        comfort = comfort.copy(publisherStyles = false)
         fontScale = ReadingTextSize.percent(value) / 100.0
         applyTypography()
     }

@@ -336,6 +336,46 @@ class NativeReaderTest {
         assertTrue("CSS application succeeded, rather than only saving controls", host.reports.isEmpty())
     }
 
+    /** C1: a fresh reader can change text size without giving up the book's own formatting. */
+    @Test fun textSizeChangesWithPublisherStylesAndKeepsPoetryFormatting() {
+        target.getSharedPreferences(ReaderTestActivity.TEST_PREFERENCES, Context.MODE_PRIVATE).edit().clear().commit()
+        launch()
+        assertTrue("A fresh reader respects publisher styles", main { reader.comfort.publisherStyles })
+        val authored = comfortMetrics()
+        main { reader.changeFont(1.5) }
+        waitFor("150% text applies with publisher styles on") {
+            !main { reader.typographyUpdating } && comfortMetrics().getDouble("poemFont") > authored.getDouble("poemFont") * 1.45
+        }
+        assertTrue("Changing size does not turn publisher styles off", main { reader.comfort.publisherStyles })
+        val large = comfortMetrics()
+        assertEquals("Poetry stays centred", "center", large.getString("poemAlign"))
+        assertEquals("The poem's 3em indent grows with the text", 3.0, large.getDouble("poemIndent") / large.getDouble("poemFont"), 0.05)
+        assertEquals("The book's poem font is kept", authored.getString("poemFamily"), large.getString("poemFamily"))
+
+        js("readium.scrollToId('paragraph-35'); true")
+        settledPageOffset()
+        val anchorBefore = firstVisibleParagraph()
+        main { reader.changeFont(1.4) }
+        waitFor("140% text applies") { !main { reader.typographyUpdating } &&
+            abs(comfortMetrics().getDouble("poemFont") / authored.getDouble("poemFont") - 1.4) < 0.05 }
+        assertTrue("Reading stays near the same paragraph", abs(firstVisibleParagraph() - anchorBefore) <= 2)
+        main { reader.changePublisherStyles(false) }
+        waitFor("custom formatting applies") { !main { reader.typographyUpdating } && comfortMetrics().getString("poemAlign") == "start" }
+        assertEquals("Turning publisher styles off keeps the saved size", 1.4, main { reader.fontScale }, 0.001)
+        main { reader.changePublisherStyles(true) }
+        waitFor("publisher formatting returns") { !main { reader.typographyUpdating } && comfortMetrics().getString("poemAlign") == "center" }
+        assertEquals(1.4, main { reader.fontScale }, 0.001)
+        assertEquals(1.4, comfortMetrics().getDouble("poemFont") / authored.getDouble("poemFont"), 0.05)
+        scenario!!.close(); scenario = null; launch()
+        assertEquals("140% survives reopening", 1.4, main { reader.fontScale }, 0.001)
+        assertTrue(main { reader.comfort.publisherStyles })
+        waitFor("the reopened book shows 140% text") {
+            abs(comfortMetrics().getDouble("poemFont") / authored.getDouble("poemFont") - 1.4) < 0.05
+        }
+        assertEquals("center", comfortMetrics().getString("poemAlign"))
+        assertTrue("CSS application succeeded, rather than only saving controls", host.reports.isEmpty())
+    }
+
     @Test fun comfortControlsChangeRealLayoutAndPreserveMidChapterPosition() {
         launch()
         js("readium.scrollToId('paragraph-35'); true")
