@@ -39,17 +39,23 @@ internal fun extractCoverSeed(samples: IntArray): Int {
     return color(winner)
 }
 
-internal enum class LibraryThemeChoice(val id: String, val label: String, val dark: Boolean, val seed: Int?) {
-    AUTOMATIC("automatic", "Automatic (Book Cover)", false, null),
+/** [dark] is null for Automatic, which follows the system light/dark setting. */
+internal enum class LibraryThemeChoice(val id: String, val label: String, val dark: Boolean?, val seed: Int?) {
+    AUTOMATIC("automatic", "Automatic (Book Cover)", null, null),
     PAPER("paper", "Paper · light", false, 0xFF8A6441.toInt()),
     FOREST("forest", "Forest · light", false, DEFAULT_COVER_SEED),
     MIDNIGHT("midnight", "Midnight · dark", true, 0xFF577AAC.toInt()),
     CHARCOAL("charcoal", "Charcoal · dark", true, 0xFF84728A.toInt());
 
+    fun isDark(systemDark: Boolean): Boolean = dark ?: systemDark
+
     companion object {
-        fun fromId(id: String): LibraryThemeChoice = entries.firstOrNull { it.id == id } ?: AUTOMATIC
+        fun fromId(id: String?): LibraryThemeChoice = entries.firstOrNull { it.id == id } ?: AUTOMATIC
     }
 }
+
+/** Saved "libraryTheme" preference to a known theme id; missing or unknown values mean Automatic. */
+internal fun savedLibraryTheme(stored: String?): String = LibraryThemeChoice.fromId(stored).id
 
 /** Color roles remain plain ARGB values so contrast guarantees can be exercised on the JVM. */
 internal data class LibraryPalette(
@@ -68,10 +74,17 @@ internal data class LibraryPalette(
     val surfaceContainerHigh: Int, val surfaceContainerHighest: Int,
 )
 
-internal fun libraryPalette(themeId: String, coverSeed: Int = DEFAULT_COVER_SEED): LibraryPalette {
+internal fun libraryPalette(themeId: String, coverSeed: Int = DEFAULT_COVER_SEED, systemDark: Boolean = false): LibraryPalette {
     val choice = LibraryThemeChoice.fromId(themeId)
-    val seed = (choice.seed ?: coverSeed) or (0xFF shl 24)
-    val dark = choice.dark
+    return seedPalette(choice.seed ?: coverSeed, choice.isDark(systemDark))
+}
+
+/** Reader panels: the library's accent, light or dark to match the page (Night is dark, Paper and Sepia light). */
+internal fun readerControlsPalette(themeId: String, coverSeed: Int = DEFAULT_COVER_SEED, night: Boolean): LibraryPalette =
+    seedPalette(LibraryThemeChoice.fromId(themeId).seed ?: coverSeed, night)
+
+private fun seedPalette(accent: Int, dark: Boolean): LibraryPalette {
+    val seed = accent or (0xFF shl 24)
     val black = 0xFF000000.toInt()
     val white = 0xFFFFFFFF.toInt()
     fun tint(whiteAmount: Double): Int = mixColors(seed, if (dark) black else white, whiteAmount)

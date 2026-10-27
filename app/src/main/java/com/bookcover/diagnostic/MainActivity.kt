@@ -5,6 +5,7 @@ import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -90,7 +91,7 @@ class MainActivity : FragmentActivity() {
         exterior = ExteriorCoverController(this, lifecycleScope)
         autoCover = preferences.getBoolean("autoCover", true)
         timer = preferences.getInt("coverTimer", 30).takeIf { it in listOf(0, 30, 60) } ?: 30
-        libraryTheme = LibraryThemeChoice.fromId(preferences.getString("libraryTheme", "automatic") ?: "automatic").id
+        libraryTheme = savedLibraryTheme(preferences.getString("libraryTheme", null))
         WindowCompat.setDecorFitsSystemWindows(window, false)
         reopeningBookId = savedInstanceState?.getString("openBook")
         if (reopeningBookId != null) setReadingWindow(true)
@@ -100,7 +101,16 @@ class MainActivity : FragmentActivity() {
             val seed by produceState(DEFAULT_COVER_SEED, recent?.id, recent?.coverRevision) {
                 value = recent?.let { book -> withContext(Dispatchers.IO) { coverThemeSeed(library.thumbnailBitmap(book)) } } ?: DEFAULT_COVER_SEED
             }
-            MaterialTheme(colorScheme = libraryColorScheme(libraryTheme, seed)) {
+            // Automatic follows the system light/dark setting; a chosen theme keeps its own.
+            val systemDark = isSystemInDarkTheme()
+            val libraryDark = LibraryThemeChoice.fromId(libraryTheme).isDark(systemDark)
+            SideEffect {
+                WindowInsetsControllerCompat(window, window.decorView).apply {
+                    isAppearanceLightStatusBars = !libraryDark
+                    isAppearanceLightNavigationBars = !libraryDark
+                }
+            }
+            MaterialTheme(colorScheme = libraryColorScheme(libraryTheme, seed, systemDark)) {
                 val current = session
                 if (current == null && reopeningBookId != null)
                     Box(Modifier.fillMaxSize().background(readerBackground(preferences.getString("theme", "Paper"))))
@@ -128,7 +138,8 @@ class MainActivity : FragmentActivity() {
                         else current.bookmarkLocator()?.let { locator -> library.bookmark(current.book.id, locator, name, current.chapterStatus?.title) }
                         message = "Bookmark saved. Open Contents to return to it."
                     }
-                    }, onRemoveBookmark = { value -> work { library.removeBookmark(current.book.id, value) } })
+                    }, onRemoveBookmark = { value -> work { library.removeBookmark(current.book.id, value) } },
+                    libraryTheme = libraryTheme, coverSeed = seed)
                 if (showDiagnostics) AlertDialog(onDismissRequest = { showDiagnostics = false }, title = { Text("Device diagnostics") },
                     text = { Text(exterior.diagnostics() + "\n" + DiagnosticLog.report(), modifier = Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), style = MaterialTheme.typography.bodySmall) },
                     confirmButton = { TextButton(onClick = { showDiagnostics = false }) { Text("Close") } })

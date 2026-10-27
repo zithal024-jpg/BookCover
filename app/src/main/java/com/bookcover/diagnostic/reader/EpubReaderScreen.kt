@@ -27,6 +27,8 @@ import android.view.ViewGroup
 import androidx.fragment.app.FragmentContainerView
 import com.bookcover.diagnostic.R
 import com.bookcover.diagnostic.library.BookRecord
+import com.bookcover.diagnostic.library.DEFAULT_COVER_SEED
+import com.bookcover.diagnostic.library.readerControlsColorScheme
 import com.bookcover.diagnostic.ui.SettingsSection
 
 /** Page colour for a reading theme; also used for the plain screen shown while a book reopens. */
@@ -49,6 +51,8 @@ internal fun EpubReaderScreen(
     onChooseCover: () -> Unit,
     onSaveBookmark: (name: String, existingValue: String?) -> Unit,
     onRemoveBookmark: (String) -> Unit,
+    libraryTheme: String = "automatic",
+    coverSeed: Int = DEFAULT_COVER_SEED,
 ) {
     var contentsVisible by remember(session) { mutableStateOf(false) }
     var bookmarkDraft by remember(session) { mutableStateOf<BookmarkDraft?>(null) }
@@ -57,7 +61,8 @@ internal fun EpubReaderScreen(
     val overlayVisible = session.controlsVisible || contentsVisible || bookmarkDraft != null
     val night = session.themeName == "Night"
     val background = readerBackground(session.themeName)
-    val scheme = if (night) darkColorScheme() else lightColorScheme()
+    // One palette with the library: same accent, light or dark to match the page.
+    val scheme = readerControlsColorScheme(libraryTheme, coverSeed, night)
     BackHandler {
         when { contentsVisible -> contentsVisible = false; session.controlsVisible -> session.controlsVisible = false; else -> onHome() }
     }

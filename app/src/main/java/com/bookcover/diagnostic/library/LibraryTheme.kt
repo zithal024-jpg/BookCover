@@ -20,8 +20,13 @@ internal fun coverThemeSeed(bitmap: Bitmap): Int {
     return extractCoverSeed(samples)
 }
 
-internal fun libraryColorScheme(themeId: String, coverSeed: Int = DEFAULT_COVER_SEED): ColorScheme {
-    val p = libraryPalette(themeId, coverSeed)
+internal fun libraryColorScheme(themeId: String, coverSeed: Int = DEFAULT_COVER_SEED, systemDark: Boolean = false): ColorScheme =
+    colorScheme(libraryPalette(themeId, coverSeed, systemDark))
+
+internal fun readerControlsColorScheme(themeId: String, coverSeed: Int, night: Boolean): ColorScheme =
+    colorScheme(readerControlsPalette(themeId, coverSeed, night))
+
+private fun colorScheme(p: LibraryPalette): ColorScheme {
     val base = if (p.dark) darkColorScheme() else lightColorScheme()
     return base.copy(
         primary = Color(p.primary), onPrimary = Color(p.onPrimary),
