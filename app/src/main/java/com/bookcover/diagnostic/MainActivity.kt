@@ -232,28 +232,36 @@ open class MainActivity : FragmentActivity() {
     }
 
     private suspend fun loadBook(book: BookRecord) {
-        val publication = withContext(Dispatchers.IO) { engine.open(library.epubFile(book)) }
-        try {
-            exterior.artwork = withContext(Dispatchers.IO) { CoverArtwork.from(library.coverBitmap(book)) }
-            val record = library.book(book.id) ?: book
-            // The Bundle is the immediate recreation snapshot; disk saves may still be finishing.
-            val restoredRecord = restoredReaderLocator?.takeIf { book.id == reopeningBookId }
-                ?.let { record.copy(locator = it) } ?: record
-            val current = EpubSession(this, restoredRecord, publication, library,
-                preferences.getFloat("fontScale", 1.0f).toDouble(), preferences.getString("theme", "Paper") ?: "Paper",
-                report = { message = it }, initialFontId = preferences.getString("fontId", "serif") ?: "serif",
-                initialEdgeTaps = preferences.getBoolean("edgeTaps", false))
-            library.markOpened(book.id)
-            session = current
-            setReadingWindow(true)
-            if (reopeningBookId != null) operations.publishInitialMessage("Swipe left/right to turn pages. Tap the middle for controls.")
-            else message = "Swipe left/right to turn pages. Tap the middle for controls."
-            DiagnosticLog.record("Opened local EPUB in host activity; metadata omitted")
-            val previousCover = restoredCover
-            restoredCover = null
-            if (previousCover != null) exterior.restore(previousCover.first, previousCover.second)
-            else if (autoCover && exterior.available) exterior.start(timer)
-        } catch (error: Exception) { publication.close(); throw error }
+        openBookWithCleanup(
+            ioContext = Dispatchers.IO,
+            openPublication = { engine.open(library.epubFile(book)) },
+            closePublication = { it.close() },
+            loadArtwork = { CoverArtwork.from(library.coverBitmap(book)) },
+            createSession = { publication ->
+                val record = library.book(book.id) ?: book
+                // The Bundle is the immediate recreation snapshot; disk saves may still be finishing.
+                val restoredRecord = restoredReaderLocator?.takeIf { book.id == reopeningBookId }
+                    ?.let { record.copy(locator = it) } ?: record
+                EpubSession(this, restoredRecord, publication, library,
+                    preferences.getFloat("fontScale", 1.0f).toDouble(), preferences.getString("theme", "Paper") ?: "Paper",
+                    report = { message = it }, initialFontId = preferences.getString("fontId", "serif") ?: "serif",
+                    initialEdgeTaps = preferences.getBoolean("edgeTaps", false))
+            },
+            closeSession = { it.close() },
+            markOpened = { library.markOpened(book.id) },
+            commit = { current, artwork ->
+                exterior.artwork = artwork
+                session = current
+                setReadingWindow(true)
+                if (reopeningBookId != null) operations.publishInitialMessage("Swipe left/right to turn pages. Tap the middle for controls.")
+                else message = "Swipe left/right to turn pages. Tap the middle for controls."
+                DiagnosticLog.record("Opened local EPUB in host activity; metadata omitted")
+                val previousCover = restoredCover
+                restoredCover = null
+                if (previousCover != null) exterior.restore(previousCover.first, previousCover.second)
+                else if (autoCover && exterior.available) exterior.start(timer)
+            },
+        )
     }
 
     private fun goHome() {

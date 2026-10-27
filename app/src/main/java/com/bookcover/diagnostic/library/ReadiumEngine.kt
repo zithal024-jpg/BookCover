@@ -3,6 +3,8 @@ package com.bookcover.diagnostic.library
 import android.content.Context
 import java.io.File
 import java.io.IOException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import com.bookcover.diagnostic.reader.bookSearchServiceFactory
 import org.readium.r2.shared.ExperimentalReadiumApi
 import org.readium.r2.shared.publication.Publication
@@ -62,8 +64,9 @@ internal class ReadiumEngine(context: Context) {
             }) { "This EPUB is protected. The prototype opens DRM-free EPUBs." }
             require(publication.readingOrder.isNotEmpty()) { "This EPUB has no readable chapters" }
             publication.positions() // Populate the cached position service before constructing the navigator.
+            currentCoroutineContext().ensureActive()
             return publication
-        } catch (error: Exception) {
+        } catch (error: Throwable) {
             publication.close()
             throw error
         }
