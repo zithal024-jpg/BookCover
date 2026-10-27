@@ -30,7 +30,7 @@ internal fun extractCoverSeed(samples: IntArray): Int {
     // Prefer a usable artwork color over large white margins, if it represents at least 2%.
     val chromatic = populated.filter { bucket ->
         val candidate = color(bucket)
-        count[bucket] >= max(2, opaqueCount / 50) && saturation(candidate) >= 0.12 &&
+        count[bucket] >= max(2, opaqueCount / 50) && saturation(candidate) >= 0.08 &&
             relativeLuminance(candidate) in 0.025..0.90
     }
     val candidates = chromatic.ifEmpty { populated }
@@ -39,13 +39,27 @@ internal fun extractCoverSeed(samples: IntArray): Int {
     return color(winner)
 }
 
-/** [dark] is null for Automatic, which follows the system light/dark setting. */
+/**
+ * [dark] is null for themes that follow the system light/dark setting: Automatic and the colour themes.
+ * Saved ids must never change; new themes go at the end.
+ */
 internal enum class LibraryThemeChoice(val id: String, val label: String, val dark: Boolean?, val seed: Int?) {
     AUTOMATIC("automatic", "Automatic (Book Cover)", null, null),
     PAPER("paper", "Paper · light", false, 0xFF8A6441.toInt()),
     FOREST("forest", "Forest · light", false, DEFAULT_COVER_SEED),
     MIDNIGHT("midnight", "Midnight · dark", true, 0xFF577AAC.toInt()),
-    CHARCOAL("charcoal", "Charcoal · dark", true, 0xFF84728A.toInt());
+    CHARCOAL("charcoal", "Charcoal · dark", true, 0xFF84728A.toInt()),
+    ROSE("rose", "Rose", null, 0xFFC2457A.toInt()),
+    CRIMSON("crimson", "Crimson", null, 0xFFB0303C.toInt()),
+    CORAL("coral", "Coral", null, 0xFFD0603F.toInt()),
+    AMBER("amber", "Amber", null, 0xFFB7791F.toInt()),
+    OLIVE("olive", "Olive", null, 0xFF7A8A2E.toInt()),
+    MEADOW("meadow", "Meadow", null, 0xFF3F8F4A.toInt()),
+    TEAL("teal", "Teal", null, 0xFF1F7F7A.toInt()),
+    OCEAN("ocean", "Ocean", null, 0xFF2A6FB0.toInt()),
+    INDIGO("indigo", "Indigo", null, 0xFF4B4FB0.toInt()),
+    LAVENDER("lavender", "Lavender", null, 0xFF7E5AB8.toInt()),
+    PLUM("plum", "Plum", null, 0xFF8E3F8C.toInt());
 
     fun isDark(systemDark: Boolean): Boolean = dark ?: systemDark
 
@@ -76,12 +90,28 @@ internal data class LibraryPalette(
 
 internal fun libraryPalette(themeId: String, coverSeed: Int = DEFAULT_COVER_SEED, systemDark: Boolean = false): LibraryPalette {
     val choice = LibraryThemeChoice.fromId(themeId)
-    return seedPalette(choice.seed ?: coverSeed, choice.isDark(systemDark))
+    return seedPalette(choice.seed ?: vividAccent(coverSeed), choice.isDark(systemDark))
 }
 
 /** Reader panels: the library's accent, light or dark to match the page (Night is dark, Paper and Sepia light). */
 internal fun readerControlsPalette(themeId: String, coverSeed: Int = DEFAULT_COVER_SEED, night: Boolean): LibraryPalette =
-    seedPalette(LibraryThemeChoice.fromId(themeId).seed ?: coverSeed, night)
+    seedPalette(LibraryThemeChoice.fromId(themeId).seed ?: vividAccent(coverSeed), night)
+
+/**
+ * Pale or muted covers (blush pink, sand) keep their hue but get enough colour to show as an accent.
+ * Near-grey covers stay neutral rather than inventing a colour.
+ */
+internal fun vividAccent(color: Int): Int {
+    val r = color ushr 16 and 255
+    val g = color ushr 8 and 255
+    val b = color and 255
+    val high = max(r, max(g, b))
+    val spread = high - min(r, min(g, b))
+    if (high == 0 || spread < high * 0.06 || spread >= high * 0.45) return color
+    val stretch = high * 0.45 / spread
+    fun channel(value: Int): Int = (high - (high - value) * stretch).roundToInt().coerceIn(0, 255)
+    return opaqueColor(channel(r), channel(g), channel(b))
+}
 
 private fun seedPalette(accent: Int, dark: Boolean): LibraryPalette {
     val seed = accent or (0xFF shl 24)

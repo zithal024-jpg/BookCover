@@ -1,6 +1,8 @@
 package com.bookcover.diagnostic.library
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
@@ -10,6 +12,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -40,12 +44,16 @@ internal fun LibrarySettingsDialog(
                 "A selected theme stays in use until you choose Automatic again.") {
                 Text("Library theme", style = MaterialTheme.typography.labelLarge)
                 Column(Modifier.selectableGroup()) { LibraryThemeChoice.entries.forEach { choice ->
+                    if (choice == LibraryThemeChoice.ROSE) Text("Colours · follow your phone's light or dark mode",
+                        style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
                     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
                         .selectable(selected = LibraryThemeChoice.fromId(libraryTheme) == choice,
                             onClick = { onLibraryTheme(choice.id) }, role = Role.RadioButton),
                         verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(selected = LibraryThemeChoice.fromId(libraryTheme) == choice, onClick = null)
-                        Text(choice.label, modifier = Modifier.padding(start = 12.dp))
+                        Text(choice.label, modifier = Modifier.padding(start = 12.dp).weight(1f))
+                        // Decorative swatch; the label already names the colour for screen readers.
+                        choice.seed?.let { seed -> Box(Modifier.size(20.dp).clip(CircleShape).background(Color(seed))) }
                     }
                 } }
             }

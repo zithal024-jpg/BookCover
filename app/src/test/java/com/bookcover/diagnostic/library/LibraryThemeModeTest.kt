@@ -42,13 +42,12 @@ class LibraryThemeModeTest {
     }
 
     @Test fun readerControlsShareTheLibraryAccentAndFollowThePageColour() {
-        for (id in LibraryThemeChoice.entries.map { it.id }) {
-            val seed = LibraryThemeChoice.fromId(id).seed ?: red
-            assertTrue(id, readerControlsPalette(id, red, night = true).dark)
-            assertFalse(id, readerControlsPalette(id, red, night = false).dark)
-            // Same accent as the library would use in that brightness.
-            assertEquals(id, libraryPalette("automatic", seed, systemDark = true), readerControlsPalette(id, red, night = true))
-            assertEquals(id, libraryPalette("automatic", seed, systemDark = false), readerControlsPalette(id, red, night = false))
+        for (choice in LibraryThemeChoice.entries) for (night in listOf(false, true)) {
+            val controls = readerControlsPalette(choice.id, red, night)
+            assertEquals(choice.id, night, controls.dark)
+            // Same accent as the library shows at that brightness.
+            if (choice.dark == null || choice.dark == night)
+                assertEquals(choice.id, libraryPalette(choice.id, red, systemDark = night), controls)
         }
     }
 
