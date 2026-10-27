@@ -22,6 +22,20 @@ class CoverHueTest {
         }
     }
 
+    @Test fun pinkSpreadOverManyShadesIsNotOutvotedByOneBrownPatch() {
+        // Colour counts measured from the owner's pink manga cover, which picked brown on the phone.
+        val shades = listOf(0xFFE51B24.toInt() to 140, 0xFF763B0B.toInt() to 150, 0xFFEC2C4D.toInt() to 134,
+            0xFFEB99A7.toInt() to 91, 0xFFDF3655.toInt() to 57)
+        val samples = shades.flatMap { (color, n) -> List(n) { color } } + List(2304 - shades.sumOf { it.second }) { 0xFFF0F0F0.toInt() }
+        val seed = extractCoverSeed(samples.toIntArray())
+        assertTrue("picked ${Integer.toHexString(seed)}", hueDistance(hue(seed), 352.0) <= 15.0)
+
+        val fragmentedPink = listOf(0xFFF06090.toInt(), 0xFFE0507F.toInt(), 0xFFF070A0.toInt(), 0xFFD84878.toInt())
+            .flatMap { pink -> List(110) { pink } } + List(160) { 0xFF763B0B.toInt() } + List(400) { 0xFFFFFFFF.toInt() }
+        val pick = extractCoverSeed(fragmentedPink.toIntArray())
+        assertTrue("picked ${Integer.toHexString(pick)}", hueDistance(hue(pick), 340.0) <= 15.0)
+    }
+
     @Test fun automaticAccentKeepsTheCoverHueAndIsClearlyColoured() {
         val covers = pinkCovers.values + listOf(0xFF2858B8.toInt(), 0xFF287452.toInt(), 0xFFE8D9A0.toInt(), 0xFF6A4C93.toInt())
         for (cover in covers) for (dark in listOf(false, true)) {

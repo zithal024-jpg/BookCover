@@ -33,11 +33,35 @@ internal fun extractCoverSeed(samples: IntArray): Int {
         count[bucket] >= max(2, opaqueCount / 50) && saturation(candidate) >= 0.08 &&
             relativeLuminance(candidate) in 0.025..0.90
     }
-    val candidates = chromatic.ifEmpty { populated }
-    val winner = candidates.maxByOrNull { bucket -> count[bucket] * (1.0 + saturation(color(bucket))) }
-        ?: return DEFAULT_COVER_SEED
-    return color(winner)
+    fun score(bucket: Int): Double = count[bucket] * (1.0 + saturation(color(bucket)))
+    if (chromatic.isEmpty()) return populated.maxByOrNull(::score)?.let(::color) ?: DEFAULT_COVER_SEED
+    // Shades of one colour vote together: a pink cover drawn in many pinks must not lose to one flat
+    // brown patch. The family's colour is the count-weighted average of its shades.
+    fun family(of: Int): List<Int> = chromatic.filter { hueDistance(color(it), color(of)) <= 20.0 }
+    val leader = chromatic.maxBy { family(it).sumOf(::score) }
+    val members = family(leader)
+    val total = members.sumOf { count[it].toLong() }
+    return opaqueColor((members.sumOf { red[it] } / total).toInt(), (members.sumOf { green[it] } / total).toInt(),
+        (members.sumOf { blue[it] } / total).toInt())
 }
+
+private fun hue(color: Int): Double {
+    val r = color ushr 16 and 255
+    val g = color ushr 8 and 255
+    val b = color and 255
+    val high = max(r, max(g, b))
+    val delta = (high - min(r, min(g, b))).toDouble()
+    if (delta == 0.0) return 0.0
+    val degrees = when (high) {
+        r -> 60 * (((g - b) / delta) % 6)
+        g -> 60 * ((b - r) / delta + 2)
+        else -> 60 * ((r - g) / delta + 4)
+    }
+    return (degrees + 360) % 360
+}
+
+private fun hueDistance(first: Int, second: Int): Double =
+    kotlin.math.abs(hue(first) - hue(second)).let { min(it, 360 - it) }
 
 /**
  * [dark] is null for themes that follow the system light/dark setting: Automatic and the colour themes.
