@@ -14,7 +14,7 @@ internal enum class ReaderAction { LOAD_LIBRARY, IMPORT, OPEN, SAVE_BACKUP, REST
 
 internal enum class FailureReason {
     LIBRARY_PROTECTED, NOT_EPUB, PROTECTED_BOOK, TOO_LARGE, NO_CHAPTERS, UNREADABLE_FILE,
-    BACKUP_NOT_WRITTEN, NOT_A_BACKUP, REMOTE_BLOCKED, UNKNOWN,
+    BACKUP_NOT_WRITTEN, IMPORT_NOT_SAVED, NOT_A_BACKUP, REMOTE_BLOCKED, UNKNOWN,
 }
 
 /**
@@ -30,6 +30,8 @@ internal fun failureReason(error: Throwable): FailureReason {
         "up to 200 MB" in text || "exceeds the prototype's import limit" in text -> FailureReason.TOO_LARGE
         "no readable chapters" in text -> FailureReason.NO_CHAPTERS
         "Could not write the backup file" in text -> FailureReason.BACKUP_NOT_WRITTEN
+        "Could not save the book" in text || "imported book files are incomplete" in text ||
+            "earlier copy of this book" in text -> FailureReason.IMPORT_NOT_SAVED
         "Remote publication resources" in text -> FailureReason.REMOTE_BLOCKED
         error is ZipException || error is EOFException || "valid EPUB" in text ||
             "opened as an EPUB" in text || "choose an EPUB" in text -> FailureReason.NOT_EPUB
@@ -58,6 +60,8 @@ private fun messageForFailure(action: ReaderAction, reason: FailureReason): Stri
         "remove it and import it again." else "This EPUB has no chapters BookCover can show. It may be damaged; " +
         "try downloading it again. Your library is unchanged."
     FailureReason.BACKUP_NOT_WRITTEN -> "BookCover couldn't save the backup there. Choose another folder and try again."
+    FailureReason.IMPORT_NOT_SAVED -> "BookCover couldn't save this book's files. Check free space, restart BookCover and try again. " +
+        "Your existing books are unchanged."
     FailureReason.REMOTE_BLOCKED -> "Part of this book is stored on the internet, which BookCover never connects to. " +
         "The rest of the book may still work."
     FailureReason.NOT_EPUB -> when (action) {
@@ -94,6 +98,7 @@ internal fun shortFailureReason(reason: FailureReason): String = when (reason) {
     FailureReason.TOO_LARGE -> "over 200 MB"
     FailureReason.NO_CHAPTERS -> "no chapters to show"
     FailureReason.UNREADABLE_FILE, FailureReason.BACKUP_NOT_WRITTEN -> "couldn't be read"
+    FailureReason.IMPORT_NOT_SAVED -> "couldn't be saved"
     FailureReason.REMOTE_BLOCKED -> "needs the internet"
     FailureReason.UNKNOWN -> "unexpected problem"
 }

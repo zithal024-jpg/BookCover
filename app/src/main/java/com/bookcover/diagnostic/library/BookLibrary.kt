@@ -21,6 +21,10 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import java.io.OutputStream
+import java.nio.channels.Channels
+import java.nio.channels.FileChannel
+import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -53,6 +57,7 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
 
     private val directory = File(context.filesDir, "library").apply { mkdirs() }
     private val index = LibraryIndex(directory)
+    private val importFinalization = ImportFinalization(directory)
     private val coverColors = CoverColorCache(File(directory, "cover-colors.json"))
     /** Reading-streak days (dated totals only); shared by the reader and the Library card. */
     val readingDays = ReadingDayStore(File(directory, "reading-days.json"))
@@ -75,6 +80,9 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
             loaded = false
             val removed = runCatching { cleanAbandonedImports() }.getOrDefault(0)
             index.load().also {
+                // Only a readable library plus a durable ownership receipt permits final-file cleanup.
+                // Recovery also checks backup/pending/damaged indexes, not just the selected records.
+                runCatching { importFinalization.recover() }
                 coverColors.colors(it.records, ::extractColor)
                 currentCoroutineContext().ensureActive()
                 loaded = true
@@ -174,12 +182,24 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
                     now, collection, coverRevision = now)
                 val cover = runCatching { publication.coverFitting(Size(1080, 1600)) }.getOrNull() ?: placeholder(record)
                 lock.withLock {
+                    check(loaded) { "Your library list could not be read, so BookCover is not saving changes to protect it." }
+                    val operation = currentCoroutineContext()
+                    operation.ensureActive()
                     book(id)?.let { return it to false }
-                    val destination = epubFile(record)
-                    if (!temporary.renameTo(destination)) temporary.copyTo(destination, overwrite = true)
-                    coverFile(record).outputStream().use { cover.compress(Bitmap.CompressFormat.PNG, 100, it) }
-                    writePng(thumbnailFile(record), shrink(cover))
-                    persist(mutableBooks.value + record)
+                    importFinalization.commit(id, writeAssets = {
+                        // New files only: never replace an existing/recoverable copy. No AtomicFile
+                        // sidecars here; each completed asset is synced before the index can refer to it.
+                        writeImportAsset(epubFile(record)) { output -> temporary.inputStream().use { it.copyTo(output) } }
+                        operation.ensureActive()
+                        writeImportAsset(coverFile(record)) { output ->
+                            if (!cover.compress(Bitmap.CompressFormat.PNG, 100, output)) throw IOException("Could not save the book cover")
+                        }
+                        operation.ensureActive()
+                        writeImportAsset(thumbnailFile(record)) { output ->
+                            if (!shrink(cover).compress(Bitmap.CompressFormat.PNG, 100, output)) throw IOException("Could not save the book thumbnail")
+                        }
+                        operation.ensureActive()
+                    }, persist = { persist(mutableBooks.value + record) })
                 }
                 return record to true
             } finally { publication.close() }
@@ -274,7 +294,7 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
         thumbnails.get(key)?.let { return it }
         val bitmap = BitmapFactory.decodeFile(thumbnailFile(record).absolutePath)
             ?: (decodeSmallCover(record) ?: shrink(placeholder(record))).also { made ->
-                runCatching { writePng(thumbnailFile(record), made) }
+                runCatching { importFinalization.writeExistingAsset(record.id) { writePng(thumbnailFile(record), made) } }
             }
         thumbnails.put(key, bitmap)
         return bitmap
@@ -304,6 +324,13 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
         val output = atomic.startWrite()
         try { bitmap.compress(Bitmap.CompressFormat.PNG, 100, output); atomic.finishWrite(output) }
         catch (error: Exception) { atomic.failWrite(output); throw error }
+    }
+
+    private fun writeImportAsset(file: File, write: (OutputStream) -> Unit) {
+        FileChannel.open(file.toPath(), StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE).use { channel ->
+            write(Channels.newOutputStream(channel))
+            channel.force(true)
+        }
     }
 
     private suspend fun change(id: String, transform: BookRecord.() -> BookRecord) = withContext(Dispatchers.IO) {

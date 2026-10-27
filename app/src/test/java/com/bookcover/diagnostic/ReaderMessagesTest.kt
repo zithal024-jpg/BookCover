@@ -26,6 +26,8 @@ class ReaderMessagesTest {
         ZipException("zip END header not found"), EOFException("Unexpected end of ZLIB input stream"),
         IOException("Could not read the selected file"), IOException("Could not read this EPUB file"),
         IOException("This file could not be opened as an EPUB"), IOException("Could not write the backup file"),
+        IOException("Could not save the book cover"), IOException("The imported book files are incomplete"),
+        IOException("An earlier copy of this book needs to be preserved"),
         FileNotFoundException("/storage/emulated/0/Download/My Book.epub: open failed: ENOENT"),
         SecurityException("Permission Denial: reading content://com.android.providers"),
         IllegalArgumentException("This prototype imports EPUBs up to 200 MB"),
@@ -117,7 +119,7 @@ class ReaderMessagesTest {
 
     /** Guards the mapper against new error texts added to the library code without a reader message. */
     @Test fun everyErrorTextThrownByTheLibraryCodeHasASpecificMessage() {
-        val sources = listOf("BookLibrary.kt", "EpubArchiveCheck.kt", "ReadiumEngine.kt", "LibraryIndex.kt", "LibraryBackup.kt").map { name ->
+        val sources = listOf("BookLibrary.kt", "ImportFinalization.kt", "EpubArchiveCheck.kt", "ReadiumEngine.kt", "LibraryIndex.kt", "LibraryBackup.kt").map { name ->
             listOf(File("src/main/java/com/bookcover/diagnostic/library/$name"),
                 File("app/src/main/java/com/bookcover/diagnostic/library/$name")).first { it.isFile }.readText()
         }
