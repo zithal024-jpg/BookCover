@@ -32,9 +32,11 @@ Readium Kotlin Toolkit 3.4.0. Application ID `com.bookcover.diagnostic`.
 - Keep supported build/device helpers, their locks and required release evidence,
   and owner phone availability. Never bypass safeguards, steal a resource or stop
   another worker's process. Registry initialization still requires prior release.
-- The implementer updates the existing tracker row once at completion, with the
-  commit and verification, or on a material blocker. Keep a short handoff only for
-  transfer or resumption; no duplicate PM logs or timed status reports are needed.
+- The implementer updates their row in `docs/review/ACTIVE-BACKLOG.md` at completion
+  or a material status change/blocker, with the commit and verification. Record new
+  review findings there before implementation prompts. Keep original BC evidence in
+  its existing completion row. Keep a short handoff only for transfer or resumption;
+  no duplicate PM logs or timed status reports are needed.
 - Preserve the data, privacy, security and isolated-QA rules below. Report checks
   accurately; only the owner's physical observation verifies the outside cover.
 - This agreement supersedes conflicting PM-only writer roles, assignment/path
@@ -113,15 +115,17 @@ That is deliberate: OneDrive breaks Android's resource merger.
 
 ## Current plan
 
-The full review is the Expert Panel Review: read
-`docs/review/EXPERT-PANEL-REVIEW.md` first (Markdown converted from the owner's
-`Expert Panel Review.docx`, which stays unchanged beside it). Its issue IDs
-(BC-01 … BC-29) are used below. The **Completion tracker** at the top of that
-file is the shared status list for Claude Code, Codex and the owner: check it
-before starting (another agent may already be on an issue) and update its row,
-with the commit and how it was verified, in the same commit as the work. Work in
-the owner's priority and dependency order, validating each meaningful change.
-Independent tasks may proceed in parallel under the agreement above.
+Start with the [active backlog](docs/review/ACTIVE-BACKLOG.md), the single shared
+work queue for Claude Code, Codex and the owner. Check it before starting, record
+new findings before implementation prompts, and update your own relevant row on
+material status changes/completion. Work in its priority and dependency order;
+independent tasks may proceed in parallel under the agreement above.
+
+The [Expert Panel Review](docs/review/EXPERT-PANEL-REVIEW.md#completion-tracker)
+retains the original BC-01 through BC-29 review and detailed completion evidence/history
+(converted from the owner's unchanged `Expert Panel Review.docx`). Add original
+BC completion evidence there with the work; live priorities and ownership belong
+in the active backlog rather than a parallel status list.
 
 **Current status (2026-10-27):** stabilization is complete, including protected
 library-index loading, backup export/import, the removed web-search shortcut,
@@ -140,12 +144,10 @@ BC-29 offline in-book search is QA-verified. CI and AGP readiness work is record
 under BC-25. Read each tracker row for its exact evidence and remaining limits;
 these summaries do not establish a new build, phone observation or resource release.
 
-**Remaining work:** fold/unfold without reload and state extraction (BC-07/15),
-two-page spread (BC-19), screen-on/battery work (BC-22), permission audit (BC-24),
-the remaining friendly-error phone check (BC-26), documentation consolidation
-(BC-28), and release choices/signing/final application ID (BC-11). Follow the
-owner's priorities and the live tracker rather than treating completed stages as
-new assignments.
+**Remaining work:** see the [active backlog](docs/review/ACTIVE-BACKLOG.md) for
+the combined code/UX findings and genuinely remaining original scope. BC-07,
+BC-24 and other completed stages are not new assignments; the evidence history
+may retain older pending notes that later owner confirmation supersedes.
 
 **Reader constraints to preserve:** text size used to look like zooming on the inner
 screen because Readium CSS caps lines at `40rem`, which grows with
@@ -157,7 +159,8 @@ which needs the phone physically unfolded and is skipped otherwise. Owner-report
 returns. Cause: recreation starts with no session, so `MainActivity` draws
 `LibraryScreen` until the saved book reopens. Quick mitigation done the same day
 (`reopeningBookId` in `MainActivity` shows a reader-coloured page; guarded by
-`ReaderLifecycleTest`); the full fix, no reload at all, remains BC-07/15.
+`ReaderLifecycleTest`); BC-07 later completed fold/recreation continuity. Its
+evidence stays in the completion tracker; remaining state extraction is BC-15.
 
 Do not start PDF, cloud sync, online catalogs, or brightness/AOD experiments
 unless the owner asks.

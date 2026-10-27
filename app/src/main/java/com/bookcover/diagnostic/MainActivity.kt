@@ -27,6 +27,7 @@ import com.bookcover.diagnostic.reader.EpubSession
 import com.bookcover.diagnostic.reader.readerBackground
 import com.bookcover.diagnostic.reader.installReadingKeyHandler
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -39,8 +40,11 @@ open class MainActivity : FragmentActivity() {
     private var session by mutableStateOf<EpubSession?>(null)
     // Set while a book that was open before rotation/fold is reopened; the library stays hidden meanwhile.
     private var reopeningBookId by mutableStateOf<String?>(null)
-    private var busy by mutableStateOf(true)
-    private var message by mutableStateOf("Preparing your library…")
+    private val operations = OperationState()
+    private val busy: Boolean get() = operations.busy
+    private var message: String
+        get() = operations.message
+        set(value) { operations.message = value }
     private var showDiagnostics by mutableStateOf(false)
     private var autoCover by mutableStateOf(true)
     private var timer by mutableIntStateOf(30)
@@ -62,7 +66,9 @@ open class MainActivity : FragmentActivity() {
         coverBookId = null
         if (uri != null && id != null) work(ReaderAction.REPLACE_COVER) {
             library.replaceCover(id, uri)
-            library.book(id)?.let { book -> exterior.artwork = withContext(Dispatchers.IO) { CoverArtwork.from(library.coverBitmap(book)) } }
+            if (session?.book?.id == id) library.book(id)?.let { book ->
+                exterior.artwork = withContext(Dispatchers.IO) { CoverArtwork.from(library.coverBitmap(book)) }
+            }
             message = "Cover updated. Start the outside cover again from reading controls."
         }
     }
@@ -89,6 +95,9 @@ open class MainActivity : FragmentActivity() {
         // Navigator restoration needs an open Publication. Reopen from our durable locator instead
         // of asking Android's fragment restoration to construct a navigator without its factory.
         super.onCreate(null)
+        // Keep picker routing/pending results even though navigator fragments cannot be restored.
+        coverBookId = savedInstanceState?.getString("pendingCoverBook")
+        savedInstanceState?.getBundle("documentPickerResults")?.let(activityResultRegistry::onRestoreInstanceState)
         installReadingKeyHandler { session }
         DiagnosticLog.init(this)
         library = BookLibrary.forApp(this)
@@ -169,10 +178,10 @@ open class MainActivity : FragmentActivity() {
                     DiagnosticLog.record("Removed ${loaded.abandonedImportsRemoved} unfinished import copies left by an interrupted import")
                 if (loaded.recoveredFromBackup || loaded.skipped > 0)
                     DiagnosticLog.record("Library index recovered: backup=${loaded.recoveredFromBackup}, skipped=${loaded.skipped}")
-                message = when {
-                    loaded.recoveredFromBackup -> "Your library list was damaged, so BookCover restored its last good copy. Recent changes may be missing."
-                    loaded.skipped > 0 -> "${loaded.skipped} damaged library entries could not be read and were set aside. Your other books are safe."
-                    else -> "Swipe to turn pages. Tap the middle of a page for controls."
+                when {
+                    loaded.recoveredFromBackup -> message = "Your library list was damaged, so BookCover restored its last good copy. Recent changes may be missing."
+                    loaded.skipped > 0 -> message = "${loaded.skipped} damaged library entries could not be read and were set aside. Your other books are safe."
+                    else -> operations.publishInitialMessage("Swipe to turn pages. Tap the middle of a page for controls.")
                 }
                 reopeningBookId?.let { id -> library.book(id)?.let { loadBook(it) } }
             } finally {
@@ -189,6 +198,7 @@ open class MainActivity : FragmentActivity() {
     internal val libraryForTests: BookLibrary get() = library
     internal val sessionForTests: EpubSession? get() = session
     internal val busyForTests: Boolean get() = busy
+    internal val messageForTests: String get() = message
     internal val showsLibraryForTests: Boolean get() = session == null && reopeningBookId == null
     internal fun openBookForTests(book: BookRecord) = openBook(book)
 
@@ -222,27 +232,37 @@ open class MainActivity : FragmentActivity() {
     }
 
     private suspend fun loadBook(book: BookRecord) {
-        val publication = withContext(Dispatchers.IO) { engine.open(library.epubFile(book)) }
-        try {
-            exterior.artwork = withContext(Dispatchers.IO) { CoverArtwork.from(library.coverBitmap(book)) }
-            val record = library.book(book.id) ?: book
-            // The Bundle is the immediate recreation snapshot; disk saves may still be finishing.
-            val restoredRecord = restoredReaderLocator?.takeIf { book.id == reopeningBookId }
-                ?.let { record.copy(locator = it) } ?: record
-            val current = EpubSession(this, restoredRecord, publication, library,
-                preferences.getFloat("fontScale", 1.0f).toDouble(), preferences.getString("theme", "Paper") ?: "Paper",
-                report = { message = it }, initialFontId = preferences.getString("fontId", "serif") ?: "serif",
-                initialEdgeTaps = preferences.getBoolean("edgeTaps", false))
-            library.markOpened(book.id)
-            session = current
-            setReadingWindow(true)
-            message = "Swipe left/right to turn pages. Tap the middle for controls."
-            DiagnosticLog.record("Opened local EPUB in host activity; metadata omitted")
-            val previousCover = restoredCover
-            restoredCover = null
-            if (previousCover != null) exterior.restore(previousCover.first, previousCover.second)
-            else if (autoCover && exterior.available) exterior.start(timer)
-        } catch (error: Exception) { publication.close(); throw error }
+        openBookWithCleanup(
+            ioContext = Dispatchers.IO,
+            openPublication = { engine.open(library.epubFile(book)) },
+            closePublication = { it.close() },
+            loadArtwork = { CoverArtwork.from(library.coverBitmap(book)) },
+            createSession = { publication ->
+                val record = library.book(book.id) ?: book
+                // The Bundle is the immediate recreation snapshot; disk saves may still be finishing.
+                val restoredRecord = restoredReaderLocator?.takeIf { book.id == reopeningBookId }
+                    ?.let { record.copy(locator = it) } ?: record
+                EpubSession(this, restoredRecord, publication, library,
+                    preferences.getFloat("fontScale", 1.0f).toDouble(), preferences.getString("theme", "Paper") ?: "Paper",
+                    report = { message = it }, initialFontId = preferences.getString("fontId", "serif") ?: "serif",
+                    initialEdgeTaps = preferences.getBoolean("edgeTaps", false))
+            },
+            closeSession = { it.close() },
+            markOpened = { library.markOpened(book.id) },
+            commit = { current, artwork ->
+                // Take ownership first so a later failure here leaves the session owned and closable.
+                session = current
+                exterior.artwork = artwork
+                setReadingWindow(true)
+                if (reopeningBookId != null) operations.publishInitialMessage("Swipe left/right to turn pages. Tap the middle for controls.")
+                else message = "Swipe left/right to turn pages. Tap the middle for controls."
+                DiagnosticLog.record("Opened local EPUB in host activity; metadata omitted")
+                val previousCover = restoredCover
+                restoredCover = null
+                if (previousCover != null) exterior.restore(previousCover.first, previousCover.second)
+                else if (autoCover && exterior.available) exterior.start(timer)
+            },
+        )
     }
 
     private fun goHome() {
@@ -263,18 +283,22 @@ open class MainActivity : FragmentActivity() {
 
     /** Runs [block]; a failure shows a plain message for [action] and logs only technical types (BC-26). */
     private fun work(action: ReaderAction, block: suspend () -> Unit) {
-        lifecycleScope.launch {
-            busy = true
-            try { block() }
-            catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) {
-                message = readerMessage(action, error)
-                DiagnosticLog.record(diagnosticSummary(action, error) + "; document details omitted")
-            } finally { busy = false }
+        // Enter synchronously, before a second picker result can observe an idle library.
+        lifecycleScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            operations.run {
+                try { block() }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) {
+                    message = readerMessage(action, error)
+                    DiagnosticLog.record(diagnosticSummary(action, error) + "; document details omitted")
+                }
+            }
         }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("pendingCoverBook", coverBookId)
+        outState.putBundle("documentPickerResults", Bundle().also(activityResultRegistry::onSaveInstanceState))
         outState.putString("openBook", session?.book?.id ?: reopeningBookId)
         outState.putString("openLocator", session?.restorationLocator?.toJSON()?.toString() ?: restoredReaderLocator)
         outState.putBoolean("coverRequested", exterior.requested)

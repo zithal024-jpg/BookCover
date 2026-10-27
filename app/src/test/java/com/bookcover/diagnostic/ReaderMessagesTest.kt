@@ -2,6 +2,8 @@ package com.bookcover.diagnostic
 
 import com.bookcover.diagnostic.library.LibraryBackupException
 import com.bookcover.diagnostic.library.LibraryIndexException
+import com.bookcover.diagnostic.library.LibraryNotReadyException
+import com.bookcover.diagnostic.library.MissingCoverBookException
 import java.io.EOFException
 import java.io.File
 import java.io.FileNotFoundException
@@ -12,6 +14,11 @@ import org.junit.Test
 
 /** BC-23 / BC-26: readers see plain, actionable messages; technical detail goes to the diagnostic log only. */
 class ReaderMessagesTest {
+    @Test fun readinessAndRemovedCoverMessagesGiveAnActionWithoutClaimingSuccess() {
+        assertTrue(readerMessage(ReaderAction.SAVE_BACKUP, LibraryNotReadyException(false)).contains("Wait for it to finish"))
+        assertTrue(readerMessage(ReaderAction.RESTORE_BACKUP, LibraryNotReadyException(true)).contains("Restart BookCover"))
+        assertTrue(readerMessage(ReaderAction.REPLACE_COVER, MissingCoverBookException()).contains("no longer in your library"))
+    }
     private val technical = listOf("exception", "zip", "header", "null", "java", "json", "index", "prototype",
         "readium", "container.xml", "stack", "uri", "content://", "/data/")
 
@@ -19,6 +26,8 @@ class ReaderMessagesTest {
         ZipException("zip END header not found"), EOFException("Unexpected end of ZLIB input stream"),
         IOException("Could not read the selected file"), IOException("Could not read this EPUB file"),
         IOException("This file could not be opened as an EPUB"), IOException("Could not write the backup file"),
+        IOException("Could not save the book cover"), IOException("The imported book files are incomplete"),
+        IOException("An earlier copy of this book needs to be preserved"),
         FileNotFoundException("/storage/emulated/0/Download/My Book.epub: open failed: ENOENT"),
         SecurityException("Permission Denial: reading content://com.android.providers"),
         IllegalArgumentException("This prototype imports EPUBs up to 200 MB"),
@@ -110,7 +119,7 @@ class ReaderMessagesTest {
 
     /** Guards the mapper against new error texts added to the library code without a reader message. */
     @Test fun everyErrorTextThrownByTheLibraryCodeHasASpecificMessage() {
-        val sources = listOf("BookLibrary.kt", "EpubArchiveCheck.kt", "ReadiumEngine.kt", "LibraryIndex.kt", "LibraryBackup.kt").map { name ->
+        val sources = listOf("BookLibrary.kt", "ImportFinalization.kt", "EpubArchiveCheck.kt", "ReadiumEngine.kt", "LibraryIndex.kt", "LibraryBackup.kt").map { name ->
             listOf(File("src/main/java/com/bookcover/diagnostic/library/$name"),
                 File("app/src/main/java/com/bookcover/diagnostic/library/$name")).first { it.isFile }.readText()
         }
