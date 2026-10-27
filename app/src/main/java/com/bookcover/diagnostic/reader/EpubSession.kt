@@ -108,6 +108,9 @@ internal class EpubSession(
     private var typographyJob: Job? = null
     private var typographyAnchor: Locator? = null
     private var typographyAnchorInvalidated = false
+    /** Names of the CSS checks the last typography update could not confirm; empty when all passed. */
+    internal var unconfirmedTypography = ""
+        private set
     private var closed = false
     // Not tied to the activity's lifecycle, so a pending position still saves while it is destroyed.
     private val saveScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -339,6 +342,7 @@ internal class EpubSession(
                 val requested = preferences()
                 val requestedFont = requested.fontFamily?.name.orEmpty()
                 val bookStyles = requested.publisherStyles == true
+                unconfirmedTypography = "settings"
                 fragment.submitPreferences(requested)
                 val settled = withTimeoutOrNull(3_000) {
                     fragment.settings.first {
@@ -348,15 +352,24 @@ internal class EpubSession(
                     }
                     // A public, read-only query confirms that the asynchronous CSS update and
                     // font loading reached the visible resource. No extra JavaScript bridge.
-                    while (fragment.evaluateJavascript("""
-                        (function(){var s=getComputedStyle(document.documentElement);
-                        return Math.abs(parseFloat(s.getPropertyValue('--USER__fontSize'))-${requested.fontSize!! * 100})<0.1
-                        && ${if (bookStyles) "!s.getPropertyValue('--USER__fontFamily').trim()" else "s.getPropertyValue('--USER__fontFamily').indexOf('$requestedFont')>=0"}
-                        && s.getPropertyValue('--USER__advancedSettings').indexOf('readium-advanced-${if (bookStyles) "off" else "on"}')>=0
-                        && Math.abs(parseFloat(s.getPropertyValue('--USER__pageMargins'))-${requested.pageMargins})<0.01
-                        && ${if (bookStyles) "!s.getPropertyValue('--USER__lineHeight').trim() && !s.getPropertyValue('--USER__textAlign').trim()" else "Math.abs(parseFloat(s.getPropertyValue('--USER__lineHeight'))-${requested.lineHeight})<0.01 && s.getPropertyValue('--USER__textAlign').trim()=='${comfort.alignment.css}'"}
-                        && document.fonts.status==='loaded';})()
-                    """.trimIndent()) != "true") delay(40)
+                    // It returns the names of unmet checks (never book text), so a timeout says why.
+                    while (true) {
+                        unconfirmedTypography = fragment.evaluateJavascript("""
+                            (function(){var s=getComputedStyle(document.documentElement), u=[];
+                            function v(n){return s.getPropertyValue(n).trim();}
+                            if(!(Math.abs(parseFloat(v('--USER__fontSize'))-${requested.fontSize!! * 100})<0.1)) u.push('size');
+                            if(!(${if (bookStyles) "!v('--USER__fontFamily')" else "v('--USER__fontFamily').indexOf('$requestedFont')>=0"})) u.push('family');
+                            // With publisher styles Readium may omit the flag entirely; only "on" overrides the book.
+                            if(${if (bookStyles) "v('--USER__advancedSettings').indexOf('readium-advanced-on')>=0" else "v('--USER__advancedSettings').indexOf('readium-advanced-on')<0"}) u.push('mode');
+                            if(!(Math.abs(parseFloat(v('--USER__pageMargins'))-${requested.pageMargins})<0.01)) u.push('margins');
+                            if(!(${if (bookStyles) "!v('--USER__lineHeight')" else "Math.abs(parseFloat(v('--USER__lineHeight'))-${requested.lineHeight})<0.01"})) u.push('lineHeight');
+                            if(!(${if (bookStyles) "!v('--USER__textAlign')" else "v('--USER__textAlign')=='${comfort.alignment.css}'"})) u.push('align');
+                            if(document.fonts.status!=='loaded') u.push('fonts');
+                            return u.join(',');})()
+                        """.trimIndent())?.trim('"') ?: "viewport"
+                        if (unconfirmedTypography.isEmpty()) break
+                        delay(40)
+                    }
                     delay(160) // Let Readium's resize/pagination observer finish before restoring the block.
                     true
                 } ?: false
@@ -367,7 +380,7 @@ internal class EpubSession(
                 currentLocator = fragment.currentLocator.value
                 currentLocator?.let { positions.submit(it) }
                 if (!settled) report("Text settings saved. This book's styles may limit the selected typography.")
-                DiagnosticLog.record("EPUB typography CSS reflow; bookStyles=$bookStyles; size=${ReadingTextSize.percent(fontScale)}%; font=$fontId; lineSpacing=${comfort.lineSpacing}; margins=${comfort.margins.id}; alignment=${comfort.alignment.id}; CSS confirmed=$settled; semantic anchor restored=$restored")
+                DiagnosticLog.record("EPUB typography CSS reflow; bookStyles=$bookStyles; size=${ReadingTextSize.percent(fontScale)}%; font=$fontId; lineSpacing=${comfort.lineSpacing}; margins=${comfort.margins.id}; alignment=${comfort.alignment.id}; CSS confirmed=$settled${if (settled) "" else " (unmet: $unconfirmedTypography)"}; semantic anchor restored=$restored")
                 typographyAnchor = null
                 typographyUpdating = false
                 currentLocator?.let(::refreshChapter)

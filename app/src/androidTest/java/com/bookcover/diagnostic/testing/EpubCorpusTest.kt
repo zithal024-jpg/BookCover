@@ -100,6 +100,19 @@ internal class EpubCorpusTest(private val book: EpubCorpus.Book) {
             assertEquals("Page check failed: $check (title: ${js(reader, "document.title")})", "true", js(reader, "Boolean($check)"))
         }
 
+        if (onMain { reader.supportsTypography }) {
+            // A fresh reader keeps publisher styles on; a size change must confirm promptly, not wait out its timeout.
+            assertTrue(onMain { reader.comfort.publisherStyles })
+            val started = SystemClock.uptimeMillis()
+            onMain { reader.changeFont(1.3) }
+            waitFor("text size applies") { !onMain { reader.typographyUpdating } }
+            val elapsed = SystemClock.uptimeMillis() - started
+            val unmet = onMain { reader.unconfirmedTypography }
+            Log.i("EpubCorpus", "${book.name} publisher-styles size change took ${elapsed}ms; unmet=[$unmet]")
+            assertEquals("Every typography check confirms with publisher styles on (took ${elapsed}ms)", "", unmet)
+            assertTrue("A text-size change settles within 1.5 s with publisher styles on; took ${elapsed}ms", elapsed < 1_500)
+        }
+
         val positions = onMain { reader.publication.positions().size }
         if (positions > 1) {
             val start = place(reader)

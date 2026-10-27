@@ -349,6 +349,7 @@ class NativeReaderTest {
             !main { reader.typographyUpdating } && comfortMetrics().getDouble("headingFont") > authored.getDouble("headingFont") * 1.45
         }
         assertTrue("Changing size does not turn publisher styles off", main { reader.comfort.publisherStyles })
+        assertEquals("Every typography check confirms with publisher styles on", "", main { reader.unconfirmedTypography })
         val large = comfortMetrics()
         assertEquals("Poetry stays centred", "center", large.getString("poemAlign"))
         assertEquals("The poem keeps its 3em indent", 3.0, large.getDouble("poemIndent") / large.getDouble("poemFont"), 0.05)
