@@ -1,5 +1,15 @@
 # BookCover product and architecture overview
 
+> **2026-10-27 status note (`main`):** The sections below preserve the October 26, 2026 (`0.4.0` initial review package) snapshot as historical reference. Since that snapshot, `main` has incorporated `BC-01`–`BC-29`, `RS-1` (Reading Streak), and release-risk fixes `F1`–`F4` (**245 JVM unit tests** and **34 isolated-QA device tests** passing on `main`). Key architectural changes since October 26 include:
+> - Removal of the external browser-search shortcut (`BC-01`); multi-select batch EPUB import (`BC-27`); synced import-asset ownership receipts and process-death cleanup (`F2`, `BookImportCleanup.kt`).
+> - In-place fold/unfold and display-size continuity (`BC-07`), debounced locator persistence (`BC-14`), and guaranteed resource cleanup on failed or cancelled book open (`F3`, `BookOpenLifecycle.kt`).
+> - Publisher styles on by default with instant CSS-variable font-size preview (`BC-08`, `C1`), RTL-aware edge taps (`BC-17`), volume-key page turns (`BC-10`), chapter progress & named bookmarks (`BC-20`), and offline Readium full-text search (`BC-29`, `BookSearch.kt`).
+> - Automatic dark-mode/cover-derived palettes plus 16 library themes and 6 reader themes (`BC-21`, `BC-23`), split Reader/Library Settings sheets, bundled licence viewer (`BC-12`), JSON library metadata backup/restore (`BC-05`, `LibraryBackup.kt`) with readiness/pre-open byte preparation and picker recreation survival (`F1/F4`), and AGP 9 built-in Kotlin / modern DSL migration (`BC-25`, removing the two legacy `gradle.properties` flags).
+>
+> For current build/test/install instructions, backup/restore behavior, and the release-readiness summary separating `main` from unmerged worktrees, start with the root [README.md](../../README.md), [ACTIVE-BACKLOG.md](ACTIVE-BACKLOG.md), and [EXPERT-PANEL-REVIEW.md](EXPERT-PANEL-REVIEW.md).
+
+---
+
 Review target: **0.4.0**, October 26, 2026. The baseline is **0.3.0-prototype / version code 5**. This document explains the product and code; [RESULTS.md](RESULTS.md) is the authority for the final build, test counts, hardware observations and any incomplete acceptance criteria. Do not infer validation from a feature description alone.
 
 ## Start here
