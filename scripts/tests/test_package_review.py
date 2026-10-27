@@ -4,6 +4,7 @@ import copy
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -23,7 +24,9 @@ class PackageReviewTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='bookcover-package-tests-')
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        # Hosted Windows TEMP can use an 8.3 alias such as RUNNER~1. Match the
+        # production module's resolved PROJECT before creating or recording paths.
+        self.root = Path(self.temporary.name).resolve()
         self.project = self.root / 'checkout'
         self.project.mkdir()
         self.tools = self.root / 'tools'
@@ -162,6 +165,34 @@ class PackageReviewTests(unittest.TestCase):
         self.assertEqual(before, set(self.root.rglob('*')))
         self.assertIn('Check', [request['Operation'] for request in self.requests])
         self.assert_released()
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows short-path alias regression')
+    def test_packaging_fixture_resolves_windows_short_path_alias(self):
+        import ctypes
+
+        temporary = tempfile.TemporaryDirectory(prefix='bookcover-package-alias-tests-')
+        self.addCleanup(temporary.cleanup)
+        canonical = Path(temporary.name).resolve()
+        get_short_path = ctypes.WinDLL('kernel32', use_last_error=True).GetShortPathNameW
+        get_short_path.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
+        get_short_path.restype = ctypes.c_uint32
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = get_short_path(str(canonical), buffer, len(buffer))
+        if not length or length >= len(buffer) or Path(buffer.value) == canonical:
+            self.skipTest('The temporary volume does not provide a distinct Windows short-path alias.')
+        self.assertTrue(Path(buffer.value).samefile(canonical))
+        self.assertEqual(canonical, Path(buffer.value).resolve())
+        aliased_temporary = mock.Mock()
+        aliased_temporary.name = buffer.value
+        aliased_temporary.cleanup = temporary.cleanup
+        fixture = PackageReviewTests('test_success_packages_only_explicit_evidence_and_frozen_source')
+        try:
+            with mock.patch.object(tempfile, 'TemporaryDirectory', return_value=aliased_temporary):
+                fixture.setUp()
+            self.assertEqual(canonical, fixture.root)
+            fixture.test_success_packages_only_explicit_evidence_and_frozen_source()
+        finally:
+            fixture.doCleanups()
 
     def test_success_packages_only_explicit_evidence_and_frozen_source(self):
         self.write(self.project / 'app/src/main/java/Unrecorded.kt', b'// newer source\n')
