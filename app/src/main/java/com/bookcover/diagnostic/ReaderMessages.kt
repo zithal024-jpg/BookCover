@@ -2,6 +2,8 @@ package com.bookcover.diagnostic
 
 import com.bookcover.diagnostic.library.LibraryBackupException
 import com.bookcover.diagnostic.library.LibraryIndexException
+import com.bookcover.diagnostic.library.LibraryNotReadyException
+import com.bookcover.diagnostic.library.MissingCoverBookException
 import java.io.EOFException
 import java.io.FileNotFoundException
 import java.io.IOException
@@ -37,7 +39,15 @@ internal fun failureReason(error: Throwable): FailureReason {
 }
 
 /** A short, plain message for the reader: what happened, whether anything changed, and what to try next. */
-internal fun readerMessage(action: ReaderAction, error: Throwable): String = when (failureReason(error)) {
+internal fun readerMessage(action: ReaderAction, error: Throwable): String {
+    if (error is LibraryNotReadyException) return if (error.loadFailed)
+        "Your library did not finish loading. Restart BookCover, check that your books appear, then try again."
+    else "Your library is still preparing. Wait for it to finish, then choose the file again."
+    if (error is MissingCoverBookException) return "That book is no longer in your library. Choose a book that is still there to change its cover."
+    return messageForFailure(action, failureReason(error))
+}
+
+private fun messageForFailure(action: ReaderAction, reason: FailureReason): String = when (reason) {
     FailureReason.LIBRARY_PROTECTED -> "BookCover couldn't read its list of your books, so it is leaving it untouched; " +
         "nothing was deleted. Restart BookCover to try again."
     FailureReason.NOT_A_BACKUP -> "That file isn't a BookCover backup. Choose a file made with Save backup. Your library is unchanged."

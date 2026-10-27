@@ -33,6 +33,8 @@ import kotlinx.coroutines.withContext
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.services.coverFitting
 
+internal class MissingCoverBookException : Exception("Cover target removed")
+
 internal class BookLibrary(private val context: Context, val engine: ReadiumEngine) {
     companion object {
         @Volatile private var shared: BookLibrary? = null
@@ -56,6 +58,7 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
     val readingDays = ReadingDayStore(File(directory, "reading-days.json"))
     private var loaded = false
     private val lock = Mutex()
+    private val access = LibraryAccess(lock)
     private val mutableBooks = MutableStateFlow<List<BookRecord>>(emptyList())
     val books = mutableBooks.asStateFlow()
     fun book(id: String): BookRecord? = mutableBooks.value.firstOrNull { it.id == id }
@@ -68,10 +71,12 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
     ) { override fun sizeOf(key: String, value: Bitmap) = value.byteCount }
 
     suspend fun load(): LibraryIndex.LoadResult = withContext(Dispatchers.IO) {
-        lock.withLock {
+        access.load {
+            loaded = false
             val removed = runCatching { cleanAbandonedImports() }.getOrDefault(0)
             index.load().also {
                 coverColors.colors(it.records, ::extractColor)
+                currentCoroutineContext().ensureActive()
                 loaded = true
                 mutableBooks.value = it.records
             }.copy(abandonedImportsRemoved = removed)
@@ -209,13 +214,14 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
     }
 
     suspend fun replaceCover(id: String, uri: Uri) = withContext(Dispatchers.IO) {
+        access.withReadyLibrary { if (book(id) == null) throw MissingCoverBookException() }
         val bitmap = ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { decoder, info, _ ->
             val ratio = minOf(1.0, 1600.0 / maxOf(info.size.width, info.size.height))
             decoder.setTargetSize(maxOf(1, (info.size.width * ratio).toInt()), maxOf(1, (info.size.height * ratio).toInt()))
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
         }
-        lock.withLock {
-            val record = book(id) ?: return@withLock
+        access.withReadyLibrary {
+            val record = book(id) ?: throw MissingCoverBookException()
             writePng(coverFile(record), bitmap)
             writePng(thumbnailFile(record), shrink(bitmap))
             forgetThumbnails(id)
@@ -223,20 +229,24 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
         }
     }
 
-    /** Writes reading positions, bookmarks and collections to [uri]. Returns how many books were saved. */
+    /** Prepares a loaded snapshot before opening [uri]. Provider writes themselves are not atomic. */
     suspend fun exportBackup(uri: Uri): Int = withContext(Dispatchers.IO) {
-        val records = mutableBooks.value
-        val output = context.contentResolver.openOutputStream(uri, "wt") ?: throw IOException("Could not write the backup file")
-        output.use { it.write(LibraryBackup.export(records, System.currentTimeMillis()).toByteArray()) }
-        records.size
+        access.export(prepare = {
+            val records = mutableBooks.value
+            PreparedBackup(records.size, LibraryBackup.export(records, System.currentTimeMillis()).toByteArray(Charsets.UTF_8))
+        }, openDestination = {
+            context.contentResolver.openOutputStream(uri, "wt") ?: throw IOException("Could not write the backup file")
+        })
     }
 
     suspend fun restoreBackup(uri: Uri): LibraryBackup.MergeResult = withContext(Dispatchers.IO) {
+        access.withReadyLibrary { }
         val input = context.contentResolver.openInputStream(uri) ?: throw IOException("Could not read the selected file")
         val text = input.use { stream ->
             val bytes = ByteArrayOutputStream()
             val buffer = ByteArray(32 * 1024)
             while (true) {
+                currentCoroutineContext().ensureActive()
                 val read = stream.read(buffer)
                 if (read < 0) break
                 bytes.write(buffer, 0, read)
@@ -245,7 +255,7 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
             bytes.toString("UTF-8")
         }
         val backup = LibraryBackup.parse(text)
-        lock.withLock {
+        access.withReadyLibrary {
             val result = LibraryBackup.merge(mutableBooks.value, backup.records)
             if (result.records != mutableBooks.value) persist(result.records)
             result

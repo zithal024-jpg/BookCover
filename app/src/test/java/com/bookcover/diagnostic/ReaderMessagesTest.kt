@@ -2,6 +2,8 @@ package com.bookcover.diagnostic
 
 import com.bookcover.diagnostic.library.LibraryBackupException
 import com.bookcover.diagnostic.library.LibraryIndexException
+import com.bookcover.diagnostic.library.LibraryNotReadyException
+import com.bookcover.diagnostic.library.MissingCoverBookException
 import java.io.EOFException
 import java.io.File
 import java.io.FileNotFoundException
@@ -12,6 +14,11 @@ import org.junit.Test
 
 /** BC-23 / BC-26: readers see plain, actionable messages; technical detail goes to the diagnostic log only. */
 class ReaderMessagesTest {
+    @Test fun readinessAndRemovedCoverMessagesGiveAnActionWithoutClaimingSuccess() {
+        assertTrue(readerMessage(ReaderAction.SAVE_BACKUP, LibraryNotReadyException(false)).contains("Wait for it to finish"))
+        assertTrue(readerMessage(ReaderAction.RESTORE_BACKUP, LibraryNotReadyException(true)).contains("Restart BookCover"))
+        assertTrue(readerMessage(ReaderAction.REPLACE_COVER, MissingCoverBookException()).contains("no longer in your library"))
+    }
     private val technical = listOf("exception", "zip", "header", "null", "java", "json", "index", "prototype",
         "readium", "container.xml", "stack", "uri", "content://", "/data/")
 
