@@ -4,6 +4,8 @@ import android.content.Context
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -148,6 +150,49 @@ class ReaderContinuityTest {
         val reopened = reader(book)
         assertNotSame(current, reopened)
         waitFor("passage after explicit exit/reopen") { passageVisible(reopened, passage) }
+        assertEquals(1, onActivity { it.supportFragmentManager.fragments.count { fragment -> fragment is org.readium.r2.navigator.epub.EpubNavigatorFragment } })
+    }
+
+    /**
+     * R2: system bars resize the reader without a configuration change. On the Fold the navigation
+     * bar finished hiding just after a reopened book placed its saved passage, and Readium kept the
+     * page index instead (33% then 0%). Large-screen emulators keep the reader size when the bars
+     * hide, so this drives the same kind of resize by showing and hiding them. Emulators have not
+     * reproduced the Fold's reset with this timing, so the Fold run of the test above stays decisive.
+     */
+    @Test fun systemBarResizeDuringReopenPlacementKeepsTheSavedPassage() {
+        val book = launchBook()
+        val current = reader(book)
+        js(current, "readium.scrollToId('paragraph-60'); true")
+        SystemClock.sleep(500)
+        val passage = main { current.fragment.visibleReadingAnchor() } ?: error("No passage")
+        fun showBars(visible: Boolean) = onActivity {
+            val bars = WindowCompat.getInsetsController(it.window, it.window.decorView)
+            if (visible) bars.show(WindowInsetsCompat.Type.systemBars()) else bars.hide(WindowInsetsCompat.Type.systemBars())
+        }
+        fun passageStays(session: EpubSession, transition: String) {
+            // Readium reacts to a resize asynchronously, so require the settled page, not a first glimpse.
+            waitFor("passage after $transition; expected=${passage.toJSON()}") { passageVisible(session, passage) }
+            SystemClock.sleep(1_500)
+            assertTrue("Passage still visible after $transition settled", passageVisible(session, passage))
+        }
+        // Leave through the app's own Back route (some emulators send the global Back action to the
+        // taskbar). On reopen, resize the reader the moment the new navigator first reports its saved
+        // position, as the Fold's bar-hide animation did.
+        main { current.controlsVisible = false }
+        onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        waitFor("library after reader exit") { onActivity { it.showsLibraryForTests } }
+        onActivity { it.openBookForTests(it.libraryForTests.book(book.id)!!) }
+        waitFor("reopened navigator", 20_000) { onActivity { it.sessionForTests?.let { s -> s !== current && s.fragment.isAdded } } == true }
+        val reopened = onActivity { it.sessionForTests!! }
+        val deadline = SystemClock.uptimeMillis() + 15_000
+        while (runCatching { js(reopened, "Boolean(document.getElementById('paragraph-0'))") }.getOrNull() != "true") {
+            check(SystemClock.uptimeMillis() < deadline) { "Reopened book never rendered" }
+        }
+        showBars(true)
+        SystemClock.sleep(80)
+        showBars(false)
+        passageStays(reopened, "resize during reopen placement")
         assertEquals(1, onActivity { it.supportFragmentManager.fragments.count { fragment -> fragment is org.readium.r2.navigator.epub.EpubNavigatorFragment } })
     }
 
