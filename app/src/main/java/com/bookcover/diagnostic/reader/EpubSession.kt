@@ -102,6 +102,8 @@ internal class EpubSession(
     private val viewportContinuity = ReadingViewportContinuity<Locator>()
     private var viewportJob: Job? = null
     private var restoringViewport = false
+    private val openedLocator = currentLocator
+    private var holdsOpenedPassage = openedLocator != null
     private var viewportSettled: (() -> Unit)? = null
     private val readingLifecycle = object : DefaultLifecycleObserver {
         override fun onPause(owner: LifecycleOwner) { readingPace.pause(); record(readingTime.pause(SystemClock.elapsedRealtime())) }
@@ -112,6 +114,12 @@ internal class EpubSession(
             readingPace.pause()
             chapters.invalidateLayout()
             currentLocator?.let(::refreshChapter)
+            // The system bars can finish hiding just after a reopened book placed its saved passage,
+            // resizing the reader without a configuration change; on the Fold it then showed the
+            // chapter start (R2). Until the reader first navigates, hold the opened passage across
+            // such resizes. After navigation the destination may not be reported yet, so never then.
+            if (holdsOpenedPassage && !typographyUpdating && oldRight - oldLeft > 0 && oldBottom - oldTop > 0)
+                viewportContinuity.begin(currentLocator)
             if (viewportContinuity.pending != null) restoreViewportWhenSettled()
         }
     }
@@ -144,7 +152,8 @@ internal class EpubSession(
             },
             listener = object : EpubNavigatorFragment.Listener {
                 override fun onJumpToLocator(locator: Locator) {
-                    if (!restoringViewport) {
+                    // Readium's own placement of the opened position is not a user navigation.
+                    if (!restoringViewport && !(holdsOpenedPassage && locator == openedLocator)) {
                         invalidateViewportAnchor()
                         viewportContinuity.remember(locator, viewportContinuity.generation)
                     }
@@ -295,6 +304,7 @@ internal class EpubSession(
     }
 
     private fun invalidateViewportAnchor() {
+        holdsOpenedPassage = false
         viewportJob?.cancel()
         viewportContinuity.navigated()
         viewportSettled?.invoke(); viewportSettled = null
