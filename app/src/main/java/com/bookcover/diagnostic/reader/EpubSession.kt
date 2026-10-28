@@ -116,8 +116,8 @@ internal class EpubSession(
             currentLocator?.let(::refreshChapter)
             // The system bars can finish hiding just after a reopened book placed its saved passage,
             // resizing the reader without a configuration change; on the Fold it then showed the
-            // chapter start (R2). Until the reader first navigates, hold the opened passage across
-            // such resizes. After navigation the destination may not be reported yet, so never then.
+            // chapter start (R2). Until the reader navigates or shows another passage, hold the opened
+            // passage across such resizes. After navigation the destination may not be reported yet.
             if (holdsOpenedPassage && !typographyUpdating && oldRight - oldLeft > 0 && oldBottom - oldTop > 0)
                 viewportContinuity.begin(currentLocator)
             if (viewportContinuity.pending != null) restoreViewportWhenSettled()
@@ -239,8 +239,12 @@ internal class EpubSession(
                     val semantic = visible.copy(locations = visible.locations.copy(
                         totalProgression = locator.locations.totalProgression, position = locator.locations.position))
                     viewportContinuity.remember(semantic, generation)
-                    if (generation == viewportContinuity.generation && viewportContinuity.pending == null)
+                    if (generation == viewportContinuity.generation && viewportContinuity.pending == null) {
+                        // Showing any other passage, however it got there, ends the hold on the opened one.
+                        if (semantic.href != openedLocator?.href || semantic.text.highlight != openedLocator?.text?.highlight)
+                            holdsOpenedPassage = false
                         positions.submit(semantic)
+                    }
                 }
                 refreshChapter(locator)
                 DiagnosticLog.record("EPUB position=${(progress * 100).toInt()}%; same host activity")
@@ -339,7 +343,15 @@ internal class EpubSession(
                 restoringViewport = true
                 val restored = try { fragment.go(anchor, animated = false) } finally { restoringViewport = false }
                 delay(200)
-                viewportContinuity.complete(generation)?.let { positions.submit(it) }
+                viewportContinuity.complete(generation)?.let { held ->
+                    // A hold that began before any visible passage was described has only Readium's
+                    // locator; describe the restored page so later restores keep a precise passage.
+                    val settled = viewportContinuity.generation
+                    val refined = if (held.text.highlight != null) null else withTimeoutOrNull(1_000) { fragment.visibleReadingAnchor() }
+                        ?.let { it.copy(locations = it.locations.copy(totalProgression = held.locations.totalProgression, position = held.locations.position)) }
+                    refined?.let { viewportContinuity.remember(it, settled) }
+                    if (settled == viewportContinuity.generation && viewportContinuity.pending == null) positions.submit(refined ?: held)
+                }
                 currentLocator?.let(::refreshChapter)
                 DiagnosticLog.record("EPUB viewport resized in place; semantic passage restored=$restored")
             } catch (cancelled: CancellationException) { throw cancelled }
