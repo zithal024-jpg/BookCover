@@ -347,7 +347,8 @@ internal class EpubSession(
                     // A hold that began before any visible passage was described has only Readium's
                     // locator; describe the restored page so later restores keep a precise passage.
                     val settled = viewportContinuity.generation
-                    val refined = if (held.text.highlight != null) null else withTimeoutOrNull(1_000) { fragment.visibleReadingAnchor() }
+                    val described = !(held.locations["cssSelector"] as? String).isNullOrBlank() && held.text.highlight != null
+                    val refined = if (described) null else withTimeoutOrNull(1_000) { fragment.visibleReadingAnchor() }
                         ?.let { it.copy(locations = it.locations.copy(totalProgression = held.locations.totalProgression, position = held.locations.position)) }
                     refined?.let { viewportContinuity.remember(it, settled) }
                     if (settled == viewportContinuity.generation && viewportContinuity.pending == null) positions.submit(refined ?: held)
