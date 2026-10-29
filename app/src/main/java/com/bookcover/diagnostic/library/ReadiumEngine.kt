@@ -49,6 +49,7 @@ internal class ReadiumEngine(context: Context) {
         val publication = opener.open(asset, allowUserInteraction = false, onCreatePublication = {
             if (!filtered) {
                 filtered = true
+                container = PublicationResources(container)
                 val searchContainer = container
                 installMarkupFilter()
                 servicesBuilder.searchServiceFactory = bookSearchServiceFactory(searchContainer)
