@@ -56,6 +56,19 @@ class ChapterProgressTest {
         assertEquals(3, map.resolve(0, 0.80, fragments, preferredTocIndex = 1).currentTocIndex)
     }
 
+    @Test fun subPixelScrollRoundingStillReachesTheMeasuredPageStart() {
+        // Emulator, 1768 px at 2.625 dpr: headings measured at page 17 of 26, while Readium reports
+        // scrollX/scrollWidth = 11449.14/17511 for that same page.
+        val map = ChapterProgressMap(listOf(0.0, 0.5), listOf("File", "End"),
+            listOf(anchor(0, 0), anchor(1, 0, "a", 1), anchor(2, 0, "b", 1), anchor(3, 0, "c", 1), anchor(4, 1)))
+        val fragments = mapOf(1 to 16.0 / 26, 2 to 17.0 / 26, 3 to 17.0 / 26)
+        val readium = 11449.14 / 17511
+        assertEquals(3, map.resolve(0, readium, fragments).currentTocIndex)
+        assertEquals(2, map.resolve(0, readium, fragments, preferredTocIndex = 2).currentTocIndex)
+        // Partway through the previous page is still the previous section.
+        assertEquals(1, map.resolve(0, 16.5 / 26, fragments, preferredTocIndex = 2).currentTocIndex)
+    }
+
     @Test fun unknownFutureFragmentKeepsKnownSelectionButDoesNotInventAnEnd() {
         val map = ChapterProgressMap(listOf(0.0, 0.5, 0.8), listOf("A", "B", "C"),
             listOf(anchor(0, 0), anchor(1, 1, "next"), anchor(2, 2)))

@@ -158,9 +158,14 @@ class BookSearchTest {
         val original = JSONObject(location)
         val dismissed = JSONObject(dismissedLocation.first)
         assertEquals("Closing search stays in the same resource", original.getString("href"), dismissed.getString("href"))
-        // WebView can round the same page's fractional progression when the IME changes height.
-        assertEquals("Closing search keeps the same reading point", original.getJSONObject("locations").getDouble("progression"),
-            dismissed.getJSONObject("locations").getDouble("progression"), 0.0001)
+        // Readium reports one page as scrollX/scrollWidth while reading but as page/pageCount after the
+        // window changes; with a fractional CSS column (1768 px at 2.625 dpr) the same page read 1/16
+        // and then 1/17. Compare in pages: the reading point is the page, and the offset check below
+        // still requires that exact page.
+        val pageFraction = js("innerWidth / document.scrollingElement.scrollWidth").toDouble()
+        assertEquals("Closing search keeps the same reading point (in pages)",
+            original.getJSONObject("locations").getDouble("progression") / pageFraction,
+            dismissed.getJSONObject("locations").getDouble("progression") / pageFraction, 0.5)
         assertEquals("Closing search with the keyboard open leaves the visible page unchanged", offset, dismissedLocation.second, 1.0)
         assertFalse("A discarded result cannot navigate after dismissal", main { reader.goToSearchResult(discarded) })
         waitFor("the original position saves normally") {

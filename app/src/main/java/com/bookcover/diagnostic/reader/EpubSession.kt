@@ -118,8 +118,9 @@ internal class EpubSession(
             // resizing the reader without a configuration change; on the Fold it then showed the
             // chapter start (R2). Until the reader navigates or shows another passage, hold the opened
             // passage across such resizes. After navigation the destination may not be reported yet.
+            // Hold the opened passage itself: by now Readium may already report its reset position.
             if (holdsOpenedPassage && !typographyUpdating && oldRight - oldLeft > 0 && oldBottom - oldTop > 0)
-                viewportContinuity.begin(currentLocator)
+                viewportContinuity.begin(openedLocator)
             if (viewportContinuity.pending != null) restoreViewportWhenSettled()
         }
     }

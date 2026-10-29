@@ -73,6 +73,9 @@ class ReaderLifecycleTest {
         val reader = openAndMoveInto(book)
         val before = progressionOf(reader)
         val other = if (shell("cmd device_state print-state").trim() == "0") "3" else "0"
+        val states = shell("cmd device_state print-states")
+        // Fail at once, not as a later display-width timeout, where the device lacks the Fold's states.
+        assertTrue("Needs device state $other of a physical Fold; this device offers: ${states.trim()}", "identifier=$other," in states)
         try {
             for (step in listOf("state $other", "state reset")) {
                 val width = onActivity { it.resources.configuration.screenWidthDp }

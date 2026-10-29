@@ -245,6 +245,9 @@ class ReaderContinuityTest {
     private fun switchScreen() {
         val width = onActivity { it.resources.configuration.screenWidthDp }
         val other = if (shell("cmd device_state print-state").trim() == "0") "3" else "0"
+        val states = shell("cmd device_state print-states")
+        // Fail at once, not as a later display-width timeout, where the device lacks the Fold's states.
+        assertTrue("Needs device state $other of a physical Fold; this device offers: ${states.trim()}", "identifier=$other," in states)
         shell("cmd device_state state $other")
         waitFor("display width changed", 20_000) { onActivity { it.resources.configuration.screenWidthDp } != width }
         SystemClock.sleep(600) // Require the settled page, not a briefly visible pre-reflow viewport.
