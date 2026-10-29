@@ -235,8 +235,12 @@ internal class EpubSession(
                     val generation = viewportContinuity.generation
                     // Keep the last precise passage during this asynchronous query (including
                     // resume notifications for an unchanged page). Explicit navigation clears it.
-                    val visible = withTimeoutOrNull(1_000) { fragment.visibleReadingAnchor() }
-                        ?: viewportContinuity.anchor ?: locator
+                    // Readium first reports the opened locator itself, before the page has moved there.
+                    // The DOM then still shows the resource start; describing it saved the chapter
+                    // start, so the next reopen landed there (R2, Fold logs). Keep the opened passage.
+                    val visible = if (holdsOpenedPassage && locator == openedLocator) locator
+                        else withTimeoutOrNull(1_000) { fragment.visibleReadingAnchor() }
+                            ?: viewportContinuity.anchor ?: locator
                     val semantic = visible.copy(locations = visible.locations.copy(
                         totalProgression = locator.locations.totalProgression, position = locator.locations.position))
                     viewportContinuity.remember(semantic, generation)
