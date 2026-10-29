@@ -50,3 +50,12 @@ Failures matching Codex's recorded 6b09295 emulator dispositions (no new kind se
 ## Requested independent verification (Codex)
 
 On exactly `7bd5ff8` (or any later docs-only commit; check the snapshot equals `8a0ca51b…`): rebuild and compare the APK hash and certificate; run R2 continuity (`ReaderContinuityTest`), BC-26 (`FriendlyErrorActivityTest` plus backup/import guards), BC-20 (`ReadingPaceTest` in units, `ReadingNavigationTest`), BC-22 (`ScreenIdleTest`); and, for R1 classification, `EpubCorpusTest` on candidate and baseline in the same configuration. Classify each failure as baseline-reproduced, candidate-only or unresolved.
+
+## Corrections (2026-10-29, after Codex's verification and the RT work)
+
+The text above is kept as first written. These corrections apply:
+
+1. `emu5620-remaining` recorded 52 cases: **35 passed, 16 failed, 1 skipped (51 executed)**, not "36 (+1 skip)".
+2. `ReadingLayoutTest` skipped because its CSS viewport did not exceed the line-length cap. That precondition does not inherently require physical hardware.
+3. "Soft-keyboard observation failed" was an accessibility-window observation timeout, not proof that no keyboard appeared. "Emulator does not deliver GLOBAL_ACTION_BACK" was wrong as a cause: Android's one-time full-screen confirmation held input focus on that emulator (ACTIVE-BACKLOG RT row, G1).
+4. Matching a previously recorded failure category did not by itself establish a baseline match. Codex's fresh `6b09295` controls now establish the nine shared reader failures; their causes and dispositions are in the RT row.
