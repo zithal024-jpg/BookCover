@@ -517,4 +517,72 @@ class ReadingPaceTest {
         val estimate = jumped.remainingMinutes(0.13, 0.23)!!
         assertTrue("Expected the slower 10-minute pace to dominate, got $estimate", estimate >= 8)
     }
+
+    private fun perMinute(fraction: Double) = fraction / 60_000.0
+
+    @Test fun rememberedPaceGivesChapterAndBookEstimatesImmediately() {
+        val pace = ReadingPace()
+        pace.seed(perMinute(0.002))
+        assertEquals(50, pace.remainingMinutes(0.4, 0.5))
+        // 0.6 of the book at 0.002/min = 300 minutes: beyond a chapter's limit is fine for a book.
+        assertEquals(300, pace.bookRemainingMinutes(0.4))
+        assertNull("Nothing was measured yet, so there is nothing new to remember", pace.learnedRatePerMillis())
+    }
+
+    @Test fun liveReadingProgressivelyOutweighsTheRememberedPace() {
+        val pace = ReadingPace()
+        pace.seed(perMinute(0.002)) // Remembered: 50 minutes per 0.1.
+        var point = 0.2
+        var now = 0L
+        pace.observe(point, now, true)
+        val estimates = mutableListOf<Int>()
+        repeat(20) {
+            point += 0.00025
+            now += 15_000L // Today's reading is twice as slow: 0.001/min, 100 minutes per 0.1.
+            assertTrue(pace.observe(point, now, true))
+            pace.remainingMinutes(point, point + 0.1)?.let(estimates::add)
+        }
+        assertEquals("No jump while live samples are still too few", 50, estimates.first())
+        assertTrue("Estimates should move steadily towards live reading: $estimates",
+            estimates.zipWithNext().all { (a, b) -> b >= a })
+        assertTrue("Live reading should dominate after a full window, got ${estimates.last()}",
+            estimates.last() in 80..100)
+        val learned = pace.learnedRatePerMillis()!! * 60_000.0
+        assertTrue("Remembered pace should now lean live, got $learned", learned in 0.001..0.0013)
+    }
+
+    @Test fun bookEstimateAllowsLongBooksButNotAbsurdOnes() {
+        val pace = ReadingPace()
+        pace.seed(perMinute(0.0002))
+        assertEquals(2_500, pace.bookRemainingMinutes(0.5))
+        assertEquals(0, pace.bookRemainingMinutes(1.0))
+        val glacial = ReadingPace()
+        glacial.seed(perMinute(0.00001))
+        assertNull(glacial.bookRemainingMinutes(0.0))
+    }
+
+    @Test fun invalidRememberedPacesAreIgnored() {
+        listOf(Double.NaN, Double.POSITIVE_INFINITY, 0.0, -perMinute(0.001), perMinute(1.0)).forEach { rate ->
+            val pace = ReadingPace()
+            pace.seed(rate)
+            assertNull("Seed $rate must be ignored", pace.bookRemainingMinutes(0.5))
+        }
+    }
+
+    @Test fun observeReportsOnlyMeasuredSamples() {
+        val pace = ReadingPace()
+        assertTrue(!pace.observe(0.1, 0L, true))
+        assertTrue(!pace.observe(0.11, 1_000L, true)) // Too quick to be reading.
+        assertTrue(pace.observe(0.12, 16_000L, true))
+        assertTrue(!pace.observe(0.13, 31_000L, false))
+    }
+
+    @Test fun timeLeftTextUsesHoursForLongSpans() {
+        assertEquals("Less than a minute left in chapter", timeLeftText(0, "chapter"))
+        assertEquals("About 1 minute left in chapter", timeLeftText(1, "chapter"))
+        assertEquals("About 59 minutes left in book", timeLeftText(59, "book"))
+        assertEquals("About 2 h left in book", timeLeftText(120, "book"))
+        assertEquals("About 5 h 7 min left in book", timeLeftText(307, "book"))
+        assertEquals("Time left in book unavailable", timeLeftText(null, "book"))
+    }
 }

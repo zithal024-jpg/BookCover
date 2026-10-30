@@ -45,6 +45,10 @@ import org.readium.r2.shared.util.AbsoluteUrl
 import org.readium.r2.shared.util.Url
 import org.readium.r2.shared.util.data.ReadError
 
+/** Remembered reading pace; reader settings stay in "reader". Test hosts clear this file. */
+internal const val PACE_PREFERENCES = "reading-pace"
+private const val USUAL_PACE_KEY = "usualPositionsPerMinute"
+
 @OptIn(ExperimentalReadiumApi::class, DelicateReadiumApi::class)
 internal class EpubSession(
     private val activity: FragmentActivity,
@@ -59,6 +63,10 @@ internal class EpubSession(
 ) {
     val search = BookSearchController(activity.lifecycleScope, publication)
     private val readingPace = ReadingPace()
+    // Local only: this book's pace in book fractions, and the usual pace in Readium positions so a
+    // newly opened book starts from it instead of relearning from nothing.
+    private val paceMemory = activity.getSharedPreferences(PACE_PREFERENCES, 0)
+    private var paceRecalled = false
     private val chapters = ReadingChapters(publication)
     val contentsEntries get() = chapters.entries
     var chapterStatus by mutableStateOf<ChapterStatus?>(null)
@@ -264,14 +272,34 @@ internal class EpubSession(
                         return@launch
                     }
                 }
-                readingPace.observe(resolved.globalPoint, SystemClock.elapsedRealtime(),
-                    !controlsVisible && activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+                if (!paceRecalled) { paceRecalled = true; recallPace() }
+                if (readingPace.observe(resolved.globalPoint, SystemClock.elapsedRealtime(),
+                        !controlsVisible && activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))) rememberPace()
                 chapterStatus = ChapterStatus(resolved.title, resolved.progression,
-                    resolved.globalEnd?.let { readingPace.remainingMinutes(resolved.globalPoint, it) }, resolved.currentTocIndex)
+                    resolved.globalEnd?.let { readingPace.remainingMinutes(resolved.globalPoint, it) }, resolved.currentTocIndex,
+                    readingPace.bookRemainingMinutes(resolved.globalPoint))
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { /* Missing TOC/geometry must never interrupt reading or position saving. */ }
         }
     }
+
+    private fun recallPace() {
+        val perMinute = paceMemory.getFloat(bookPaceKey(), 0f).toDouble().takeIf { it > 0.0 }
+            ?: chapters.totalPositions?.let { total ->
+                paceMemory.getFloat(USUAL_PACE_KEY, 0f).toDouble().takeIf { it > 0.0 }?.div(total)
+            }
+        perMinute?.let { readingPace.seed(it / 60_000.0) }
+    }
+
+    private fun rememberPace() {
+        val perMinute = (readingPace.learnedRatePerMillis() ?: return) * 60_000.0
+        paceMemory.edit().apply {
+            putFloat(bookPaceKey(), perMinute.toFloat())
+            chapters.totalPositions?.let { putFloat(USUAL_PACE_KEY, (perMinute * it).toFloat()) }
+        }.apply()
+    }
+
+    private fun bookPaceKey() = "book:${book.id}"
 
     fun goToContents(index: Int) {
         contentsEntries.getOrNull(index)?.let {

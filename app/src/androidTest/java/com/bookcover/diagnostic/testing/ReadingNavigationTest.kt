@@ -15,6 +15,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.bookcover.diagnostic.library.SavedBookmarks
 import com.bookcover.diagnostic.reader.EpubSession
+import com.bookcover.diagnostic.reader.PACE_PREFERENCES
 import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -44,6 +45,8 @@ class ReadingNavigationTest {
         check(target.packageName.endsWith(".qa")) { "Navigation tests must use the isolated QA app." }
         target.getSharedPreferences(ReaderTestActivity.TEST_PREFERENCES, Context.MODE_PRIVATE).edit().clear()
             .putBoolean("publisherStyles", false).commit()
+        // A pace remembered by earlier runs would make the "no invented estimate" check meaningless.
+        target.getSharedPreferences(PACE_PREFERENCES, Context.MODE_PRIVATE).edit().clear().commit()
         val service = automation.serviceInfo
         previousAccessibilityFlags = service.flags
         service.flags = service.flags or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or

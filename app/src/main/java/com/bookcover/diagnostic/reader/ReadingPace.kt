@@ -7,7 +7,9 @@ import kotlin.math.min
 import kotlin.math.pow
 
 /** Learns publication-coordinate distance per active reading interval; never assumes a WPM rate.
- * The caller pauses around jumps, reflow, controls, lifecycle pauses and viewport changes. */
+ * The caller pauses around jumps, reflow, controls, lifecycle pauses and viewport changes.
+ * A pace remembered from earlier sessions ([seed]) gives an immediate estimate; live samples
+ * then progressively outweigh it, so the estimate follows the reader's current speed. */
 internal class ReadingPace {
     private companion object {
         const val MIN_SAMPLES = 3
@@ -31,6 +33,9 @@ internal class ReadingPace {
         const val SUB_MINUTE_THRESHOLD = 0.5
         const val MINUTE_ROUNDING_EPSILON = 1e-9
         const val MAX_REMAINING_MINUTES = 600
+        const val MAX_BOOK_REMAINING_MINUTES = 100 * 60
+        /** The remembered pace counts as this many live samples; a full 20-sample window outweighs it 5:1. */
+        const val PRIOR_WEIGHT = 4.0
     }
 
     private data class Sample(val distance: Double, val elapsedMillis: Long) {
@@ -41,6 +46,14 @@ internal class ReadingPace {
     private var previousPoint: Double? = null
     private var previousTime: Long? = null
     private var retraceTarget: Double? = null
+    private var priorRatePerMillis: Double? = null
+
+    /** Starts from a remembered pace (publication fraction per millisecond); invalid values are ignored. */
+    fun seed(ratePerMillis: Double) {
+        if (ratePerMillis.isFinite() && ratePerMillis > 0.0 && ratePerMillis <= MAX_PACE_PER_MILLIS) {
+            priorRatePerMillis = ratePerMillis
+        }
+    }
 
     /** Breaks the candidate interval while keeping previously learned pace for this session.
      * A pending re-read mark survives so opening controls mid-retrace does not count old pages. */
@@ -49,15 +62,16 @@ internal class ReadingPace {
         previousTime = null
     }
 
-    fun observe(point: Double, nowMillis: Long, eligible: Boolean) {
+    /** Returns true when this observation added a measured reading sample. */
+    fun observe(point: Double, nowMillis: Long, eligible: Boolean): Boolean {
         if (!eligible || !point.isFinite() || point !in 0.0..1.0 || nowMillis < 0) {
             pause()
-            return
+            return false
         }
         val beforePoint = previousPoint
         val beforeTime = previousTime
         if (beforePoint != null && beforeTime != null && nowMillis >= beforeTime &&
-            abs(point - beforePoint) <= UNCHANGED_POINT_EPSILON) return
+            abs(point - beforePoint) <= UNCHANGED_POINT_EPSILON) return false
         previousPoint = point
         previousTime = nowMillis
         if (beforePoint == null || beforeTime == null) {
@@ -65,9 +79,9 @@ internal class ReadingPace {
             val target = retraceTarget
             if (target != null && (point >= target - UNCHANGED_POINT_EPSILON ||
                     target - point > MAX_INTERVAL_DISTANCE + 1e-9)) retraceTarget = null
-            return
+            return false
         }
-        if (nowMillis <= beforeTime) return
+        if (nowMillis <= beforeTime) return false
 
         val distance = point - beforePoint
         val elapsed = nowMillis - beforeTime
@@ -75,37 +89,62 @@ internal class ReadingPace {
             retraceTarget = if (-distance <= MAX_INTERVAL_DISTANCE + 1e-9) {
                 max(retraceTarget ?: beforePoint, beforePoint)
             } else null
-            return
+            return false
         }
         val target = retraceTarget
         if (target != null) {
             if (point >= target - UNCHANGED_POINT_EPSILON) retraceTarget = null
-            return
+            return false
         }
         if (distance < MIN_INTERVAL_DISTANCE || distance > MAX_INTERVAL_DISTANCE + 1e-9 ||
-            elapsed !in MIN_INTERVAL_MILLIS..MAX_INTERVAL_MILLIS) return
+            elapsed !in MIN_INTERVAL_MILLIS..MAX_INTERVAL_MILLIS) return false
 
         val rate = distance / elapsed.toDouble()
-        if (rate > MAX_PACE_PER_MILLIS + 1e-12) return
+        if (rate > MAX_PACE_PER_MILLIS + 1e-12) return false
         if (samples.size >= MIN_SAMPLES) {
             val medianDistance = unweightedMedian(samples.map { it.distance })
             val medianRate = weightedMedianRate()
-            if (distance > MULTI_PAGE_STEP_FACTOR * medianDistance && rate > MULTI_PAGE_RATE_FACTOR * medianRate) return
+            if (distance > MULTI_PAGE_STEP_FACTOR * medianDistance && rate > MULTI_PAGE_RATE_FACTOR * medianRate) return false
         }
 
         samples.addLast(Sample(distance, elapsed))
         while (samples.size > MAX_SAMPLES) samples.removeFirst()
+        return true
     }
 
-    fun remainingMinutes(point: Double, chapterEnd: Double): Int? {
-        if (!point.isFinite() || !chapterEnd.isFinite() || point !in 0.0..1.0 || chapterEnd !in 0.0..1.0) return null
-        if (chapterEnd <= point + UNCHANGED_POINT_EPSILON) return 0
+    fun remainingMinutes(point: Double, chapterEnd: Double): Int? =
+        minutesBetween(point, chapterEnd, MAX_REMAINING_MINUTES)
+
+    /** Time to the end of the publication; a long book may legitimately need many hours. */
+    fun bookRemainingMinutes(point: Double): Int? = minutesBetween(point, 1.0, MAX_BOOK_REMAINING_MINUTES)
+
+    /** The remembered pace until enough live reading is measured, then a blend that leans further on
+     * live reading with each sample (which are themselves recency-weighted). */
+    fun currentRatePerMillis(): Double? {
+        val prior = priorRatePerMillis
+        val live = liveRatePerMillis()
+        return when {
+            live == null -> prior
+            prior == null -> live
+            else -> (PRIOR_WEIGHT * prior + samples.size * live) / (PRIOR_WEIGHT + samples.size)
+        }
+    }
+
+    /** The pace worth remembering for later sessions; null until live reading has been measured. */
+    fun learnedRatePerMillis(): Double? = if (liveRatePerMillis() == null) null else currentRatePerMillis()
+
+    private fun liveRatePerMillis(): Double? {
         val elapsed = samples.sumOf { it.elapsedMillis }
         if (samples.size < MIN_SAMPLES || elapsed < MIN_TOTAL_ELAPSED_MILLIS) return null
-        val ratePerMillis = estimatedRatePerMillis()
-        if (!ratePerMillis.isFinite() || ratePerMillis <= 0.0) return null
-        val minutes = (chapterEnd - point) / (ratePerMillis * 60_000.0)
-        if (!minutes.isFinite() || minutes < 0.0 || minutes > MAX_REMAINING_MINUTES) return null
+        return estimatedRatePerMillis().takeIf { it.isFinite() && it > 0.0 }
+    }
+
+    private fun minutesBetween(point: Double, end: Double, maxMinutes: Int): Int? {
+        if (!point.isFinite() || !end.isFinite() || point !in 0.0..1.0 || end !in 0.0..1.0) return null
+        if (end <= point + UNCHANGED_POINT_EPSILON) return 0
+        val ratePerMillis = currentRatePerMillis() ?: return null
+        val minutes = (end - point) / (ratePerMillis * 60_000.0)
+        if (!minutes.isFinite() || minutes < 0.0 || minutes > maxMinutes) return null
         if (minutes < SUB_MINUTE_THRESHOLD) return 0
         return ceil(minutes - MINUTE_ROUNDING_EPSILON).toInt().coerceAtLeast(1)
     }

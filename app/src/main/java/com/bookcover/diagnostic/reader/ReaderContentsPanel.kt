@@ -39,14 +39,28 @@ internal fun ChapterProgressSummary(status: ChapterStatus?) {
             Text("$unitLabel progress unavailable", style = MaterialTheme.typography.bodySmall)
         }
         if (status != null) {
-            Text(if (progress == null) "Time left unavailable for this $unit" else when (val minutes = status.remainingMinutes) {
-                null -> "Time left: learning your reading pace"
-                0 -> "Less than a minute left in $unit"
-                1 -> "About 1 minute left in $unit"
-                else -> "About $minutes minutes left in $unit"
+            val learning = status.remainingMinutes == null && status.bookRemainingMinutes == null
+            Text(when {
+                progress == null -> "Time left unavailable for this $unit"
+                learning -> "Time left: learning your reading pace"
+                else -> timeLeftText(status.remainingMinutes, unit)
             }, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("chapter-time-left"))
+            if (!learning) {
+                Text(timeLeftText(status.bookRemainingMinutes, "book"), style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.testTag("book-time-left"))
+            }
         }
     }
+}
+
+/** Whole minutes up to an hour, then hours and minutes, so long books stay readable. */
+internal fun timeLeftText(minutes: Int?, unit: String): String = when {
+    minutes == null -> "Time left in $unit unavailable"
+    minutes <= 0 -> "Less than a minute left in $unit"
+    minutes == 1 -> "About 1 minute left in $unit"
+    minutes < 60 -> "About $minutes minutes left in $unit"
+    minutes % 60 == 0 -> "About ${minutes / 60} h left in $unit"
+    else -> "About ${minutes / 60} h ${minutes % 60} min left in $unit"
 }
 
 /** A bounded list avoids composing long TOCs offscreen and opens directly on the current entry. */
