@@ -15,6 +15,9 @@ internal data class ChapterStatus(
     val progression: Double?,
     val remainingMinutes: Int?,
     val currentTocIndex: Int?,
+    val bookRemainingMinutes: Int? = null,
+    val pagesUntilEstimate: Int = 0,
+    val roughEstimate: Boolean = false,
 )
 
 /** Readium adapter: the arithmetic and pace policy live in independently testable pure models. */
@@ -39,6 +42,9 @@ internal class ReadingChapters(private val publication: Publication) {
     private var model: ChapterProgressMap? = null
     private val resolvedFragments = mutableMapOf<Int, Double>()
     private var layoutGeneration = 0
+    /** Readium positions (about 1,024 characters each) in the whole book; null when it supplies none. */
+    var totalPositions: Int? = null
+        private set
 
     fun invalidateLayout() { layoutGeneration++; resolvedFragments.clear() }
 
@@ -54,6 +60,7 @@ internal class ReadingChapters(private val publication: Publication) {
     private suspend fun initialize() {
         if (model != null) return
         val positions = publication.positionsByReadingOrder()
+        totalPositions = positions.sumOf { it.size }.takeIf { it > 0 }
         val weights = resources.indices.map { positions.getOrNull(it)?.size?.coerceAtLeast(1) ?: 1 }
         val total = weights.sum().coerceAtLeast(1).toDouble()
         var accumulated = 0.0

@@ -94,14 +94,22 @@ class ReadingPaceTest {
         assertEquals(before, pace.remainingMinutes(0.03, 0.1))
     }
 
-    @Test fun controlsOrBackgroundEligibilityBreakTheCandidateInterval() {
+    @Test fun ineligibleMovesBreakTheCandidateIntervalButRepeatsOfThePageDoNot() {
         val pace = ReadingPace()
         pace.observe(0.0, 0, true)
         pace.observe(0.01, 15_000, true)
-        pace.observe(0.01, 20_000, false)
+        pace.observe(0.015, 20_000, false) // Moved while ineligible: that interval is discarded.
         pace.observe(0.02, 30_000, true)
         pace.observe(0.03, 45_000, true)
         assertNull(pace.remainingMinutes(0.03, 0.5))
+
+        val held = ReadingPace()
+        held.observe(0.0, 0, true)
+        held.observe(0.01, 15_000, true)
+        held.observe(0.01, 20_000, false) // The current page re-reported while controls are shown.
+        assertTrue(held.observe(0.02, 30_000, true))
+        held.observe(0.03, 45_000, true)
+        assertEquals(10, held.remainingMinutes(0.03, 0.43)) // 0.01 per 15s = 0.04/min.
     }
 
     @Test fun repeatedUnchangedLocationsDoNotResetTheReadingTimer() {
@@ -516,5 +524,197 @@ class ReadingPaceTest {
         for (step in 0..6) jumped.observe(0.10 + step * 0.005, now + step * 30_000L, true)
         val estimate = jumped.remainingMinutes(0.13, 0.23)!!
         assertTrue("Expected the slower 10-minute pace to dominate, got $estimate", estimate >= 8)
+    }
+
+    private fun perMinute(fraction: Double) = fraction / 60_000.0
+
+    @Test fun rememberedPaceGivesChapterAndBookEstimatesImmediately() {
+        val pace = ReadingPace()
+        pace.seed(perMinute(0.002))
+        assertEquals(50, pace.remainingMinutes(0.4, 0.5))
+        // 0.6 of the book at 0.002/min = 300 minutes: beyond a chapter's limit is fine for a book.
+        assertEquals(300, pace.bookRemainingMinutes(0.4))
+        assertNull("Nothing was measured yet, so there is nothing new to remember", pace.learnedRatePerMillis())
+    }
+
+    @Test fun liveReadingProgressivelyOutweighsTheRememberedPace() {
+        val pace = ReadingPace()
+        pace.seed(perMinute(0.002)) // Remembered: 50 minutes per 0.1.
+        var point = 0.2
+        var now = 0L
+        pace.observe(point, now, true)
+        val estimates = mutableListOf<Int>()
+        repeat(20) {
+            point += 0.00025
+            now += 15_000L // Today's reading is twice as slow: 0.001/min, 100 minutes per 0.1.
+            assertTrue(pace.observe(point, now, true))
+            pace.remainingMinutes(point, point + 0.1)?.let(estimates::add)
+        }
+        assertEquals("No jump while live samples are still too few", 50, estimates.first())
+        assertTrue("Estimates should move steadily towards live reading: $estimates",
+            estimates.zipWithNext().all { (a, b) -> b >= a })
+        assertTrue("Live reading should dominate after a full window, got ${estimates.last()}",
+            estimates.last() in 80..100)
+        val learned = pace.learnedRatePerMillis()!! * 60_000.0
+        assertTrue("Remembered pace should now lean live, got $learned", learned in 0.001..0.0013)
+    }
+
+    @Test fun fastRememberedPaceFadesOutDuringSustainedSlowerReading() {
+        val page = 0.0005
+        val earlier = ReadingPace()
+        earlier.observe(0.1, 0L, true)
+        repeat(6) { index ->
+            assertTrue(earlier.observe(0.1 + (index + 1) * page, (index + 1) * 10_000L, true))
+        }
+        val pace = ReadingPace()
+        pace.seed(earlier.learnedRatePerMillis()!!)
+        pace.observe(0.2, 0L, true)
+        var previousEstimate = pace.remainingMinutes(0.2, 0.25)!!
+        repeat(100) { index ->
+            val count = index + 1
+            val point = 0.2 + count * page
+            assertTrue(pace.observe(point, count * 120_000L, true))
+            val estimate = pace.remainingMinutes(point, point + 100 * page)!!
+            assertTrue("Slower reading should steadily increase time left", estimate >= previousEstimate)
+            if (count == 19) assertTrue("Prior should be almost gone before expiry: $estimate", estimate in 190..200)
+            if (count >= 20) assertEquals("100 pages at 120s/page after $count live pages", 200, estimate)
+            previousEstimate = estimate
+        }
+        val reopened = ReadingPace()
+        reopened.seed(pace.learnedRatePerMillis()!!)
+        assertEquals("Reopening must remember the corrected pace", 200, reopened.remainingMinutes(0.3, 0.35))
+    }
+
+    @Test fun slowRememberedPaceFadesOutDuringSustainedFasterReading() {
+        val page = 0.0005
+        val priorRate = page / 120_000.0
+        val pace = ReadingPace()
+        pace.seed(priorRate)
+        pace.observe(0.2, 0L, true)
+        var previousEstimate = 200
+        repeat(100) { index ->
+            val count = index + 1
+            val point = 0.2 + count * page
+            assertTrue(pace.observe(point, count * 10_000L, true))
+            if (count <= 4) assertEquals("Keep the prior until 45s of live reading", priorRate, pace.currentRatePerMillis()!!, 1e-15)
+            val estimate = pace.remainingMinutes(point, point + 100 * page)!!
+            assertTrue("Faster reading should steadily reduce time left", estimate <= previousEstimate)
+            if (count == 19) assertTrue("Prior should be almost gone before expiry: $estimate", estimate in 17..20)
+            if (count >= 20) assertEquals("100 pages at 10s/page after $count live pages", 17, estimate)
+            previousEstimate = estimate
+        }
+    }
+
+    @Test fun matchingRememberedPaceStaysStableAsLiveReadingReplacesIt() {
+        val page = 0.0005
+        val rate = page / 120_000.0
+        val pace = ReadingPace()
+        pace.seed(rate)
+        pace.observe(0.2, 0L, true)
+        repeat(30) { index ->
+            val point = 0.2 + (index + 1) * page
+            assertTrue(pace.observe(point, (index + 1) * 120_000L, true))
+            assertEquals(200, pace.remainingMinutes(point, point + 100 * page))
+            assertEquals(rate, pace.currentRatePerMillis()!!, rate * 1e-9)
+        }
+    }
+
+    @Test fun bookEstimateAllowsLongBooksButNotAbsurdOnes() {
+        val pace = ReadingPace()
+        pace.seed(perMinute(0.0002))
+        assertEquals(2_500, pace.bookRemainingMinutes(0.5))
+        assertEquals(0, pace.bookRemainingMinutes(1.0))
+        val glacial = ReadingPace()
+        glacial.seed(perMinute(0.00001))
+        assertNull(glacial.bookRemainingMinutes(0.0))
+    }
+
+    @Test fun invalidRememberedPacesAreIgnored() {
+        listOf(Double.NaN, Double.POSITIVE_INFINITY, 0.0, -perMinute(0.001), perMinute(1.0)).forEach { rate ->
+            val pace = ReadingPace()
+            pace.seed(rate)
+            assertNull("Seed $rate must be ignored", pace.bookRemainingMinutes(0.5))
+        }
+    }
+
+    @Test fun observeReportsOnlyMeasuredSamples() {
+        val pace = ReadingPace()
+        assertTrue(!pace.observe(0.1, 0L, true))
+        assertTrue(!pace.observe(0.11, 1_000L, true)) // Too quick to be reading.
+        assertTrue(pace.observe(0.12, 16_000L, true))
+        assertTrue(!pace.observe(0.13, 31_000L, false))
+    }
+
+    @Test fun glancingAtControlsEveryPageStillLearnsWithoutCountingTheGlance() {
+        // Owner's 2026-10-30 pattern: each page is read for 60s, with a 5s look at the controls
+        // in the middle (which re-sends the same position). Previously no sample was ever kept.
+        val pace = ReadingPace()
+        var point = 0.30
+        var now = 0L
+        pace.observe(point, now, true)
+        repeat(3) { page ->
+            now += 30_000L
+            pace.hold(now)
+            assertTrue(!pace.observe(point, now + 50L, false)) // Same page re-reported with controls shown.
+            now += 5_000L
+            pace.release(now)
+            assertEquals(3 - page, pace.pagesUntilEstimate())
+            now += 30_000L
+            point += 0.001
+            assertTrue("Page ${page + 1} should be timed", pace.observe(point, now, true))
+        }
+        assertEquals(0, pace.pagesUntilEstimate())
+        // 0.001 per 60s of reading (glances excluded): 0.1 more = 100 minutes, not 108.
+        assertEquals(100, pace.remainingMinutes(point, point + 0.1))
+    }
+
+    @Test fun movingWhileHeldOrBackgroundedBreaksTheInterval() {
+        val pace = ReadingPace()
+        pace.observe(0.30, 0L, true)
+        pace.hold(10_000L)
+        pace.observe(0.35, 12_000L, false) // A Contents jump while controls are shown.
+        pace.release(15_000L)
+        assertTrue("The jump must not become a reading sample", !pace.observe(0.351, 45_000L, true))
+        // The app sitting in the background for an hour is left out of the page time.
+        pace.hold(60_000L)
+        pace.release(3_660_000L)
+        assertTrue(pace.observe(0.352, 3_675_000L, true))
+    }
+
+    @Test fun quickFlipsBesideRealReadingDoNotShrinkTheEstimateSixfold() {
+        // Owner's phone 2026-10-30: equal pages read in 4.4s, 20s and 113s. Averaging speeds
+        // implied ~17s per page; per-distance averaging of Winsorized page times gives ~28s, and
+        // further real pages quickly pull it towards the 113s reading pace.
+        val page = 0.0005
+        val pace = ReadingPace()
+        var point = 0.01
+        var now = 0L
+        pace.observe(point, now, true)
+        for (seconds in listOf(4.4, 20.0, 113.0)) {
+            point += page; now += (seconds * 1_000).toLong(); pace.observe(point, now, true)
+        }
+        val early = pace.remainingMinutes(point, point + 100 * page)!!
+        assertTrue("100 pages should take well over 28 minutes at first, got $early", early >= 45)
+        assertTrue(pace.isRough())
+        assertNull("Too few pages to be remembered", pace.learnedRatePerMillis())
+        repeat(5) { point += page; now += 110_000L; pace.observe(point, now, true) }
+        val settled = pace.remainingMinutes(point, point + 100 * page)!!
+        assertTrue("After more real pages, 100 pages should approach 3 hours, got $settled", settled in 150..200)
+        assertTrue(!pace.isRough())
+        assertNotNull(pace.learnedRatePerMillis())
+    }
+
+    @Test fun learningTextCountsDownPages() {
+        assertEquals("Time left: learning your reading pace (about 3 more pages)", learningText(3))
+        assertEquals("Time left: learning your reading pace (about 1 more page)", learningText(1))
+    }
+
+    @Test fun timeLeftTextUsesHoursForLongSpans() {
+        assertEquals("Less than a minute left in chapter", timeLeftText(0, "chapter"))
+        assertEquals("About 1 minute left in chapter", timeLeftText(1, "chapter"))
+        assertEquals("About 59 minutes left in book", timeLeftText(59, "book"))
+        assertEquals("About 2 h left in book", timeLeftText(120, "book"))
+        assertEquals("About 5 h 7 min left in book", timeLeftText(307, "book"))
+        assertEquals("Time left in book unavailable", timeLeftText(null, "book"))
     }
 }
