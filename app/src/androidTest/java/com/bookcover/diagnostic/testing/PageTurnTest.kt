@@ -128,7 +128,7 @@ class PageTurnTest {
         assertTrue("The test starts on the last page of chapter 0", main { !visibleWebView().canScrollHorizontally(1) })
 
         val forwardReveal = RevealSamples()
-        engineTurn("forward swipe across the chapter boundary", paper, "swipe", forwardReveal) { drag(0.80f, 0.35f, hold = true) }
+        engineTurn("forward swipe across the chapter boundary", paper, "swipe", forwardReveal) { drag(0.80f, 0.35f, hold = true, sampler = forwardReveal) }
         waitFor("chapter 1 is current") { href().endsWith("chapter1.xhtml") && js("Boolean(document.getElementById('linked'))") == "true" }
         assertEquals("A forward crossing lands on the next chapter's first page", 0.0, settledOffset(), 1.0)
         assertTrue(main { !visibleWebView().canScrollHorizontally(-1) })
@@ -137,7 +137,7 @@ class PageTurnTest {
         }
 
         val backwardReveal = RevealSamples()
-        engineTurn("backward swipe across the chapter boundary", paper, "swipe", backwardReveal) { drag(0.20f, 0.65f, hold = true) }
+        engineTurn("backward swipe across the chapter boundary", paper, "swipe", backwardReveal) { drag(0.20f, 0.65f, hold = true, sampler = backwardReveal) }
         waitFor("chapter 0 is current") { href().endsWith("chapter0.xhtml") && js("Boolean(document.getElementById('paragraph-0'))") == "true" }
         settledOffset()
         assertEquals("A backward crossing lands on the previous chapter's LAST page", "true",
@@ -312,6 +312,8 @@ class PageTurnTest {
 
         fun assertAll(description: String, expected: (String, Boolean, Boolean) -> Boolean) {
             Log.i(TAG, "${testName.methodName} | $description: ${samples.size} reveal samples")
+        // Zero samples would let the check below pass without checking anything.
+        assertTrue("$description: no reveal samples were taken, so the reveal was not checked", samples.isNotEmpty())
             val wrong = samples.filterNot { expected(it.first.substringAfterLast('/'), it.second, it.third) }
             assertTrue("$description; ${wrong.size} of ${samples.size} samples showed another page: " +
                 wrong.take(3).joinToString { "${it.first.substringAfterLast('/')} back=${it.second} forward=${it.third}" },
@@ -467,7 +469,7 @@ class PageTurnTest {
      * [hold] it takes 240 ms (a fling). With [hold] it moves at a walking pace and then rests for
      * 200 ms before lifting, so the release velocity is about zero and only the distance decides.
      */
-    private fun drag(start: Float, end: Float, hold: Boolean = false) {
+    private fun drag(start: Float, end: Float, hold: Boolean = false, sampler: RevealSamples? = null) {
         val frame = webViewFrame()
         val y = frame.top + frame.height() * 0.60f
         fun x(fraction: Float) = frame.left + frame.width() * fraction
@@ -478,10 +480,12 @@ class PageTurnTest {
         for (step in 1..steps) {
             SystemClock.sleep(stepMillis)
             send(down, SystemClock.uptimeMillis(), MotionEvent.ACTION_MOVE, x(start + (end - start) * step / steps), y)
+            sampler?.sample()
         }
         if (hold) repeat(5) {
             SystemClock.sleep(40)
             send(down, SystemClock.uptimeMillis(), MotionEvent.ACTION_MOVE, x(end), y)
+            sampler?.sample()
         }
         send(down, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, x(end), y)
         instrumentation.waitForIdleSync()

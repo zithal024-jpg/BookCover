@@ -342,14 +342,16 @@ internal class PageTurnController(
 
     private fun capture() {
         captureJob?.cancel()
-        // The bitmap describes the screen as it is now; later control changes must not re-clip it.
-        turnBottomClip = liveBottomClip
         // A programmatic turn may have just closed the controls; a previous overlay may still be in
         // the last frame. Wait until the screen shows only the page before copying it.
         val waitFrames = if (overlayRecentlyShown || engine.source != PageTurnSource.SWIPE) 2 else 0
         captureJob = scope.launch {
             try {
                 repeat(waitFrames) { awaitFrame() }
+                // Read the clip only now: a button turn has just closed the controls, and the overlay's
+                // SideEffect updates liveBottomClip during the frames waited above. The bitmap describes
+                // the screen at this moment; later control changes must not re-clip it (D11).
+                turnBottomClip = liveBottomClip
                 val started = SystemClock.uptimeMillis()
                 val ok = snapshot()
                 snapshotMillis = SystemClock.uptimeMillis() - started
