@@ -1,5 +1,45 @@
 # Known limitations, open issues and next priorities
 
+## Current status on `main` (2026-10-27 reconciliation)
+
+Several limitations recorded in the original 2026-10-26 0.4.0 review baseline below have since been resolved on `main` (`0.4.0-prototype`, `versionCode` 6). For the live queue of remaining work, see [ACTIVE-BACKLOG.md](ACTIVE-BACKLOG.md); for detailed implementation and test evidence, see [EXPERT-PANEL-REVIEW.md](EXPERT-PANEL-REVIEW.md) and the root [README.md](../../README.md).
+
+### Resolved on `main` since the 2026-10-26 baseline
+
+- **External browser shortcut removed (`BC-01`, `1c6c414`):** The external browser-search shortcut was removed; BookCover imports only user-selected local `.epub` files.
+- **In-place fold/unfold and display-size continuity (`BC-07`, `f2d6e46`):** `MainActivity` now handles `screenSize|smallestScreenSize|screenLayout|orientation|uiMode|density` configuration changes in place, keeping the open `EpubNavigatorFragment` and outer-cover `WindowAreaController` session alive across fold/unfold transitions without restarting the timer. Full process death still reopens the book at its saved locator and requests a new cover session when enabled.
+- **Automatic dark-mode and 16-theme library/reader palette (`BC-21`, `BC-23`):** Automatic library theme now follows system light/dark mode while tinting from the latest-read cover (`CoverPalette`), alongside 5 base presets, 11 colour themes, custom cover RGB swatches, and 6 reader page themes.
+- **Publisher styles, instant font-size preview, RTL edge taps & volume keys (`BC-08`, `C1`, `BC-10`, `BC-17`):** Publisher styles default to on while CSS text size (`80%–220%`) still applies; CSS custom property live preview avoids multi-second slider rebuilds; narrow edge taps invert in RTL layouts; volume keys optionally turn pages.
+- **Chapter progress, named bookmarks, in-book search & Reading Streak (`BC-20`, `BC-29`, `RS-1`):** Chapter page count/TOC marker and named bookmarks (`BC-20`), offline Readium full-text search (`BC-29`), and local Reading Streak tracking (`RS-1`) are implemented on `main`.
+- **Library backup/restore, index recovery, debounced locator writes & resource cleanup (`BC-04`, `BC-05`, `BC-14`, `BC-27`, `F1`–`F4`):**
+  - `LibraryIndex` keeps a verified `.bak` copy and refuses to overwrite a damaged primary index (`BC-04`).
+  - Locator writes are debounced (`750 ms`) and flushed immediately on pause/stop/explicit navigation (`BC-14`).
+  - Multi-select batch import saves each book incrementally and cleans temporary copies (`BC-27`, `74ed155`).
+  - `F1/F4` (`db27ced`) requires a loaded library before backup export/restore, prepares complete backup bytes before opening the destination URI, rechecks readiness before restore merge/save, and preserves picker request routing and pending custom-cover book ID across Activity recreation.
+  - `F2` (`ea697d2`, `094811a`) records a synced ownership receipt before creating new import assets and cleans only proven abandoned files after failure, cancellation, or real process death (`SIGKILL`).
+  - `F3` (`5b083e3`) closes any open `EpubSession` (`readingLifecycle` observer, `BookSearchController`, `Publication`) or pre-session `Publication` on failed or cancelled book open before handoff to `MainActivity.session`.
+- **Build, licensing & permission audit (`BC-03`, `BC-12`, `BC-24`, `BC-25`):** All-rights-reserved `LICENSE` + `NOTICE` (`BC-03`), in-app third-party licence screen (`BC-12`), merged-manifest zero-network/storage permission test (`BC-24`), and migration to AGP 9 built-in Kotlin and modern DSL (`BC-25`, removing the two legacy `gradle.properties` flags) are complete on `main`.
+
+### Current known limitations on `main`
+
+- **Backup scope and SAF write atomicity (`BC-05`, `F1/F4`, `RS-1`):**
+  - **Settings → Backup → Export backup** exports a JSON file of reading positions, named bookmarks, and collections matched by SHA-256 book ID. **EPUB book files, custom cover images, and Reading Streak history (`library/reading-days.json`) are not included in library backups.** To restore metadata for books not currently in the library, import those `.epub` files first and run **Restore backup** again.
+  - While `F1` prepares and validates the complete UTF-8 backup payload in memory before opening the output stream (so readiness/serialization errors never touch the destination file), Android SAF `openOutputStream(uri, "wt")` truncates on open; a storage-provider write failure *after* stream open is not atomic.
+- **Supported formats:** Local **DRM-free EPUB 2/3** only (200 MB file / 100 MB entry / 500 MB expanded / 20,000-entry archive limits). PDF, Kindle/MOBI/AZW/KFX, DRM-protected EPUBs, and cloud sync are out of scope. Fixed-layout EPUBs render with publisher layout and disable reflow typography controls.
+- **Exterior screen hardware & power (`BC-22 / S1` open):** Exterior cover presentation depends on runtime Jetpack WindowManager `WindowAreaController` support on compatible foldables (e.g., Galaxy Z Fold). Outer-screen brightness and Samsung low-power AOD remain shelved. On current `main`, an open book keeps the inner screen awake (`FLAG_KEEP_SCREEN_ON`); configurable inner-screen idle timeout and 60-minute battery drain measurements remain open under `BC-22 / S1`.
+- **Remaining open backlog items and branch reconciliation (`ACTIVE-BACKLOG.md`):**
+  - **Branch divergence to integrate before a single unified build:** Local `main` (`cfc9549`) holds `F2` real process-death QA (`094811a`/`cfc9549`), whereas `origin/main` (`af0695b`) holds `S2 / UX §1` Library Home redesign (`224b907`/`6f374c0`/`1cfc2cd`, merged in `d046d67`) and `F3` commit-block ordering follow-up + owner confirmation (`db379d4`/`849dbf7`/`2f8df76`, merged in `af0695b`). Unreviewed reader edits also remain in the separate `h3` worktree (`a8f6d9e`), and `911beba` remains on `claude/reading-streak-feature-d82445`.
+  - `UX §2` (fixed-pixel reflowable publisher CSS verification across narrow/wide and 100%/200% text).
+  - `UX validation` (consolidated TalkBack, 200% text, 48 dp touch-target, and contrast verification pass once UI changes settle).
+  - `BC-26` phone check of visible friendly error banners for corrupt EPUB import and non-backup restore (JVM mapper/tests complete).
+  - `BC-15` (incremental ViewModel/state-holder extraction from `MainActivity`), `BC-19 / S3` (unfolded two-page spread observation/option), and `BC-20` (reading-speed/time-left natural-reading calibration).
+  - `BC-11` (owner decisions on final app name, production `applicationId`, release signing key, and R8 release build).
+
+---
+
+<details>
+<summary>Original 2026-10-26 0.4.0 review baseline known limitations (historical)</summary>
+
 Review target: 0.4.0. Read [RESULTS.md](RESULTS.md) for the final pass/fail/pending matrix. Final native checks passed folded and unfolded, and the user separately confirmed physical outside continuity in this version. This document records remaining design limits, debt and coverage beyond those specific passes.
 
 ## Supported content and typography
@@ -59,3 +99,5 @@ Review target: 0.4.0. Read [RESULTS.md](RESULTS.md) for the final pass/fail/pend
 3. Observe sustained dual-panel reading and lifecycle transitions on the actual target phone; measure power before proposing AOD or further dimming work.
 4. Improve persistence recovery/export and cancellation ownership, then profile library/position/cover processing with large collections. Preserve the existing same-Activity display route.
 5. Perform accessibility/usability and dependency/license review, migrate the build compatibility flags, and establish a deliberate source-license, release-signing and distribution process before calling the app production-ready.
+
+</details>
