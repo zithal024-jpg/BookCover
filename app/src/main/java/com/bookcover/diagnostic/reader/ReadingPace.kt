@@ -7,7 +7,8 @@ import kotlin.math.min
 import kotlin.math.pow
 
 /** Learns publication-coordinate distance per active reading interval; never assumes a WPM rate.
- * The caller pauses around jumps, reflow, controls, lifecycle pauses and viewport changes.
+ * The caller pauses around jumps, reflow and viewport changes, and holds the clock while controls
+ * are shown or the app is in the background.
  * A pace remembered from earlier sessions ([seed]) gives an immediate estimate; live samples
  * then progressively outweigh it, so the estimate follows the reader's current speed. */
 internal class ReadingPace {
@@ -47,6 +48,7 @@ internal class ReadingPace {
     private var previousTime: Long? = null
     private var retraceTarget: Double? = null
     private var priorRatePerMillis: Double? = null
+    private var heldSince: Long? = null
 
     /** Starts from a remembered pace (publication fraction per millisecond); invalid values are ignored. */
     fun seed(ratePerMillis: Double) {
@@ -60,11 +62,36 @@ internal class ReadingPace {
     fun pause() {
         previousPoint = null
         previousTime = null
+        heldSince = null
+    }
+
+    /** Stops the clock without discarding the page being read (controls shown, app in background).
+     * Breaking the interval instead cost two page turns per glance at the controls, so a reader
+     * who checked the estimate while reading never accumulated enough samples to see one. */
+    fun hold(nowMillis: Long) {
+        if (heldSince == null && previousTime != null && nowMillis >= 0) heldSince = nowMillis
+    }
+
+    /** Restarts the clock; the held time is left out of the current page's interval. */
+    fun release(nowMillis: Long) {
+        val since = heldSince ?: return
+        heldSince = null
+        val before = previousTime ?: return
+        if (nowMillis >= since) previousTime = before + (nowMillis - since) else pause()
+    }
+
+    /** Timed page turns still needed before a live estimate exists; 0 once any estimate is available. */
+    fun pagesUntilEstimate(): Int = when {
+        currentRatePerMillis() != null -> 0
+        else -> (MIN_SAMPLES - samples.size).coerceAtLeast(1)
     }
 
     /** Returns true when this observation added a measured reading sample. */
     fun observe(point: Double, nowMillis: Long, eligible: Boolean): Boolean {
-        if (!eligible || !point.isFinite() || point !in 0.0..1.0 || nowMillis < 0) {
+        val unchanged = previousPoint?.let { point.isFinite() && abs(point - it) <= UNCHANGED_POINT_EPSILON } == true
+        // A repeated notification for the page being read (e.g. when controls open) keeps the interval.
+        if ((!eligible || heldSince != null) && unchanged) return false
+        if (!eligible || heldSince != null || !point.isFinite() || point !in 0.0..1.0 || nowMillis < 0) {
             pause()
             return false
         }

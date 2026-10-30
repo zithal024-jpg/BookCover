@@ -75,7 +75,12 @@ internal class EpubSession(
     var controlsVisible: Boolean
         get() = visibleControls
         set(value) {
-            if (visibleControls != value) readingPace.pause()
+            if (visibleControls != value) {
+                // Glancing at the controls (e.g. to read the time left) holds the page clock rather than
+                // discarding the page being timed.
+                val now = SystemClock.elapsedRealtime()
+                if (value) readingPace.hold(now) else if (resumed()) readingPace.release(now)
+            }
             visibleControls = value
         }
     var progress by mutableDoubleStateOf(book.progression)
@@ -112,9 +117,13 @@ internal class EpubSession(
     private var restoringViewport = false
     private var viewportSettled: (() -> Unit)? = null
     private val readingLifecycle = object : DefaultLifecycleObserver {
-        override fun onPause(owner: LifecycleOwner) { readingPace.pause(); record(readingTime.pause(SystemClock.elapsedRealtime())) }
-        override fun onResume(owner: LifecycleOwner) { readingPace.pause(); if (fragment.isAdded && !closed) readingTime.resume(SystemClock.elapsedRealtime()) }
+        override fun onPause(owner: LifecycleOwner) { readingPace.hold(SystemClock.elapsedRealtime()); record(readingTime.pause(SystemClock.elapsedRealtime())) }
+        override fun onResume(owner: LifecycleOwner) {
+            if (!controlsVisible) readingPace.release(SystemClock.elapsedRealtime())
+            if (fragment.isAdded && !closed) readingTime.resume(SystemClock.elapsedRealtime())
+        }
     }
+    private fun resumed() = activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
     private val layoutListener = View.OnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
         if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) {
             readingPace.pause()
@@ -273,11 +282,13 @@ internal class EpubSession(
                     }
                 }
                 if (!paceRecalled) { paceRecalled = true; recallPace() }
-                if (readingPace.observe(resolved.globalPoint, SystemClock.elapsedRealtime(),
-                        !controlsVisible && activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))) rememberPace()
+                if (readingPace.observe(resolved.globalPoint, SystemClock.elapsedRealtime(), !controlsVisible && resumed())) {
+                    rememberPace()
+                    DiagnosticLog.record("Reading pace sample; pages until estimate=${readingPace.pagesUntilEstimate()}")
+                }
                 chapterStatus = ChapterStatus(resolved.title, resolved.progression,
                     resolved.globalEnd?.let { readingPace.remainingMinutes(resolved.globalPoint, it) }, resolved.currentTocIndex,
-                    readingPace.bookRemainingMinutes(resolved.globalPoint))
+                    readingPace.bookRemainingMinutes(resolved.globalPoint), readingPace.pagesUntilEstimate())
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { /* Missing TOC/geometry must never interrupt reading or position saving. */ }
         }

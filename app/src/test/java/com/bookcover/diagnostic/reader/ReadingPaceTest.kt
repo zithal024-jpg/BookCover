@@ -94,14 +94,22 @@ class ReadingPaceTest {
         assertEquals(before, pace.remainingMinutes(0.03, 0.1))
     }
 
-    @Test fun controlsOrBackgroundEligibilityBreakTheCandidateInterval() {
+    @Test fun ineligibleMovesBreakTheCandidateIntervalButRepeatsOfThePageDoNot() {
         val pace = ReadingPace()
         pace.observe(0.0, 0, true)
         pace.observe(0.01, 15_000, true)
-        pace.observe(0.01, 20_000, false)
+        pace.observe(0.015, 20_000, false) // Moved while ineligible: that interval is discarded.
         pace.observe(0.02, 30_000, true)
         pace.observe(0.03, 45_000, true)
         assertNull(pace.remainingMinutes(0.03, 0.5))
+
+        val held = ReadingPace()
+        held.observe(0.0, 0, true)
+        held.observe(0.01, 15_000, true)
+        held.observe(0.01, 20_000, false) // The current page re-reported while controls are shown.
+        assertTrue(held.observe(0.02, 30_000, true))
+        held.observe(0.03, 45_000, true)
+        assertEquals(10, held.remainingMinutes(0.03, 0.43)) // 0.01 per 15s = 0.04/min.
     }
 
     @Test fun repeatedUnchangedLocationsDoNotResetTheReadingTimer() {
@@ -575,6 +583,47 @@ class ReadingPaceTest {
         assertTrue(!pace.observe(0.11, 1_000L, true)) // Too quick to be reading.
         assertTrue(pace.observe(0.12, 16_000L, true))
         assertTrue(!pace.observe(0.13, 31_000L, false))
+    }
+
+    @Test fun glancingAtControlsEveryPageStillLearnsWithoutCountingTheGlance() {
+        // Owner's 2026-10-30 pattern: each page is read for 60s, with a 5s look at the controls
+        // in the middle (which re-sends the same position). Previously no sample was ever kept.
+        val pace = ReadingPace()
+        var point = 0.30
+        var now = 0L
+        pace.observe(point, now, true)
+        repeat(3) { page ->
+            now += 30_000L
+            pace.hold(now)
+            assertTrue(!pace.observe(point, now + 50L, false)) // Same page re-reported with controls shown.
+            now += 5_000L
+            pace.release(now)
+            assertEquals(3 - page, pace.pagesUntilEstimate())
+            now += 30_000L
+            point += 0.001
+            assertTrue("Page ${page + 1} should be timed", pace.observe(point, now, true))
+        }
+        assertEquals(0, pace.pagesUntilEstimate())
+        // 0.001 per 60s of reading (glances excluded): 0.1 more = 100 minutes, not 108.
+        assertEquals(100, pace.remainingMinutes(point, point + 0.1))
+    }
+
+    @Test fun movingWhileHeldOrBackgroundedBreaksTheInterval() {
+        val pace = ReadingPace()
+        pace.observe(0.30, 0L, true)
+        pace.hold(10_000L)
+        pace.observe(0.35, 12_000L, false) // A Contents jump while controls are shown.
+        pace.release(15_000L)
+        assertTrue("The jump must not become a reading sample", !pace.observe(0.351, 45_000L, true))
+        // The app sitting in the background for an hour is left out of the page time.
+        pace.hold(60_000L)
+        pace.release(3_660_000L)
+        assertTrue(pace.observe(0.352, 3_675_000L, true))
+    }
+
+    @Test fun learningTextCountsDownPages() {
+        assertEquals("Time left: learning your reading pace (about 3 more pages)", learningText(3))
+        assertEquals("Time left: learning your reading pace (about 1 more page)", learningText(1))
     }
 
     @Test fun timeLeftTextUsesHoursForLongSpans() {

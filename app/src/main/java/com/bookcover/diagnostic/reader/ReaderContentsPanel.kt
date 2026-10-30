@@ -42,7 +42,7 @@ internal fun ChapterProgressSummary(status: ChapterStatus?) {
             val learning = status.remainingMinutes == null && status.bookRemainingMinutes == null
             Text(when {
                 progress == null -> "Time left unavailable for this $unit"
-                learning -> "Time left: learning your reading pace"
+                learning -> learningText(status.pagesUntilEstimate)
                 else -> timeLeftText(status.remainingMinutes, unit)
             }, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("chapter-time-left"))
             if (!learning) {
@@ -51,6 +51,12 @@ internal fun ChapterProgressSummary(status: ChapterStatus?) {
             }
         }
     }
+}
+
+/** Shows that learning is progressing; only page turns at a reading pace count. */
+internal fun learningText(pages: Int): String = when {
+    pages <= 1 -> "Time left: learning your reading pace (about 1 more page)"
+    else -> "Time left: learning your reading pace (about $pages more pages)"
 }
 
 /** Whole minutes up to an hour, then hours and minutes, so long books stay readable. */
