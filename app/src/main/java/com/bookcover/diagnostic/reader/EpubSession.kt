@@ -72,6 +72,11 @@ internal class EpubSession(
             if (visibleControls != value) readingPace.pause()
             visibleControls = value
         }
+    /**
+     * The screen shows a panel over the page (controls, Contents, bookmark editor). Set by
+     * `EpubReaderScreen`; swipes are never taken over then, or the panel would be in the snapshot (D12).
+     */
+    var panelsOpen = false
     var progress by mutableDoubleStateOf(book.progression)
     var fontScale by mutableDoubleStateOf(ReadingTextSize.percent(initialFontScale) / 100.0)
         private set
@@ -180,12 +185,12 @@ internal class EpubSession(
         fragment = factory.instantiate(activity.classLoader, EpubNavigatorFragment::class.java.name) as EpubNavigatorFragment
         pageTurns = PageTurnController(activity, publication, fragment,
             conditions = ::turnConditions,
-            controlsVisible = { controlsVisible },
+            controlsVisible = { controlsVisible || panelsOpen },
             selectionActive = { actionModeActive },
             rightToLeft = { fragment.settings.value.readingProgression == ReadingProgression.RTL },
             pageColor = { readerBackground(themeName).toArgb() },
             onSwipeTurn = { noteUserTurn(PageTurnSource.SWIPE) },
-            onTurnUndone = { readingPace.pause() },
+            onBlockedTap = ::blockedTap,
         ).apply { style = PageTurnStyle.of(paperPageTurn) }
         activity.lifecycle.addObserver(readingLifecycle)
         fragment.addInputListener(object : InputListener {
@@ -286,7 +291,9 @@ internal class EpubSession(
                         return@launch
                     }
                 }
-                readingPace.observe(resolved.globalPoint, SystemClock.elapsedRealtime(),
+                // A swipe's silent turn is provisional until it commits: a cancel undoes it, and the
+                // page must not yield a reading-pace sample twice (step 5 review, D9).
+                if (!pageTurns.swipeUncommitted) readingPace.observe(resolved.globalPoint, SystemClock.elapsedRealtime(),
                     !controlsVisible && activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
                 chapterStatus = ChapterStatus(resolved.title, resolved.progression,
                     resolved.globalEnd?.let { readingPace.remainingMinutes(resolved.globalPoint, it) }, resolved.currentTocIndex)
@@ -310,11 +317,12 @@ internal class EpubSession(
     /** Called before dispatching a display configuration change; never creates another navigator. */
     fun viewportChanging(onSettled: () -> Unit) {
         if (closed || !fragment.isAdded) { onSettled(); return }
-        // A turn mid-flight must not leave its snapshot over the resized page.
-        pageTurns.abort()
+        // A turn mid-flight must not leave its snapshot over the resized page, and a swipe the user
+        // had not committed is turned back: continuity restores the page from before it (D8).
+        val revert = pageTurns.abort()
         viewportSettled = onSettled
         readingPace.pause()
-        viewportContinuity.begin(typographyAnchor ?: currentLocator)
+        viewportContinuity.begin(typographyAnchor ?: revert ?: currentLocator)
         restoreViewportWhenSettled()
     }
 
@@ -545,6 +553,21 @@ internal class EpubSession(
         pageTurns.turn(direction, source, PageTurnRules.path(turnConditions()))
     }
 
+    /** A tap that landed while a turn's snapshot hid the page underneath (D5): edge taps still turn. */
+    private fun blockedTap(x: Float, y: Float) {
+        if (closed) return
+        val view = fragment.view ?: return
+        readerActive()
+        when (readingTapAction(x, y, view.width.toFloat(), view.height.toFloat(), view.resources.displayMetrics.density,
+            edgeTaps, controlsVisible, typographyUpdating, hasProtectedTarget = false,
+            rightToLeft = fragment.settings.value.readingProgression == ReadingProgression.RTL)) {
+            ReadingTapAction.PREVIOUS -> { turnPage(PageTurnDirection.BACKWARD, PageTurnSource.EDGE_TAP); DiagnosticLog.record("EPUB edge completed tap: backward") }
+            ReadingTapAction.NEXT -> { turnPage(PageTurnDirection.FORWARD, PageTurnSource.EDGE_TAP); DiagnosticLog.record("EPUB edge completed tap: forward") }
+            // Links, selection and the controls toggle wait until the page under the finger is the one shown.
+            ReadingTapAction.CONTROLS, ReadingTapAction.NONE -> Unit
+        }
+    }
+
     private fun noteUserTurn(source: PageTurnSource) {
         readerActive()
         // A user who navigates during reflow must not be pulled back by an old anchor.
@@ -603,8 +626,11 @@ internal class EpubSession(
     fun previous() = turnPage(PageTurnDirection.BACKWARD, PageTurnSource.BUTTON)
     val restorationLocator: Locator? get() = viewportContinuity.pending ?: viewportContinuity.anchor ?: currentLocator
     /** Saves a waiting reading position now, e.g. when the app goes to the background. */
-    fun flushPosition() {
-        restorationLocator?.let(positions::submit)
+    fun flushPosition() = flushPosition(null)
+
+    /** [revert]: the page from before a dropped, uncommitted swipe turn, saved instead (D8). */
+    private fun flushPosition(revert: Locator?) {
+        (revert ?: restorationLocator)?.let(positions::submit)
         positions.flush()
     }
 
@@ -626,7 +652,7 @@ internal class EpubSession(
         record(readingTime.pause(SystemClock.elapsedRealtime()))
         readingTimeJob?.cancel()
         closed = true
-        pageTurns.close()
+        val revert = pageTurns.close()
         search.close()
         locationJob?.cancel()
         chapterJob?.cancel()
@@ -635,7 +661,7 @@ internal class EpubSession(
         viewportSettled = null
         activity.lifecycle.removeObserver(readingLifecycle)
         fragment.view?.removeOnLayoutChangeListener(layoutListener)
-        flushPosition()
+        flushPosition(revert)
         typographyJob?.cancel()
         if (!activity.supportFragmentManager.isDestroyed && fragment.isAdded) {
             runCatching { activity.supportFragmentManager.beginTransaction().remove(fragment).commitNowAllowingStateLoss() }

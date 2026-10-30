@@ -78,6 +78,8 @@ internal fun EpubReaderScreen(
     val pageMargin = if (session.supportsTypography) dimensionResource(NavigatorR.dimen.readium_navigator_epub_vertical_padding) else 0.dp
     val density = LocalDensity.current
     val overlayVisible = session.controlsVisible || contentsVisible || bookmarkDraft != null
+    // PT-1: the same condition keeps swipes native while any panel is over the page (D12).
+    SideEffect { session.panelsOpen = overlayVisible }
     val night = session.themeName == "Night"
     val background = readerBackground(session.themeName)
     // One palette with the library: same accent, light or dark to match the page.

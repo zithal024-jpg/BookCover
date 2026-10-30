@@ -24,19 +24,32 @@ page-turn with a toggle. Prompt: [review/PT-1-PAGE-TURN-PROMPT.md](review/PT-1-P
    trailing-edge shadow. Identical for every source and across chapter boundaries. Drawing reads
    progress only in the draw phase (no recomposition per frame, no per-frame allocation).
 5. **Swipes.** `PageTurnTouchLayer` wraps the `FragmentContainerView` and decides in
-   `dispatchTouchEvent` (children cannot disable it). A move past 6 dp that is clearly horizontal
-   (|dx| > 1.5·|dy|) is taken: the children get one `ACTION_CANCEL` before their own slops
-   (Chromium 8 dp, Readium's pager/WebView 16 dp), so no native scroll, fling or page snap follows.
+   `dispatchTouchEvent` (children cannot disable it). A move past 6 dp that is more sideways than
+   vertical (|dx| > |dy|; step 5 lowered this from 1.5·|dy|) is taken: the children get one
+   `ACTION_CANCEL` before their own slops (Chromium 8 dp, Readium's pager/WebView 16 dp), so no
+   native scroll, fling or page snap follows. A drag that starts steeper is still watched until it
+   has moved 16 dp sideways (the WebView's paging slop) and is taken if it flattens out by then.
+   The swipe follows the finger that started it; if that finger lifts first, the turn cancels.
    The snapshot follows the finger. Release commits past 30% of the width or on a 400 dp/s fling
    over at least 25 dp (velocity from an Android `VelocityTracker`); a fling back cancels. Cancel
    slides the page back flat, then undoes the silent turn exactly once while the snapshot still
    covers the page, and only after the first turn has landed.
 6. **Passes through untouched:** taps (Readium `onTap`: edge taps, controls toggle), vertical
    drags, long presses and drags while the text-selection toolbar is open, multi-finger gestures,
-   and any swipe while the reading controls are open (their panels would be in the snapshot).
+   any swipe while a panel is over the page (controls, Contents or bookmark editor: it would be
+   in the snapshot), and swipes within 650 ms of a native Readium turn (its settle scroll would
+   be frozen half-way). **Exception:** while the snapshot hides a page Readium has already turned
+   to, touches never reach that hidden page. Edge taps still turn (queued) and a swipe can still
+   start; centre taps, links and long presses are ignored for those few hundred milliseconds.
 7. **Book edges.** Reflowable `goForward/goBackward` never return false at the end of the book,
    so the controller checks first: the visible WebView cannot scroll further that way and the
-   current resource is the first/last reading-order item. Then the page rubber-bands, no turn.
+   resource it shows is the first/last reading-order item. That resource is read from the
+   visible WebView's Readium page fragment (its `link` argument), not from the locator, which
+   trails each turn by 100 ms; the locator is only the fallback. Then the page rubber-bands, no turn.
+8. **Did the page really move?** Readium also returns true and then quietly does nothing at the
+   start or end of the book. A silent turn therefore counts as a move only when the visible page
+   changed (another WebView, or a scroll of at least 40% of a page). The locator decides only when
+   no page could be watched. A turn that did not move is never undone.
 
 ## Paper curl (step 3)
 
@@ -80,10 +93,12 @@ page-turn with a toggle. Prompt: [review/PT-1-PAGE-TURN-PROMPT.md](review/PT-1-P
 - **Fixed-layout books stay entirely native** (no swipe takeover; taps, buttons and keys keep
   `animated = true`). No FXL fixture has been checked on the phone; revisit after that.
 - **Fold, unfold or rotation mid-turn:** the overlay is dropped at once (layout-size change and
-  `viewportChanging`), and BC-07 continuity restores the passage. A turn already issued under a
-  finger is kept. If the fold comes within Readium's 100 ms locator debounce of that silent
-  turn, continuity may restore the page from before the turn instead. Either outcome is one
-  page, never two.
+  `viewportChanging`), and BC-07 continuity restores the passage. A committed turn is kept. A
+  swipe the user had not committed (still under the finger, cancelling, or being undone) is
+  turned back. Continuity and closing the reader then use the locator from just before its
+  silent turn, so the book never reopens on a page the user declined (step 5, D8).
+- **A flick that commits before its page is drawn** keeps the full-length settle, and if the
+  page is still not drawn the page colour fades off it (150 ms) instead of the text popping in.
 - **Typography change:** any running turn is dropped before the reflow starts.
 - **Turns that arrive while one is running:** a running animation jumps to its end and the new
   turn starts. If the old turn is still waiting for its page, or a finger still holds a swipe,
@@ -116,6 +131,35 @@ style it started with.
 | R10 | Hard rules: no manifest, `INTERNET`, network, `build.gradle.kts`, `testBuildType`/`applicationIdSuffix` or QA host changes in the diff. | No change needed. |
 | R11 | Debuggable builds (including the owner's installed debug build) log one `PT-1 turn …` line per turn. The log is capped at 128 KB, so these lines can push out older ones. | Kept for QA as the prompt asks; quiet it to failures only after device QA. |
 | R12 | Going backward across a chapter boundary: readiness fires once a different WebView is visible and has drawn (bounded at 150 ms). If Readium positions that chapter at its last page only after it loads, the reveal could briefly show its first page. | Open: unverified. Check on the phone (chapter boundary, both directions). |
+
+## Step 5 deep review (2026-10-30, `19cd1f4..c459b9d`, code and Readium 3.4.0 bytecode, no device)
+
+Each finding went through three independent attempts to refute it. CONFIRMED findings survived at
+least two. Unit tests are JVM-only. A finding marked "wiring" changes Android touch or Compose code
+that the JVM tests cannot run, so only the build and the phone check it.
+
+| # | Finding (verdict) | Outcome |
+|---|---|---|
+| D1 | A silent turn that Readium quietly ignores counted as a real move. Reflowable `goForward/goBackward` return true whenever a WebView exists, even at the start or end of the book, so the R1 "refused turn" check almost never fired. If `atBookEdge` was wrong at a real edge, cancelling the swipe would "undo" a turn that never happened and move the reader one page the wrong way. (CONFIRMED, medium) | **Fixed.** `awaitPage` now returns whether the page moved. When a page could be watched, only a visible change counts: another WebView, or a scroll of 40% of a page or more (`PageTurnRules.pageChanged/turnLanded`). A locator change alone could be a stale locator catching up. The visible page is checked once more after the locator wait. A turn that did not move goes to `pageReady(moved = false)` and is never undone. Test `aSilentTurnThatChangedNothingOnScreenIsNotAMove`. |
+| D2 | The book-edge check took the resource from Readium's locator, which is announced 100 ms after a turn. A quick reverse turn after leaving the first or last chapter was taken as the book's edge and lost. (CONFIRMED, low) | **Fixed.** `atBookEdge` reads the resource from the visible WebView's own page fragment: the innermost fragment whose view holds it, using its `link` argument. In Readium 3.4.0 `R2EpubPageFragment` is internal, so the code matches on the view and the argument, not the class. The locator is only the fallback. Test `bookEdgeNeedsAKnownFirstOrLastResource` covers the index rule. The fragment lookup is wiring. |
+| D3 | Swipes that were mostly sideways but at an angle (ratio between 1:1 and 1.5:1) still turned the old Readium way. `R2WebView` pages on sideways travel alone and never checks dy. (CONFIRMED, medium) | **Fixed.** A drag is a turn when \|dx\| > \|dy\| (`HORIZONTAL_DOMINANCE` 1.5 → 1). A drag that starts steeper is watched (`Mode.WATCH`) until it has moved 16 dp sideways (the paging slop, `mayStillTakeOver`), and is taken if it flattens out by then. Tests: `verticalAndShortDragsPassThrough` (updated), `steepDragsAreWatched…`. Trade-off: a tap that drifts 6 dp at 45° is now taken as a short swipe (see R8). |
+| D4 | A touch-down stops `R2WebView`'s settle scroll half-way. Only its own ACTION_UP snaps the page back, and the takeover's ACTION_CANCEL does not. A quick swipe during a native settle therefore left the snapshot (and at the book edge, the page) misaligned. (CONFIRMED, low) | **Fixed.** For `NATIVE_SETTLE_MILLIS` (650 ms) after a native Readium turn, swipes stay native and Readium's own ACTION_UP re-snaps the page. "Native turn" means Readium's animated turn, or a passed-through gesture that ended with at least 16 dp of sideways travel. Test: `canTakeOverSwipe(nativeSettling = true)` is false. The touch-layer trigger is wiring. |
+| D5 | Taps and long presses during a turn reached the hidden page under the snapshot (links, controls toggle, text selection). (CONFIRMED, low) | **Fixed.** While the overlay shows a page other than the one underneath (`coversOtherPage`), the touch layer swallows the gesture (`Mode.BLOCKED`). An edge tap still turns (queued, through `EpubSession.blockedTap` → `turnPage`), and a horizontal swipe can still start. Centre taps, links and long presses are ignored for that moment. Test `touchesAreBlockedOnlyWhileTheSnapshotHidesAnotherPage`. The touch layer itself is wiring. |
+| D6 | An owned swipe read pointer index 0. If the first finger lifted while a second stayed down, the swipe jumped to the other finger and could commit a turn nobody swiped through. (CONFIRMED, low) | **Fixed (wiring, no JVM test: `MotionEvent` needs a device).** The layer records the active pointer id, reads it with `findPointerIndex`, and takes velocity for that id. If that finger lifts first, the swipe cancels and the rest of the gesture is ignored. |
+| D7 | A swipe cancelled while its snapshot was being taken still issued its silent Readium turn. An edge back gesture that closed the reader could then save the page next to the one being read. A cancel in the two frames after the overlay appeared did the same. (CONFIRMED, medium) | **Fixed.** `captured()` drops a swipe released without commit during capture, so no overlay and no turn. The silent turn is now issued through `engine.issueTurn(token)` after the overlay is on screen, and returns null when the swipe has been cancelled meanwhile. `turned`/`silentTurns` count only issued turns. Test `aSwipeCancelledBeforeItsSilentTurnNeverTurnsReadium`. |
+| D8 | `close()`/`abort()` kept the silent turn of a swipe the user had cancelled. The book could reopen, or a fold restore, one page off. (CONFIRMED, medium; one verifier rated it near-theoretical) | **Fixed.** The engine reports `uncommittedTurnOutstanding`/`undoOwed`, meaning a swipe still under the finger, cancelling, or being undone. `abort()` turns Readium back when an undo is owed, and returns the locator from just before the silent turn. `close()` saves that locator instead of Readium's current one. `viewportChanging` hands it to BC-07 continuity. A committed turn is still kept. Test `anUncommittedSwipeTurnIsReportedUntilItsUndoLands`. Replaces the step-2 note "a turn already issued under a finger is kept". |
+| D9 | Reading pace got two short samples for one page when a swipe was cancelled after its silent turn. (CONFIRMED, low) | **Fixed.** `refreshChapter` skips `readingPace.observe` while a swipe is uncommitted (`pageTurns.swipeUncommitted`). The undo then lands on the unchanged baseline, so the `onTurnUndone → readingPace.pause()` hook is no longer needed and was removed: it threw away the page's reading time. Engine state covered by the D8 test. The `EpubSession` call is wiring. |
+| D10 | A quick flick that committed before its page was drawn slid the snapshot off over plain page colour, then the text popped in. (CONFIRMED, low; mainly at chapter boundaries) | **Fixed.** `Settle(1f, awaitingPage = true)` keeps the full-length settle, not shortened by finger speed. If the page is still not drawn when the settle ends, `HOLDING` → `FADING`: the page-colour cover fades off over 150 ms (`FadeCover`, `coverFade`), so the text no longer pops in. Test `committedSwipeHoldsPageColourUntilTheTurnLands` (updated). |
+| D11 | The bottom clip followed the current controls state, not the state when the snapshot was taken. Opening the controls mid-turn drew the snapshot's copy of the progress row. (CONFIRMED, low; mostly hidden by the panel) | **Fixed (wiring).** The overlay reports the live clip to the controller (`liveBottomClip`). The capture latches it (`turnBottomClip`), and the painter uses the latched value for the whole turn. |
+| D12 | Swipe takeover checked only `controlsVisible`. With Contents open after a centre tap had hidden the controls, a swipe was taken and the Contents panel was copied into the turning page. (CONFIRMED, low; the bookmark-editor half was refuted: it is a separate dialog window) | **Fixed (wiring).** `EpubReaderScreen` publishes its own panel condition (`controlsVisible \|\| contentsVisible \|\| bookmarkDraft != null`) as `EpubSession.panelsOpen`, and the controller's takeover check uses it. |
+| D13 | Same root cause as D2, seen at a chapter boundary. Case 1: a quick second turn was wrongly treated as the book's edge. Case 2: an edge was missed, then a silent turn that did nothing, about 1 s of page colour, and a "turn" to the same page. (CONFIRMED, low) | **Fixed by D2** (resource from the visible page) and **D1** (a turn that did not move is not counted, and is never undone). |
+| RF1 | A gesture whose UP/CANCEL was dropped would leave the engine stuck in DRAGGING. (REFUTED: `ViewGroup` sends ACTION_CANCEL to the old touch target before a new ACTION_DOWN, through Compose's interop, and detaching is handled) | Recorded only, no change. |
+
+Still open after step 5: R9 (RTL book edges on real Readium pages) and R12 (backward
+chapter-boundary reveal) from step 4. All of D1 to D13 still need the phone, especially:
+- the D3 takeover angle and edge taps (R8);
+- the D5 blocked taps;
+- the D2 page-fragment lookup on Readium 3.4.0 (if it fails, the locator fallback is the old behaviour).
 
 ## Validation record
 

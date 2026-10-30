@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.Shader
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -23,24 +24,29 @@ import androidx.compose.ui.unit.dp
  * starts or ends; per-frame progress is read in the draw phase, so each frame only redraws.
  *
  * [bottomClip] is the strip at the bottom of the page that the progress row covers. The snapshot
- * includes that row, so it is not drawn there (the page's own bottom margin shows instead).
+ * includes that row, so it is not drawn there (the page's own bottom margin shows instead). The
+ * clip in force when the snapshot was taken is used for the whole turn, because opening the
+ * controls mid-turn removes the row from the screen but not from the bitmap (step 5 review, D11).
  */
 @Composable
 internal fun PageTurnOverlay(controller: PageTurnController, pageColor: Color, bottomClip: Dp, modifier: Modifier = Modifier) {
     // Kept across turns (above the early return), so its mesh arrays and shader are reused.
     val painter = remember(controller) { PageTurnPainter() }
-    if (!controller.overlayVisible) return
     val density = LocalDensity.current
-    val shadowWidth = with(density) { 20.dp.toPx() }
     val clip = with(density) { bottomClip.toPx() }
+    SideEffect { controller.liveBottomClip = clip }
+    if (!controller.overlayVisible) return
+    val shadowWidth = with(density) { 20.dp.toPx() }
     val color = pageColor.toArgb()
     val pixelDensity = density.density
     Spacer(modifier.drawBehind {
         controller.snapshotVersion // A new snapshot redraws even at the same progress.
         val started = controller.drawStarted()
+        // Until the turned page is drawn (and at the book's edge) the uncovered area is plain page;
+        // a committed swipe that outran its page fades that cover off instead of popping (D10).
+        val cover = if (!controller.pageReady || controller.rubberBand) 1f else controller.coverFade
         painter.draw(drawContext.canvas.nativeCanvas, controller.bitmap, size.width, size.height, controller.progress,
-            controller.screenSign, controller.turnStyle, !controller.pageReady || controller.rubberBand, color, shadowWidth,
-            clip, pixelDensity)
+            controller.screenSign, controller.turnStyle, cover, color, shadowWidth, controller.turnBottomClip, pixelDensity)
         controller.drawFinished(started)
     })
 }
@@ -65,14 +71,15 @@ internal class PageTurnPainter {
 
     fun draw(
         canvas: Canvas, bitmap: Bitmap?, width: Float, height: Float, progress: Float, sign: Int, style: PageTurnStyle,
-        coverUnderneath: Boolean, pageColor: Int, shadowWidth: Float, bottomClip: Float, density: Float = 1f,
+        cover: Float, pageColor: Int, shadowWidth: Float, bottomClip: Float, density: Float = 1f,
     ) {
         if (bitmap == null || width <= 0f || height <= 0f) return
         canvas.save()
         canvas.clipRect(0f, 0f, width, height)
-        if (coverUnderneath) {
-            // Until the turned page is drawn (or at the book's edge), the uncovered area is plain page.
+        if (cover > 0f) {
+            // Page colour over the page underneath: opaque until it is drawn, then fading (D10).
             fillPaint.color = pageColor
+            fillPaint.alpha = (255 * cover.coerceAtMost(1f)).toInt()
             canvas.drawRect(0f, 0f, width, height, fillPaint)
         }
         when (style) {

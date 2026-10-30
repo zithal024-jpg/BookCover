@@ -23,6 +23,8 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.core.os.BundleCompat
+import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import com.bookcover.diagnostic.DiagnosticLog
@@ -33,6 +35,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
+import org.readium.r2.shared.publication.Link
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
 import kotlin.coroutines.resume
@@ -56,8 +59,8 @@ internal class PageTurnController(
     private val pageColor: () -> Int,
     /** Side effects of a user turn (anchor, contents, activity); called once per taken-over swipe. */
     private val onSwipeTurn: (PageTurnDirection) -> Unit,
-    /** A cancelled swipe is undoing its silent turn: the page did not really advance. */
-    private val onTurnUndone: () -> Unit = {},
+    /** A tap swallowed while the snapshot hides a turned page (layer coordinates): edge taps still turn. */
+    private val onBlockedTap: (Float, Float) -> Unit = { _, _ -> },
 ) : PageTurnGestures {
     private val engine = PageTurnEngine()
     private val scope = activity.lifecycleScope
@@ -76,10 +79,17 @@ internal class PageTurnController(
     var screenSign = -1; private set
     var rubberBand = false; private set
     var bitmap: Bitmap? = null; private set
+    /** Alpha of the page-colour cover fading off a page that a committed swipe outran (read in draw). */
+    var coverFade by mutableFloatStateOf(0f); private set
+    /** The progress-row strip to leave undrawn, set by [PageTurnOverlay] from the screen's live state. */
+    var liveBottomClip = 0f
+    /** [liveBottomClip] when the snapshot was taken: it describes that bitmap, not today's controls (D11). */
+    var turnBottomClip = 0f; private set
 
     private var captureJob: Job? = null
     private var readinessJob: Job? = null
     private var animating = false
+    private var fading = false
     private var animationFrom = 0f
     private var animationTo = 0f
     private val animator = ValueAnimator.ofFloat(0f, 1f).apply {
@@ -104,6 +114,10 @@ internal class PageTurnController(
     private val pending = ArrayDeque<Pair<PageTurnDirection, PageTurnSource>>()
     private var turnSource: PageTurnSource? = null
     private var overlayRecentlyShown = false
+    /** Readium's locator just before the current turn's silent turn; restored if an uncommitted swipe is dropped. */
+    private var turnBefore: Locator? = null
+    /** Until this uptime a native Readium settle scroll may be running (see [PageTurnRules.NATIVE_SETTLE_MILLIS]). */
+    private var nativeSettleUntil = 0L
 
     // QA timing (debuggable builds only; failures are always logged).
     private val debuggable = activity.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
@@ -165,7 +179,17 @@ internal class PageTurnController(
 
     override fun canTakeOverSwipe(dx: Float, longPressed: Boolean): Boolean =
         container != null && PageTurnRules.swipeDirection(dx, rightToLeft()) != null &&
-            PageTurnRules.canTakeOverSwipe(conditions(), controlsVisible(), selectionActive(), longPressed)
+            PageTurnRules.canTakeOverSwipe(conditions(), controlsVisible(), selectionActive(), longPressed,
+                nativeSettling = SystemClock.uptimeMillis() < nativeSettleUntil)
+
+    override fun touchesBlocked(): Boolean = overlayVisible && engine.coversOtherPage
+
+    override fun blockedTap(x: Float, y: Float) = onBlockedTap(x, y)
+
+    override fun nativeSwipeEnded() { nativeSettleUntil = SystemClock.uptimeMillis() + PageTurnRules.NATIVE_SETTLE_MILLIS }
+
+    /** A swipe the user has not committed yet: its silent turn is provisional (reading pace ignores it). */
+    val swipeUncommitted get() = engine.swipeUncommitted
 
     override fun swipeStarted(dx: Float) {
         val direction = PageTurnRules.swipeDirection(dx, rightToLeft()) ?: return
@@ -221,20 +245,35 @@ internal class PageTurnController(
 
     private var settleVelocity = 0f
 
-    /** Fold, rotation, layout change or close: drop the overlay now; BC-07 continuity keeps the position. */
-    fun abort() {
+    /**
+     * Fold, rotation, layout change or close: drop the overlay now. A committed turn is kept and
+     * BC-07 continuity keeps the position. A swipe the user had not committed (cancelled, or still
+     * under the finger) must not leave the reader on its silent turn (D8): with [reverse] Readium is
+     * turned back at once, and the locator from before that turn is returned so the caller can save
+     * or restore it instead of Readium's (possibly already turned) current locator.
+     */
+    fun abort(reverse: Boolean = true): Locator? {
+        val outstanding = engine.uncommittedTurnOutstanding
+        val owed = engine.undoOwed
+        val direction = engine.direction
+        val before = turnBefore
         pending.clear()
         swipeHeld = false
         captureJob?.cancel(); captureJob = null
         readinessJob?.cancel(); readinessJob = null
         stopAnimation()
         dispatch(engine.abort())
+        turnBefore = null
+        if (owed && reverse && direction != null) turnDirectly(direction.opposite, animated = false)
+        return if (outstanding) before else null
     }
 
-    fun close() {
-        abort()
+    /** Ends the controller; returns the position to save when an uncommitted swipe was dropped (see [abort]). */
+    fun close(): Locator? {
+        val revert = abort(reverse = false)
         container = null
         bitmap = null
+        return revert
     }
 
     /** Jump a running animation to its end so a new turn starts from a settled page. */
@@ -255,11 +294,18 @@ internal class PageTurnController(
             is PageTurnAction.ShowOverlay -> showOverlay(action)
             PageTurnAction.Reveal -> animate(1f, PageTurnRules.turnMillis(turnStyle), reveal)
             is PageTurnAction.Settle -> {
-                val toward = if (action.target >= progress) settleVelocity else -settleVelocity
+                // A flick that commits before its page is drawn keeps the full-length settle, so the
+                // snapshot does not slide off over plain page colour (D10).
+                val toward = when {
+                    action.awaitingPage -> 0f
+                    action.target >= progress -> settleVelocity
+                    else -> -settleVelocity
+                }
                 animate(action.target, PageTurnRules.settleMillis(progress, action.target, toward, travel(), PageTurnRules.turnMillis(turnStyle)), settle)
             }
             PageTurnAction.RubberBand -> { rubberBand = true; animate(0f, PageTurnRules.RUBBER_BAND_MILLIS, linear, bounce = true) }
-            is PageTurnAction.Undo -> { onTurnUndone(); silentTurn(action.direction, action.token) }
+            PageTurnAction.FadeCover -> fadeCover()
+            is PageTurnAction.Undo -> silentTurn(action.direction, action.token)
             PageTurnAction.RemoveOverlay -> removeOverlay()
             is PageTurnAction.TurnDirectly -> turnDirectly(action.direction, action.animated)
         }
@@ -286,11 +332,15 @@ internal class PageTurnController(
     private var pendingPosted = false
 
     private fun turnDirectly(direction: PageTurnDirection, animated: Boolean) {
+        // Readium's animated turn ends in a settle scroll; swipes during it stay native (D4).
+        if (animated) nativeSwipeEnded()
         runCatching { if (direction == PageTurnDirection.FORWARD) fragment.goForward(animated) else fragment.goBackward(animated) }
     }
 
     private fun capture() {
         captureJob?.cancel()
+        // The bitmap describes the screen as it is now; later control changes must not re-clip it.
+        turnBottomClip = liveBottomClip
         // A programmatic turn may have just closed the controls; a previous overlay may still be in
         // the last frame. Wait until the screen shows only the page before copying it.
         val waitFrames = if (overlayRecentlyShown || engine.source != PageTurnSource.SWIPE) 2 else 0
@@ -363,7 +413,14 @@ internal class PageTurnController(
             // Frame N draws the overlay; frame N+1 starts after it reached the screen.
             awaitFrame(); awaitFrame()
             if (!engine.isCurrent(token)) return@launch
-            action.turn?.let { silentTurn(it, token) }
+            if (action.turn != null) {
+                // A swipe cancelled in these two frames no longer wants its turn (D7).
+                val turn = engine.issueTurn(token)
+                if (turn != null) {
+                    turnBefore = fragment.currentLocator.value
+                    silentTurn(turn, token)
+                } else pageReady = true
+            }
             dispatch(engine.overlayShown())
         }
     }
@@ -373,20 +430,21 @@ internal class PageTurnController(
         pageReady = false
         val mark = visibleWebView()?.let { it to it.scrollX }
         val before = fragment.currentLocator.value
-        val turned = runCatching {
+        val accepted = runCatching {
             if (direction == PageTurnDirection.FORWARD) fragment.goForward(false) else fragment.goBackward(false)
         }.getOrDefault(false)
         readinessJob?.cancel()
         readinessJob = scope.launch {
+            var moved = accepted
             try {
-                if (turned) awaitPage(mark, before) else readinessPath = "no-turn"
+                moved = if (accepted) awaitPage(mark, before) else { readinessPath = "no-turn"; false }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { readinessPath = "error" }
             if (engine.isCurrent(token)) {
                 pageReady = true
-                // A refused silent turn never moved the page: a later cancel must not undo it.
-                if (!turned) DiagnosticLog.record("PT-1 silent ${direction.name.lowercase()} turn refused by Readium")
-                dispatch(engine.pageReady(token, moved = turned))
+                // A refused or silently dropped turn never moved the page: a later cancel must not undo it.
+                if (!moved) DiagnosticLog.record("PT-1 silent ${direction.name.lowercase()} turn did not move the page ($readinessPath)")
+                dispatch(engine.pageReady(token, moved = moved))
             }
         }
     }
@@ -394,26 +452,36 @@ internal class PageTurnController(
     /**
      * Readium turns asynchronously and announces the locator only after a 100 ms debounce, so watch
      * the page itself: a different visible WebView (chapter boundary) or a page-width scroll, then
-     * one visual-state callback so Chromium has drawn it. Bounded; the locator change is the fallback.
+     * one visual-state callback so Chromium has drawn it. Bounded; the locator change is the fallback
+     * only when no page could be watched. Returns whether the reader really moved (D1).
      */
-    private suspend fun awaitPage(mark: Pair<WebView, Int>?, before: Locator) {
+    private suspend fun awaitPage(mark: Pair<WebView, Int>?, before: Locator): Boolean {
         val width = container?.width ?: 0
+        fun landedPage(): WebView? {
+            val web = visibleWebView() ?: return null
+            return web.takeIf { mark != null && PageTurnRules.pageChanged(web !== mark.first, web.scrollX - mark.second, width) }
+        }
         var landed: WebView? = null
         if (mark != null) withTimeoutOrNull(400) {
             while (landed == null) {
                 awaitFrame()
-                val web = visibleWebView()
-                if (web != null && (web !== mark.first || abs(web.scrollX - mark.second) >= width * 0.4f)) landed = web
+                landed = landedPage()
             }
         }
-        landed?.let { web ->
-            withTimeoutOrNull(150) { visualState(web) }
-            awaitFrame()
-            readinessPath = "page"
-            return
+        if (landed == null) {
+            val locatorChanged = withTimeoutOrNull(600) { fragment.currentLocator.first { it != before } } != null
+            // Readium may have reported success and quietly done nothing (the start or end of the book).
+            landed = landedPage()
+            if (landed == null) {
+                readinessPath = if (locatorChanged) "locator" else "timeout"
+                return PageTurnRules.turnLanded(accepted = true, watched = mark != null, pageChanged = false, locatorChanged = locatorChanged)
+            }
         }
-        val changed = withTimeoutOrNull(600) { fragment.currentLocator.first { it != before } } != null
-        readinessPath = if (changed) "locator" else "timeout"
+        val web = landed ?: return false
+        withTimeoutOrNull(150) { visualState(web) }
+        awaitFrame()
+        readinessPath = "page"
+        return PageTurnRules.turnLanded(accepted = true, watched = true, pageChanged = true, locatorChanged = false)
     }
 
     private suspend fun visualState(web: WebView) = suspendCancellableCoroutine { continuation ->
@@ -422,11 +490,12 @@ internal class PageTurnController(
         })
     }
 
-    private fun animate(target: Float, millis: Long, interpolator: android.animation.TimeInterpolator, bounce: Boolean = false) {
+    private fun animate(target: Float, millis: Long, interpolator: android.animation.TimeInterpolator, bounce: Boolean = false, fade: Boolean = false) {
         stopAnimation()
         animationFrom = if (bounce) 0f else progress
         animationTo = target
         bouncing = bounce
+        fading = fade
         if (debuggable) frameMeter.animationStarted()
         animator.duration = millis
         animator.interpolator = interpolator
@@ -436,8 +505,15 @@ internal class PageTurnController(
 
     private var bouncing = false
 
+    /** The committed page is drawn after its slide ended: fade the page colour off it, no pop (D10). */
+    private fun fadeCover() {
+        coverFade = 1f
+        animate(progress, PageTurnRules.COVER_FADE_MILLIS, linear, fade = true)
+    }
+
     private fun frame(animation: ValueAnimator) {
         val fraction = animation.animatedFraction
+        if (fading) { coverFade = 1f - fraction; return }
         progress = if (bouncing) (PageTurnRules.RUBBER_BAND_MAX * sin(PI * fraction)).toFloat()
             else animationFrom + (animationTo - animationFrom) * fraction
         if (debuggable) frameMeter.animationFrame(System.nanoTime())
@@ -448,6 +524,7 @@ internal class PageTurnController(
         overlayVisible = false
         pageReady = true
         progress = 0f
+        coverFade = 0f
         rubberBand = false
         if (debuggable) DiagnosticLog.record("PT-1 turn style=${turnStyle.name.lowercase()}; snapshot=${snapshotMillis}ms via $snapshotMethod; " +
             "source=${source?.name?.lowercase()}; ready=$readinessPath; ${frameMeter.summary()}")
@@ -458,15 +535,43 @@ internal class PageTurnController(
         }
     }
 
+    /**
+     * Whether the page on screen is the first (backward) or last (forward) page of the book. The
+     * resource is read from the visible WebView's own page fragment, not from Readium's locator,
+     * which trails a turn by its 100 ms debounce: a quick turn back after crossing into the first or
+     * last chapter was taken as the book's edge and lost (D2, D13). The locator is only the fallback.
+     */
     private fun atBookEdge(direction: PageTurnDirection): Boolean {
         val web = visibleWebView() ?: return false
         if (web.canScrollHorizontally(PageTurnRules.scrollDirection(direction, rightToLeft()))) return false
-        val href = fragment.currentLocator.value.href.removeFragment()
         val order = publication.readingOrder
+        val href = (resourceOf(web) ?: fragment.currentLocator.value.href).removeFragment()
         val index = order.indexOfFirst { it.url().removeFragment() == href }
-        if (index < 0) return false
-        return if (direction == PageTurnDirection.FORWARD) index == order.lastIndex else index == 0
+        return PageTurnRules.atBookEdge(index, order.size, direction)
     }
+
+    /**
+     * The reading-order resource shown by [web]: the link of Readium's page fragment whose view holds
+     * it. Readium 3.4.0 keeps that link in the (internal) R2EpubPageFragment's arguments under "link";
+     * null whenever that is not found, and the caller then falls back to the locator.
+     */
+    private fun resourceOf(web: WebView) = runCatching {
+        fun holds(view: View?): Boolean {
+            var at: Any? = web
+            while (at is View) { if (at === view) return true; at = at.parent }
+            return false
+        }
+        fun find(fragments: List<Fragment>): Link? {
+            for (child in fragments) {
+                if (!child.isAdded || !holds(child.view)) continue
+                // The innermost fragment holding the WebView is its page.
+                find(child.childFragmentManager.fragments)?.let { return it }
+                child.arguments?.let { BundleCompat.getParcelable(it, "link", Link::class.java) }?.let { return it }
+            }
+            return null
+        }
+        if (fragment.isAdded) find(fragment.childFragmentManager.fragments)?.url() else null
+    }.getOrNull()
 
     /** The reflowable page on screen: the shown WebView with the largest visible area. */
     private fun visibleWebView(): WebView? {
