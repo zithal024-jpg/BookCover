@@ -213,4 +213,51 @@ class PageTurnEngineTest {
         assertEquals(paper, PageTurnRules.settleMillis(0f, 1f, 0f, 2 * width, paper))
         assertTrue(PageTurnRules.settleMillis(0.4f, 1f, 30_000f, 2 * width, paper) in PageTurnRules.MIN_SETTLE_MILLIS..paper)
     }
+
+    @Test fun cancelAfterARefusedSilentTurnUndoesNothing() {
+        // Readium refused the silent turn: undoing it would move the reader a page the wrong way.
+        val engine = PageTurnEngine()
+        engine.beginSwipe(FORWARD, atBookEdge = false, withOverlay = true)
+        val show = engine.captured(true) as PageTurnAction.ShowOverlay
+        engine.overlayShown()
+        assertEquals(PageTurnAction.None, engine.pageReady(show.token, moved = false))
+        assertFalse(engine.turned)
+        assertEquals(PageTurnAction.Settle(0f), engine.release(commit = false))
+        assertEquals(PageTurnAction.RemoveOverlay, engine.animationEnded())
+        assertEquals(0, engine.undos)
+        assertEquals(1, engine.refusedTurns)
+        assertFalse(engine.busy)
+    }
+
+    @Test fun refusedTurnLandingAfterTheCancelAnimationFinishesWithoutUndo() {
+        val engine = PageTurnEngine()
+        engine.beginSwipe(BACKWARD, atBookEdge = false, withOverlay = true)
+        val show = engine.captured(true) as PageTurnAction.ShowOverlay
+        engine.overlayShown()
+        engine.release(commit = false)
+        assertEquals(PageTurnAction.None, engine.animationEnded())
+        assertEquals(Phase.UNDO_WAITING, engine.phase)
+        assertEquals(PageTurnAction.RemoveOverlay, engine.pageReady(show.token, moved = false))
+        assertEquals(0, engine.undos)
+        assertFalse(engine.busy)
+    }
+
+    @Test fun refusedProgrammaticTurnStillRevealsAndARefusedUndoIsNotCountedAsRefusedTurn() {
+        val engine = PageTurnEngine()
+        engine.request(FORWARD, PageTurnSource.VOLUME_KEY, atBookEdge = false)
+        val show = engine.captured(true) as PageTurnAction.ShowOverlay
+        engine.overlayShown()
+        assertEquals("The same page underneath is revealed; nothing is stuck", PageTurnAction.Reveal, engine.pageReady(show.token, moved = false))
+        assertEquals(PageTurnAction.RemoveOverlay, engine.animationEnded())
+
+        engine.beginSwipe(FORWARD, atBookEdge = false, withOverlay = true)
+        val swipe = engine.captured(true) as PageTurnAction.ShowOverlay
+        engine.overlayShown()
+        engine.pageReady(swipe.token)
+        engine.release(commit = false)
+        val undo = engine.animationEnded() as PageTurnAction.Undo
+        assertEquals(PageTurnAction.RemoveOverlay, engine.pageReady(undo.token, moved = false))
+        assertEquals(1, engine.undos)
+        assertEquals(1, engine.refusedTurns)
+    }
 }

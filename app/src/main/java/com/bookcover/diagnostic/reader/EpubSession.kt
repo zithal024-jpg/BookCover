@@ -310,6 +310,8 @@ internal class EpubSession(
     /** Called before dispatching a display configuration change; never creates another navigator. */
     fun viewportChanging(onSettled: () -> Unit) {
         if (closed || !fragment.isAdded) { onSettled(); return }
+        // A turn mid-flight must not leave its snapshot over the resized page.
+        pageTurns.abort()
         viewportSettled = onSettled
         readingPace.pause()
         viewportContinuity.begin(typographyAnchor ?: currentLocator)
@@ -450,6 +452,7 @@ internal class EpubSession(
         chapters.invalidateLayout()
         // Persist the selection immediately, even if the reader leaves before a debounced reflow.
         readerPreferences.saveReadingTypography(comfort, fontScale, fontId)
+        pageTurns.abort() // Reflow repaginates under any snapshot; drop it first.
         typographyJob?.cancel()
         if (!typographyUpdating) typographyAnchorInvalidated = false
         typographyUpdating = true

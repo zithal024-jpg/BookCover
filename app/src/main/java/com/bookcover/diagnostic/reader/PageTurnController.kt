@@ -100,7 +100,8 @@ internal class PageTurnController(
     private var swipeDirection: PageTurnDirection? = null
     private var swipeHeld = false
     private var lastAlong = 0f
-    private var pending: Pair<PageTurnDirection, PageTurnSource>? = null
+    /** Turns asked for while one is still running, in order (a few quick key presses); see [turn]. */
+    private val pending = ArrayDeque<Pair<PageTurnDirection, PageTurnSource>>()
     private var turnSource: PageTurnSource? = null
     private var overlayRecentlyShown = false
 
@@ -136,13 +137,19 @@ internal class PageTurnController(
 
     /** A user turn from a tap, button or key: [path] was decided by the session. */
     fun turn(direction: PageTurnDirection, source: PageTurnSource, path: PageTurnPath) {
-        if (engine.busy) {
-            finishNow()
-            if (engine.busy) {
-                if (path == PageTurnPath.ENGINE) { pending = direction to source; return }
-                abort()
-            }
+        if (engine.busy) finishNow()
+        // Still busy (a finger holds a swipe, or a page is still landing), or earlier turns are
+        // queued: queue this one behind them. Aborting a live swipe here would keep its silent turn
+        // and add this one on top. Queued turns re-decide their path when they run.
+        if (engine.busy || pending.isNotEmpty()) {
+            if (pending.size < PageTurnRules.MAX_QUEUED_TURNS) pending.addLast(direction to source)
+            if (!engine.busy) runPending()
+            return
         }
+        startTurn(direction, source, path)
+    }
+
+    private fun startTurn(direction: PageTurnDirection, source: PageTurnSource, path: PageTurnPath) {
         when (path) {
             PageTurnPath.NATIVE -> turnDirectly(direction, animated = true)
             PageTurnPath.INSTANT -> turnDirectly(direction, animated = false)
@@ -153,6 +160,7 @@ internal class PageTurnController(
                 dispatch(engine.request(direction, source, atBookEdge(direction)))
             }
         }
+        if (!engine.busy) runPending()
     }
 
     override fun canTakeOverSwipe(dx: Float, longPressed: Boolean): Boolean =
@@ -215,7 +223,7 @@ internal class PageTurnController(
 
     /** Fold, rotation, layout change or close: drop the overlay now; BC-07 continuity keeps the position. */
     fun abort() {
-        pending = null
+        pending.clear()
         swipeHeld = false
         captureJob?.cancel(); captureJob = null
         readinessJob?.cancel(); readinessJob = null
@@ -255,7 +263,27 @@ internal class PageTurnController(
             PageTurnAction.RemoveOverlay -> removeOverlay()
             is PageTurnAction.TurnDirectly -> turnDirectly(action.direction, action.animated)
         }
+        if (!engine.busy) runPending()
     }
+
+    /**
+     * A turn queued while the engine was busy runs once it is idle, whichever way the last turn
+     * ended (overlay removed, direct turn, failed snapshot). Read at run time, so abort/close drop it.
+     */
+    private fun runPending() {
+        if (pending.isEmpty() || pendingPosted) return
+        pendingPosted = true
+        mainHandler.post {
+            pendingPosted = false
+            if (container == null) { pending.clear(); return@post }
+            // A swipe may have started meanwhile; its end drains the queue again.
+            if (engine.busy) return@post
+            val (direction, source) = pending.removeFirstOrNull() ?: return@post
+            startTurn(direction, source, PageTurnRules.path(conditions()))
+        }
+    }
+
+    private var pendingPosted = false
 
     private fun turnDirectly(direction: PageTurnDirection, animated: Boolean) {
         runCatching { if (direction == PageTurnDirection.FORWARD) fragment.goForward(animated) else fragment.goBackward(animated) }
@@ -356,7 +384,9 @@ internal class PageTurnController(
             catch (_: Exception) { readinessPath = "error" }
             if (engine.isCurrent(token)) {
                 pageReady = true
-                dispatch(engine.pageReady(token))
+                // A refused silent turn never moved the page: a later cancel must not undo it.
+                if (!turned) DiagnosticLog.record("PT-1 silent ${direction.name.lowercase()} turn refused by Readium")
+                dispatch(engine.pageReady(token, moved = turned))
             }
         }
     }
@@ -425,13 +455,6 @@ internal class PageTurnController(
             // The next snapshot must not copy this overlay; it is gone two frames from now.
             awaitFrame(); awaitFrame()
             if (!overlayVisible) overlayRecentlyShown = false
-        }
-        pending?.let { (direction, queuedSource) ->
-            pending = null
-            mainHandler.post {
-                val path = PageTurnRules.path(conditions())
-                if (!engine.busy) turn(direction, queuedSource, path)
-            }
         }
     }
 

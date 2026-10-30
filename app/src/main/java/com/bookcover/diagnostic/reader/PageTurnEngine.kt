@@ -64,6 +64,8 @@ internal object PageTurnRules {
     /** At the start or end of the book the page gives a little, then springs back. */
     const val RUBBER_BAND_MAX = 0.06f
     const val RUBBER_BAND_RESISTANCE = 0.25f
+    /** Turns asked for while one runs (quick key presses) wait in order; more than this are dropped. */
+    const val MAX_QUEUED_TURNS = 3
 
     fun path(conditions: PageTurnConditions): PageTurnPath = when {
         !conditions.reflowable || conditions.typographyUpdating || conditions.restoringViewport -> PageTurnPath.NATIVE
@@ -188,6 +190,8 @@ internal class PageTurnEngine {
     /** Silent turns issued, including undos; tests check that a cancel undoes exactly once. */
     var silentTurns = 0; private set
     var undos = 0; private set
+    /** Silent turns Readium refused; they are never undone. */
+    var refusedTurns = 0; private set
     var token = 0; private set
     private var swipe = false
     private var pendingRelease: Boolean? = null
@@ -251,14 +255,19 @@ internal class PageTurnEngine {
         else -> PageTurnAction.None
     }
 
-    /** The page under the overlay is drawn after the silent turn or undo identified by [token]. */
-    fun pageReady(token: Int): PageTurnAction {
+    /**
+     * The page under the overlay is drawn after the silent turn or undo identified by [token].
+     * [moved] is false when Readium refused the silent turn (`goForward/goBackward` returned false
+     * or threw): the page never left, so a later cancel must not "undo" it onto the wrong page.
+     */
+    fun pageReady(token: Int, moved: Boolean = true): PageTurnAction {
         if (!isCurrent(token) || pageReady) return PageTurnAction.None
         pageReady = true
+        if (!moved && phase != Phase.UNDOING && turned) { turned = false; refusedTurns++ }
         return when (phase) {
             Phase.AWAITING_PAGE -> { phase = Phase.REVEALING; PageTurnAction.Reveal }
             Phase.HOLDING, Phase.UNDOING -> finish()
-            Phase.UNDO_WAITING -> undo()
+            Phase.UNDO_WAITING -> if (turned) undo() else finish()
             else -> PageTurnAction.None
         }
     }

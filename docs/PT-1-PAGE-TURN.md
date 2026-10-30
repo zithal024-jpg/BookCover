@@ -79,10 +79,19 @@ page-turn with a toggle. Prompt: [review/PT-1-PAGE-TURN-PROMPT.md](review/PT-1-P
   Readium's animated turn).
 - **Fixed-layout books stay entirely native** (no swipe takeover; taps, buttons and keys keep
   `animated = true`). No FXL fixture has been checked on the phone; revisit after that.
-- **Fold, unfold or rotation mid-turn:** the overlay is dropped at once; BC-07 continuity restores
-  the passage. A turn already issued under a finger is kept.
-- A new turn during an animation jumps the old one to its end; a turn still waiting for its page
-  is queued (one slot).
+- **Fold, unfold or rotation mid-turn:** the overlay is dropped at once (layout-size change and
+  `viewportChanging`), and BC-07 continuity restores the passage. A turn already issued under a
+  finger is kept. If the fold comes within Readium's 100 ms locator debounce of that silent
+  turn, continuity may restore the page from before the turn instead. Either outcome is one
+  page, never two.
+- **Typography change:** any running turn is dropped before the reflow starts.
+- **Turns that arrive while one is running:** a running animation jumps to its end and the new
+  turn starts. If the old turn is still waiting for its page, or a finger still holds a swipe,
+  new turns wait in order, up to 3 (`MAX_QUEUED_TURNS`), and each runs when the engine is idle
+  again. Earlier builds kept one slot and aborted a held swipe for a non-engine turn, which could
+  turn two pages.
+- **Readium refuses a silent turn** (`goForward/goBackward` returns false or throws): the engine
+  records it, never undoes it on cancel, and logs `PT-1 silent … turn refused by Readium`.
 
 ## Toggle
 
@@ -90,6 +99,23 @@ page-turn with a toggle. Prompt: [review/PT-1-PAGE-TURN-PROMPT.md](review/PT-1-P
 `paperPageTurn` in the `"reader"` SharedPreferences. **Default: off** for the first build, so the
 owner can compare both styles; off = smoothed slide, on = paper curl (step 3). A turn keeps the
 style it started with.
+
+## Step 4 review (2026-10-30, code reading of `19cd1f4..171d03e`, no device)
+
+| # | Finding | Result |
+|---|---------|--------|
+| R1 | A cancelled swipe always undid its silent turn, even when Readium had refused that turn (`goForward/goBackward` returned false or threw). The undo would then move the reader one page the wrong way. | **Fixed.** `PageTurnEngine.pageReady(token, moved)` clears the "turned" state for a refused turn, so a cancel finishes without an undo. Three new `PageTurnEngineTest` cases. |
+| R2 | A turn from a key or tap that arrived while a finger held a swipe used `abort()` when its path was not the engine (e.g. reflow had just started). That kept the swipe's silent turn and added a second turn on top. | **Fixed.** A turn that arrives while the engine is busy is always queued and re-decides its path when it runs. |
+| R3 | The single queue slot was drained only when an overlay was removed. A turn queued behind an overlay-less turn (instant path, failed snapshot) could wait until the next turn. Quick repeated key presses also dropped all but the last. | **Fixed.** The queue holds up to 3 turns in order and is drained whenever the engine becomes idle. |
+| R4 | A queued turn was posted to the main thread and could run after the reader closed. | **Fixed.** It is read at run time and dropped once the controller is closed or aborted. |
+| R5 | A turn mid-flight was not dropped when a display change began (`viewportChanging`) or a typography reflow started. The layout listener caught most cases, but only after the resize. | **Fixed.** Both now call `pageTurns.abort()` first. |
+| R6 | `PageTurnPainter` was created inside the "overlay visible" branch, so each turn allocated a new mesh (22×30 arrays) and `BitmapShader`. | **Fixed.** It is remembered above the early return and reused across turns. |
+| R7 | Position saving: committed turns (silent `animated = false`) and undos both change `fragment.currentLocator`, which the unchanged collector in `EpubSession.attach` saves through `positions.submit` (LatestValueSaver). | No change needed (checked by reading; not exercised on the phone). |
+| R8 | Edge taps and the controls tap: taps never cross the 6 dp decision slop, so they reach Readium's `onTap` unchanged. Edge-tap log lines are kept. A tap that drifts 6 to 8 dp sideways is now taken as a short swipe, which cancels, where Chromium alone might have counted it as a tap. | Kept as designed (step-1 spike). Device QA should watch for missed edge taps. |
+| R9 | RTL: direction, screen sign and the book-edge `canScrollHorizontally` direction mirror correctly in unit tests. The RTL book-edge check on real Readium RTL pages is unverified. | Open: needs the RTL device test. |
+| R10 | Hard rules: no manifest, `INTERNET`, network, `build.gradle.kts`, `testBuildType`/`applicationIdSuffix` or QA host changes in the diff. | No change needed. |
+| R11 | Debuggable builds (including the owner's installed debug build) log one `PT-1 turn …` line per turn. The log is capped at 128 KB, so these lines can push out older ones. | Kept for QA as the prompt asks; quiet it to failures only after device QA. |
+| R12 | Going backward across a chapter boundary: readiness fires once a different WebView is visible and has drawn (bounded at 150 ms). If Readium positions that chapter at its last page only after it loads, the reveal could briefly show its first page. | Open: unverified. Check on the phone (chapter boundary, both directions). |
 
 ## Validation record
 
@@ -107,3 +133,30 @@ style it started with.
   reused) and `PageTurnFrameMeterTest`. See the PT-1 backlog row for the commit and build.
   **Not yet verified on the phone:** how the curl looks and feels, `drawVertices` with a bitmap
   shader and per-vertex colours on the Fold's GPU, and the frame-time numbers for ten turns.
+- Step 4 (2026-10-30): review fixes R1 to R6 above, plus 3 new `PageTurnEngineTest` cases (a
+  refused silent turn is never undone, whether it lands before or after the cancel animation,
+  and a refused undo is not counted as a refused turn). `scripts\Build.ps1 -TaskId pt1`:
+  BUILD SUCCESSFUL, exit 0. assembleDebug, testQaUnitTest **293/293** (0 skipped, failed or
+  errors; `PageTurnEngineTest` 17, `PageCurlGeometryTest` 12, `PageTurnFrameMeterTest` 3,
+  `PageTurnPreferencesTest` 2), lintDebug and lintQa all passed. Source snapshot
+  `57aff70f…913d`; evidence manifest
+  `%LOCALAPPDATA%\BookCoverBuild\tasks\pt1-c273832966f5eaef\evidence\57aff70f5fd6d603462d7066d56a7321d7c3006ef3a67a94d6c6d0599c98913d-4bd87669e9074eafaca30959bd49a607.json`.
+  The APK `output\BookCover-pt1-c273832966f5eaef.apk` is git-ignored and was **not installed**.
+
+## What is built and what is NOT verified
+
+**Built and checked on this PC (JVM only):** the engine state machine, the commit, cancel and
+rubber-band rules, RTL direction mapping, settle timing, curl geometry and mesh bounds, the
+frame meter, and the toggle preference (default off). The app compiles and passes lint.
+
+**Not verified at all.** This run had no device QA, no `Test-Device.ps1`, no adb and no install:
+- No on-phone test ran. The `NativeReaderTest` swipe, cancel and book-edge additions and the
+  RTL pair from the prompt are still to be written and run on the isolated `qa` build. The
+  existing swipe assertions now go through the engine and may need longer waits.
+- Unmeasured on the phone: PixelCopy success and snapshot time on the inner screen, the
+  readiness signal (R12), the 6 dp takeover against Chromium's slop (R8), and RTL book edges (R9).
+- Smoothness is unmeasured on the phone. There are no frame-time numbers for ten turns yet:
+  they come from the `PT-1 turn …` log lines during QA.
+- No owner observation: the look and feel of the slide and the paper curl, a cancelled half
+  swipe, chapter boundaries, Night theme and rotation mid-turn. Only the owner looking at the
+  phone can confirm the feel.

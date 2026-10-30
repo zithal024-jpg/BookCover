@@ -27,11 +27,12 @@ import androidx.compose.ui.unit.dp
  */
 @Composable
 internal fun PageTurnOverlay(controller: PageTurnController, pageColor: Color, bottomClip: Dp, modifier: Modifier = Modifier) {
+    // Kept across turns (above the early return), so its mesh arrays and shader are reused.
+    val painter = remember(controller) { PageTurnPainter() }
     if (!controller.overlayVisible) return
     val density = LocalDensity.current
     val shadowWidth = with(density) { 20.dp.toPx() }
     val clip = with(density) { bottomClip.toPx() }
-    val painter = remember { PageTurnPainter() }
     val color = pageColor.toArgb()
     val pixelDensity = density.density
     Spacer(modifier.drawBehind {
