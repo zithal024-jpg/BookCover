@@ -38,6 +38,39 @@ page-turn with a toggle. Prompt: [review/PT-1-PAGE-TURN-PROMPT.md](review/PT-1-P
    so the controller checks first: the visible WebView cannot scroll further that way and the
    current resource is the first/last reading-order item. Then the page rubber-bands, no turn.
 
+## Paper curl (step 3)
+
+1. **Geometry** (`PageCurlGeometry.kt`, pure Kotlin). The outgoing page wraps around a vertical
+   cylinder lying on the page, radius 11% of the page width kept between 60 and 100 dp (about
+   80 dp on the inner screen). Points before the fold line stay flat; points on the cylinder are
+   compressed toward its crest; past half a turn the paper lies back over the page, so the reader
+   sees its reverse. Paper never stretches. RTL forward turns (and LTR backward turns) are the
+   exact mirror image: the page peels from the left edge.
+2. **Finger-following.** During a swipe the lifted page edge stays under the finger. Progress 1
+   means the fold line has passed one radius beyond the far edge, so the whole page is off the
+   page area. Commit/cancel uses the same rules as the slide (30% of the width, or a 400 dp/s
+   fling over 25 dp; a fling back cancels). The full curl takes 340 ms (the slide 280 ms) because it
+   travels about twice as far; settling after release is shortened for a fast finger.
+3. **Drawing** (`PageTurnPainter.curl` in `PageTurnOverlay.kt`). A reusable `PageCurlMesh` of
+   22 columns × 30 rows: one flat column, ten on the front of the cylinder, ten on its back and one
+   for the paper lying back, so columns always sit exactly on the fold line and the crest. Drawn
+   with `Canvas.drawVertices` and a `BitmapShader` of the snapshot (hardware accelerated from
+   API 29; minSdk is 30). `drawBitmapMesh` was not used because it spaces texture coordinates
+   evenly and cannot put columns on the fold. Order: a soft shadow cast on the revealed page just
+   beyond the curl, the front of the page (darkening up to 22% toward the crest), a short shadow
+   beyond the folded-back flap's edge (deeper as it rises), then the back of the page: the mirrored
+   print washed with the page colour nudged 8% toward white at about 80% opacity, so it reads as
+   slightly lighter paper in every theme, Night included. A hint of perspective lets the raised
+   paper grow by at most 0.8% of the page height.
+4. **Performance.** Paints, gradients, the mesh arrays and index buffers are allocated once; the
+   `BitmapShader` is created once per snapshot bitmap (which is itself reused). Progress is read
+   only in the draw phase, so frames redraw without recomposing.
+5. **Frame-time counter** (`PageTurnFrameMeter`, debuggable builds only: debug and qa). Per turn
+   it counts animation frames and those over budget (an interval more than 1.5× the display's
+   refresh interval, i.e. at least one missed vsync: over 12.5 ms at 120 Hz), the worst frame, and
+   the average and worst UI-thread draw time of the overlay. It is appended to the existing
+   `PT-1 turn …` DiagnosticLog line. Render-thread GPU time is not visible to it.
+
 ## Fallbacks and limits
 
 - **Remove animations** (`ValueAnimator.areAnimatorsEnabled()` false): turns are instant
@@ -55,8 +88,8 @@ page-turn with a toggle. Prompt: [review/PT-1-PAGE-TURN-PROMPT.md](review/PT-1-P
 
 "Paper page turn" in More → Page turning (`testTag("paper-page-turn")`), saved as
 `paperPageTurn` in the `"reader"` SharedPreferences. **Default: off** for the first build, so the
-owner can compare both styles; off = smoothed slide. In step 2 the paper style still draws the
-slide; step 3 adds the curl in `PageTurnOverlay.kt`.
+owner can compare both styles; off = smoothed slide, on = paper curl (step 3). A turn keeps the
+style it started with.
 
 ## Validation record
 
@@ -67,4 +100,10 @@ slide; step 3 adds the curl in `PageTurnOverlay.kt`.
 - **Not yet verified:** nothing has run on the phone. PixelCopy speed on the inner screen, the
   readiness signal, Chromium's real touch slop, RTL edge detection and the feel all need the
   isolated QA run (step 4) and the owner's own observation. Debuggable builds log one
-  `PT-1 turn …` line per turn (snapshot time and method, readiness path, frames, slow frames).
+  `PT-1 turn …` line per turn (snapshot time and method, readiness path, frame-time counts).
+- Step 3 (2026-10-30): paper curl, `PageCurlGeometryTest` (flat at progress 0, fully off the page
+  at 1, bounds within the page plus the fold radius, each point moving one way only, mirror image
+  for the other direction, no stretching, edge under the finger, crest/back shading, mesh arrays
+  reused) and `PageTurnFrameMeterTest`. See the PT-1 backlog row for the commit and build.
+  **Not yet verified on the phone:** how the curl looks and feels, `drawVertices` with a bitmap
+  shader and per-vertex colours on the Fold's GPU, and the frame-time numbers for ten turns.

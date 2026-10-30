@@ -208,5 +208,9 @@ class PageTurnEngineTest {
         val fast = PageTurnRules.settleMillis(0.4f, 1f, 30_000f, width)
         assertTrue("A fast finger finishes sooner", fast < slow)
         assertTrue(fast >= PageTurnRules.MIN_SETTLE_MILLIS)
+        val paper = PageTurnRules.turnMillis(PageTurnStyle.PAPER)
+        assertEquals(PageTurnRules.TURN_MILLIS, PageTurnRules.turnMillis(PageTurnStyle.SLIDE))
+        assertEquals(paper, PageTurnRules.settleMillis(0f, 1f, 0f, 2 * width, paper))
+        assertTrue(PageTurnRules.settleMillis(0.4f, 1f, 30_000f, 2 * width, paper) in PageTurnRules.MIN_SETTLE_MILLIS..paper)
     }
 }

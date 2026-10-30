@@ -69,7 +69,9 @@ internal class PageTurnController(
     var pageReady by mutableStateOf(true); private set
     var progress by mutableFloatStateOf(0f); private set
     var snapshotVersion by mutableIntStateOf(0); private set
+    /** The setting; a turn keeps the style it started with ([turnStyle]) even if this changes. */
     var style by mutableStateOf(PageTurnStyle.SLIDE)
+    var turnStyle = PageTurnStyle.SLIDE; private set
     /** -1: the outgoing page moves left; +1: right. */
     var screenSign = -1; private set
     var rubberBand = false; private set
@@ -107,17 +109,30 @@ internal class PageTurnController(
     private var snapshotMillis = 0L
     private var snapshotMethod = ""
     private var readinessPath = ""
-    private var frames = 0
-    private var slowFrames = 0
-    private var lastFrameNanos = 0L
-    private var slowFrameNanos = 25_000_000L
+    private val frameMeter = PageTurnFrameMeter()
     private val visibleRect = Rect()
 
     fun attach(view: View) {
         container = view
-        val hz = view.display?.refreshRate ?: 60f
-        slowFrameNanos = (1.5e9 / hz.coerceAtLeast(30f)).toLong()
     }
+
+    /** Debug/QA builds time each overlay draw (UI-thread work); returns 0 when not measuring. */
+    fun drawStarted(): Long = if (debuggable) System.nanoTime() else 0L
+
+    fun drawFinished(started: Long) {
+        if (started != 0L) frameMeter.drawn(System.nanoTime() - started)
+    }
+
+    /** How far the turn travels from progress 0 to 1, in pixels (the curl travels about twice the width). */
+    private fun travel(): Float {
+        val view = container ?: return 0f
+        val width = view.width.toFloat()
+        if (turnStyle != PageTurnStyle.PAPER) return width
+        return PageCurlGeometry.maxTravel(width, travelRadius(width))
+    }
+
+    private fun travelRadius(width: Float): Float =
+        PageCurlGeometry.radiusFor(width, container?.resources?.displayMetrics?.density ?: 1f)
 
     /** A user turn from a tap, button or key: [path] was decided by the session. */
     fun turn(direction: PageTurnDirection, source: PageTurnSource, path: PageTurnPath) {
@@ -133,6 +148,7 @@ internal class PageTurnController(
             PageTurnPath.INSTANT -> turnDirectly(direction, animated = false)
             PageTurnPath.ENGINE -> {
                 turnSource = source
+                turnStyle = style
                 screenSign = PageTurnRules.screenSign(direction, rightToLeft())
                 dispatch(engine.request(direction, source, atBookEdge(direction)))
             }
@@ -152,6 +168,7 @@ internal class PageTurnController(
         if (engine.busy) { swipeHeld = true; return } // Still waiting on a page: decide on release.
         swipeHeld = false
         turnSource = PageTurnSource.SWIPE
+        turnStyle = style
         screenSign = PageTurnRules.screenSign(direction, rightToLeft())
         val path = PageTurnRules.path(conditions())
         dispatch(engine.beginSwipe(direction, atBookEdge(direction), withOverlay = path == PageTurnPath.ENGINE))
@@ -166,7 +183,12 @@ internal class PageTurnController(
         if (phase != PageTurnEngine.Phase.CAPTURING && phase != PageTurnEngine.Phase.DRAGGING) return
         val width = (container?.width ?: 0).toFloat()
         rubberBand = engine.atBookEdge
-        progress = if (engine.atBookEdge) PageTurnRules.rubberBand(lastAlong, width) else PageTurnRules.progress(lastAlong, width)
+        // The slide moves with the finger; the curl keeps the lifted page edge under the finger.
+        progress = when {
+            engine.atBookEdge -> PageTurnRules.rubberBand(lastAlong, width)
+            turnStyle == PageTurnStyle.PAPER -> PageCurlGeometry.progressForDrag(lastAlong, width, travelRadius(width))
+            else -> PageTurnRules.progress(lastAlong, width)
+        }
     }
 
     override fun swipeEnded(dx: Float, velocityX: Float, cancelled: Boolean) {
@@ -223,11 +245,10 @@ internal class PageTurnController(
             PageTurnAction.None -> Unit
             PageTurnAction.Capture -> capture()
             is PageTurnAction.ShowOverlay -> showOverlay(action)
-            PageTurnAction.Reveal -> animate(1f, PageTurnRules.TURN_MILLIS, reveal)
+            PageTurnAction.Reveal -> animate(1f, PageTurnRules.turnMillis(turnStyle), reveal)
             is PageTurnAction.Settle -> {
                 val toward = if (action.target >= progress) settleVelocity else -settleVelocity
-                val width = (container?.width ?: 0).toFloat()
-                animate(action.target, PageTurnRules.settleMillis(progress, action.target, toward, width), settle)
+                animate(action.target, PageTurnRules.settleMillis(progress, action.target, toward, travel(), PageTurnRules.turnMillis(turnStyle)), settle)
             }
             PageTurnAction.RubberBand -> { rubberBand = true; animate(0f, PageTurnRules.RUBBER_BAND_MILLIS, linear, bounce = true) }
             is PageTurnAction.Undo -> { onTurnUndone(); silentTurn(action.direction, action.token) }
@@ -307,7 +328,8 @@ internal class PageTurnController(
         if (!engine.isSwipe) progress = 0f
         overlayVisible = true
         overlayRecentlyShown = true
-        frames = 0; slowFrames = 0; lastFrameNanos = 0L; readinessPath = ""
+        readinessPath = ""
+        if (debuggable) frameMeter.startTurn(container?.display?.refreshRate ?: 60f)
         val token = action.token
         scope.launch {
             // Frame N draws the overlay; frame N+1 starts after it reached the screen.
@@ -375,6 +397,7 @@ internal class PageTurnController(
         animationFrom = if (bounce) 0f else progress
         animationTo = target
         bouncing = bounce
+        if (debuggable) frameMeter.animationStarted()
         animator.duration = millis
         animator.interpolator = interpolator
         animating = true
@@ -387,9 +410,7 @@ internal class PageTurnController(
         val fraction = animation.animatedFraction
         progress = if (bouncing) (PageTurnRules.RUBBER_BAND_MAX * sin(PI * fraction)).toFloat()
             else animationFrom + (animationTo - animationFrom) * fraction
-        val now = System.nanoTime()
-        if (lastFrameNanos != 0L) { frames++; if (now - lastFrameNanos > slowFrameNanos) slowFrames++ }
-        lastFrameNanos = now
+        if (debuggable) frameMeter.animationFrame(System.nanoTime())
     }
 
     private fun removeOverlay() {
@@ -398,8 +419,8 @@ internal class PageTurnController(
         pageReady = true
         progress = 0f
         rubberBand = false
-        if (debuggable) DiagnosticLog.record("PT-1 turn style=${style.name.lowercase()}; snapshot=${snapshotMillis}ms via $snapshotMethod; " +
-            "source=${source?.name?.lowercase()}; ready=$readinessPath; frames=$frames; slow=$slowFrames")
+        if (debuggable) DiagnosticLog.record("PT-1 turn style=${turnStyle.name.lowercase()}; snapshot=${snapshotMillis}ms via $snapshotMethod; " +
+            "source=${source?.name?.lowercase()}; ready=$readinessPath; ${frameMeter.summary()}")
         scope.launch {
             // The next snapshot must not copy this overlay; it is gone two frames from now.
             awaitFrame(); awaitFrame()

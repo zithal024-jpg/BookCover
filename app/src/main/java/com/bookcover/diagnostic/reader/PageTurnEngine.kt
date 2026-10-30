@@ -57,6 +57,8 @@ internal object PageTurnRules {
     const val FLING_DP_PER_SECOND = 400f
     const val FLING_MIN_DISTANCE_DP = 25f
     const val TURN_MILLIS = 280L
+    /** The curl travels about twice as far as the slide; a little longer keeps it unhurried. */
+    const val PAPER_TURN_MILLIS = 340L
     const val MIN_SETTLE_MILLIS = 120L
     const val RUBBER_BAND_MILLIS = 260L
     /** At the start or end of the book the page gives a little, then springs back. */
@@ -117,12 +119,15 @@ internal object PageTurnRules {
      * Settle time after the finger lifts: the remaining share of a full turn, shortened to keep up
      * with a fast finger (a decelerating curve starts at twice its average speed), never below 120 ms.
      */
-    fun settleMillis(from: Float, to: Float, velocityTowardTarget: Float, width: Float): Long {
+    fun settleMillis(from: Float, to: Float, velocityTowardTarget: Float, width: Float, fullMillis: Long = TURN_MILLIS): Long {
         val share = abs(to - from).coerceIn(0f, 1f)
-        var millis = TURN_MILLIS * share
+        var millis = fullMillis * share
         if (velocityTowardTarget > 0f && width > 0f) millis = minOf(millis, 2f * share * width / velocityTowardTarget * 1000f)
-        return millis.toLong().coerceIn(MIN_SETTLE_MILLIS, TURN_MILLIS)
+        return millis.toLong().coerceIn(MIN_SETTLE_MILLIS, fullMillis)
     }
+
+    /** Full-turn duration: the slide, or the paper curl, which travels about twice as far. */
+    fun turnMillis(style: PageTurnStyle): Long = if (style == PageTurnStyle.PAPER) PAPER_TURN_MILLIS else TURN_MILLIS
 }
 
 /** What the controller must do next. Each engine call returns exactly one action. */
