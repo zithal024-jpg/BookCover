@@ -424,9 +424,10 @@ class ReadingKeysAccessibilityTest {
     private fun settledOffset(): Double {
         var previous = offset()
         var stableSince = SystemClock.uptimeMillis()
-        waitFor("the page animation settles", timeout = 5_000) {
+        // PT-1: also wait for the page-turn engine's snapshot to leave the screen.
+        waitFor("the page animation settles", timeout = 8_000) {
             val current = offset()
-            if (abs(current - previous) > 0.5) stableSince = SystemClock.uptimeMillis()
+            if (abs(current - previous) > 0.5 || !main { reader.pageTurns.idle }) stableSince = SystemClock.uptimeMillis()
             previous = current
             SystemClock.uptimeMillis() - stableSince >= 240
         }

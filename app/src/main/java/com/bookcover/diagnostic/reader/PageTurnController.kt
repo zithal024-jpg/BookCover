@@ -191,6 +191,9 @@ internal class PageTurnController(
     /** A swipe the user has not committed yet: its silent turn is provisional (reading pace ignores it). */
     val swipeUncommitted get() = engine.swipeUncommitted
 
+    /** No turn running, on screen or queued. On-phone QA tests wait for this before the next gesture. */
+    val idle get() = !engine.busy && !overlayVisible && pending.isEmpty() && !pendingPosted
+
     override fun swipeStarted(dx: Float) {
         val direction = PageTurnRules.swipeDirection(dx, rightToLeft()) ?: return
         if (engine.busy) finishNow()

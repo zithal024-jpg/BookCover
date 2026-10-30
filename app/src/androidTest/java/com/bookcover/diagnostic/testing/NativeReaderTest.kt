@@ -462,13 +462,17 @@ class NativeReaderTest {
 
     private fun pageOffset(): Double = js("window.scrollX").toDouble()
 
-    /** A turn emits intermediate offsets during Readium's animation; assertions use its endpoint. */
+    /**
+     * A turn emits intermediate offsets during Readium's animation; assertions use its endpoint. PT-1:
+     * an engine turn moves the page at once under its snapshot and removes the snapshot about 300 ms
+     * later. Until then touches on the page are held back (D5), so also wait for the engine to be idle.
+     */
     private fun settledPageOffset(): Double {
         var previous = pageOffset()
         var stableSince = SystemClock.uptimeMillis()
-        waitFor("the native page animation reaches a stable endpoint", timeout = 5_000) {
+        waitFor("the page animation reaches a stable endpoint", timeout = 8_000) {
             val current = pageOffset()
-            if (abs(current - previous) > 0.5) stableSince = SystemClock.uptimeMillis()
+            if (abs(current - previous) > 0.5 || !main { reader.pageTurns.idle }) stableSince = SystemClock.uptimeMillis()
             previous = current
             SystemClock.uptimeMillis() - stableSince >= 240
         }
@@ -526,6 +530,10 @@ class NativeReaderTest {
         instrumentation.waitForIdleSync()
     }
 
+    /**
+     * 12 moves over 240 ms. Every caller drags 60% of the width, so the PT-1 engine commits it by
+     * both of its rules (past 30% of the width, and a fling), exactly like the native swipe did.
+     */
     private fun swipeViewport(start: Float, end: Float, y: Float) {
         val frame = webViewFrame()
         val down = SystemClock.uptimeMillis()

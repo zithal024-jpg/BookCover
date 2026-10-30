@@ -161,6 +161,40 @@ chapter-boundary reveal) from step 4. All of D1 to D13 still need the phone, esp
 - the D5 blocked taps;
 - the D2 page-fragment lookup on Readium 3.4.0 (if it fails, the locator fallback is the old behaviour).
 
+## Step 6 on-phone tests (2026-10-30, written and compiled, not yet run)
+
+New `app/src/androidTest/.../testing/PageTurnTest.kt` (isolated `qa` app, `ReaderTestActivity`, the
+generated `NativeEpubFixture` only; no new fixture was needed). Swipes are real touch events
+injected through the window, so they reach `PageTurnTouchLayer`. Each case runs with the paper
+toggle off and on:
+
+- swipes: start-of-book backward swipe stays put; a slow swipe past 30% (stopped before release,
+  so only distance decides) and a fast fling each turn exactly one page; a 12% stopped swipe
+  cancels with the offset and locator unchanged; a swipe back returns exactly one page;
+- chapter boundaries: forward lands on chapter 1's first page, backward on chapter 0's **last**
+  page; while the snapshot is revealing, the visible WebView is sampled each frame and must already
+  show that page (checks R12); a swipe at the end of the book leaves page and locator unchanged;
+- edge taps (one page each way), the centre controls tap, and the Previous/Next page buttons
+  (accessibility clicks) each move exactly one page;
+- RTL: start-of-book backward swipe stays put (part of R9), then one forward/back pair per style;
+- the "Paper page turn" row (`paper-page-turn`) turns on through accessibility, is saved, and is
+  still on (and used) in a new session;
+- ten swipes per style on the inner screen with frame totals; skipped when folded
+  (smallest width under 600 dp), like `ReadingLayoutTest`.
+
+Every engine turn waits for its `PT-1 turn …` DiagnosticLog line, asserts its style, source,
+snapshot method/time and frame counts, and prints them to logcat with tag `PT1QA`. Engine tests are
+skipped (not passed) if Android animations are off, since turns then take the instant path. A first
+reader screen that never attaches ("navigator is attached") is reopened once.
+
+Existing tests: `NativeReaderTest.swipeViewport` drags 60% of the width in 240 ms, so it still
+commits by both rules. `settledPageOffset` (NativeReaderTest) and `settledOffset`
+(ReadingKeysAccessibilityTest) now also wait for `PageTurnController.idle` (new read-only accessor):
+during a turn's last ~300 ms touches are held back from the hidden page (D5), so a centre tap or link
+tap right after a turn could otherwise be swallowed. Their timeout went from 5 to 8 s; no assertion
+changed. `scripts\Build.ps1` does not compile androidTest; `compileQaAndroidTestKotlin` and
+`assembleQaAndroidTest` were run separately with the same task environment and a BUILD reservation.
+
 ## Validation record
 
 - Step 2 (2026-10-30): `scripts\Build.ps1 -TaskId pt1` — see the PT-1 backlog row for the commit,
@@ -194,9 +228,8 @@ rubber-band rules, RTL direction mapping, settle timing, curl geometry and mesh 
 frame meter, and the toggle preference (default off). The app compiles and passes lint.
 
 **Not verified at all.** This run had no device QA, no `Test-Device.ps1`, no adb and no install:
-- No on-phone test ran. The `NativeReaderTest` swipe, cancel and book-edge additions and the
-  RTL pair from the prompt are still to be written and run on the isolated `qa` build. The
-  existing swipe assertions now go through the engine and may need longer waits.
+- No on-phone test ran. `PageTurnTest` (step 6) is written and compiles but has not run on the
+  phone; the existing swipe tests' waits were adjusted for the engine, also not yet run.
 - Unmeasured on the phone: PixelCopy success and snapshot time on the inner screen, the
   readiness signal (R12), the 6 dp takeover against Chromium's slop (R8), and RTL book edges (R9).
 - Smoothness is unmeasured on the phone. There are no frame-time numbers for ten turns yet:
