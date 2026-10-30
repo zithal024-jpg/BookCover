@@ -559,6 +559,66 @@ class ReadingPaceTest {
         assertTrue("Remembered pace should now lean live, got $learned", learned in 0.001..0.0013)
     }
 
+    @Test fun fastRememberedPaceFadesOutDuringSustainedSlowerReading() {
+        val page = 0.0005
+        val earlier = ReadingPace()
+        earlier.observe(0.1, 0L, true)
+        repeat(6) { index ->
+            assertTrue(earlier.observe(0.1 + (index + 1) * page, (index + 1) * 10_000L, true))
+        }
+        val pace = ReadingPace()
+        pace.seed(earlier.learnedRatePerMillis()!!)
+        pace.observe(0.2, 0L, true)
+        var previousEstimate = pace.remainingMinutes(0.2, 0.25)!!
+        repeat(100) { index ->
+            val count = index + 1
+            val point = 0.2 + count * page
+            assertTrue(pace.observe(point, count * 120_000L, true))
+            val estimate = pace.remainingMinutes(point, point + 100 * page)!!
+            assertTrue("Slower reading should steadily increase time left", estimate >= previousEstimate)
+            if (count == 19) assertTrue("Prior should be almost gone before expiry: $estimate", estimate in 190..200)
+            if (count >= 20) assertEquals("100 pages at 120s/page after $count live pages", 200, estimate)
+            previousEstimate = estimate
+        }
+        val reopened = ReadingPace()
+        reopened.seed(pace.learnedRatePerMillis()!!)
+        assertEquals("Reopening must remember the corrected pace", 200, reopened.remainingMinutes(0.3, 0.35))
+    }
+
+    @Test fun slowRememberedPaceFadesOutDuringSustainedFasterReading() {
+        val page = 0.0005
+        val priorRate = page / 120_000.0
+        val pace = ReadingPace()
+        pace.seed(priorRate)
+        pace.observe(0.2, 0L, true)
+        var previousEstimate = 200
+        repeat(100) { index ->
+            val count = index + 1
+            val point = 0.2 + count * page
+            assertTrue(pace.observe(point, count * 10_000L, true))
+            if (count <= 4) assertEquals("Keep the prior until 45s of live reading", priorRate, pace.currentRatePerMillis()!!, 1e-15)
+            val estimate = pace.remainingMinutes(point, point + 100 * page)!!
+            assertTrue("Faster reading should steadily reduce time left", estimate <= previousEstimate)
+            if (count == 19) assertTrue("Prior should be almost gone before expiry: $estimate", estimate in 17..20)
+            if (count >= 20) assertEquals("100 pages at 10s/page after $count live pages", 17, estimate)
+            previousEstimate = estimate
+        }
+    }
+
+    @Test fun matchingRememberedPaceStaysStableAsLiveReadingReplacesIt() {
+        val page = 0.0005
+        val rate = page / 120_000.0
+        val pace = ReadingPace()
+        pace.seed(rate)
+        pace.observe(0.2, 0L, true)
+        repeat(30) { index ->
+            val point = 0.2 + (index + 1) * page
+            assertTrue(pace.observe(point, (index + 1) * 120_000L, true))
+            assertEquals(200, pace.remainingMinutes(point, point + 100 * page))
+            assertEquals(rate, pace.currentRatePerMillis()!!, rate * 1e-9)
+        }
+    }
+
     @Test fun bookEstimateAllowsLongBooksButNotAbsurdOnes() {
         val pace = ReadingPace()
         pace.seed(perMinute(0.0002))

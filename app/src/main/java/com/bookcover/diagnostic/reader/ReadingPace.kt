@@ -35,7 +35,7 @@ internal class ReadingPace {
         const val MINUTE_ROUNDING_EPSILON = 1e-9
         const val MAX_REMAINING_MINUTES = 600
         const val MAX_BOOK_REMAINING_MINUTES = 100 * 60
-        /** The remembered pace counts as this many live samples; a full 20-sample window outweighs it 5:1. */
+        /** Initial remembered-pace weight; fades to zero over a full live-sample window. */
         const val PRIOR_WEIGHT = 4.0
         const val REMEMBER_MIN_SAMPLES = 6
         const val SETTLED_SAMPLES = 8
@@ -150,16 +150,20 @@ internal class ReadingPace {
     /** Time to the end of the publication; a long book may legitimately need many hours. */
     fun bookRemainingMinutes(point: Double): Int? = minutesBetween(point, 1.0, MAX_BOOK_REMAINING_MINUTES)
 
-    /** The remembered pace until enough live reading is measured, then a blend that leans further on
-     * live reading with each sample (which are themselves recency-weighted). */
+    /** The remembered pace until enough live reading is measured, then a blend of time per distance.
+     * Its influence fades out completely after a full window of measured reading. */
     fun currentRatePerMillis(): Double? {
         val prior = priorRatePerMillis
-        val live = liveRatePerMillis()
-        return when {
-            live == null -> prior
-            prior == null -> live
-            else -> (PRIOR_WEIGHT * prior + samples.size * live) / (PRIOR_WEIGHT + samples.size)
-        }
+        val live = liveRatePerMillis() ?: return prior
+        if (prior == null || samples.size >= MAX_SAMPLES) return live
+
+        val liveWeight = samples.size.toDouble()
+        val priorWeight = PRIOR_WEIGHT * (MAX_SAMPLES - liveWeight) / MAX_SAMPLES
+        // Average time per distance, not speed. Normalize inverse rates to keep even tiny
+        // remembered rates finite; an expired prior is never included in this calculation.
+        val scale = min(prior, live)
+        val scaledPace = priorWeight * (scale / prior) + liveWeight * (scale / live)
+        return scale * ((priorWeight + liveWeight) / scaledPace)
     }
 
     /** The pace worth remembering for later sessions; null until enough live reading has been
