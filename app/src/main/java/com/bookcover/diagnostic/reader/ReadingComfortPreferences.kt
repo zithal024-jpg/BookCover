@@ -42,3 +42,13 @@ internal fun ReadingComfort.epubPreferences(fontScale: Double, fontId: String, t
     columnCount = ColumnCount.ONE, scroll = false, publisherStyles = publisherStyles,
     theme = when (themeName) { "Night" -> Theme.DARK; "Sepia" -> Theme.SEPIA; else -> Theme.LIGHT },
 )
+
+/** PT-1: off for the first build so the owner can compare both styles; the smoothed slide is the default turn. */
+internal const val PAPER_PAGE_TURN_DEFAULT = false
+private const val PAPER_PAGE_TURN_KEY = "paperPageTurn"
+
+internal fun SharedPreferences.paperPageTurn(): Boolean = getBoolean(PAPER_PAGE_TURN_KEY, PAPER_PAGE_TURN_DEFAULT)
+
+internal fun SharedPreferences.savePaperPageTurn(enabled: Boolean) {
+    edit().putBoolean(PAPER_PAGE_TURN_KEY, enabled).apply()
+}

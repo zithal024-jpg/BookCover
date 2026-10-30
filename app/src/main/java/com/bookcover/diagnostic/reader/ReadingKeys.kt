@@ -1,6 +1,7 @@
 package com.bookcover.diagnostic.reader
 
 import android.app.Activity
+import android.view.ActionMode
 import android.view.KeyEvent
 import android.view.Window
 
@@ -10,6 +11,15 @@ internal fun Activity.installReadingKeyHandler(reader: () -> EpubSession?) {
     window.callback = object : Window.Callback by original {
         override fun dispatchKeyEvent(event: KeyEvent): Boolean =
             reader()?.dispatchKeyEvent(event) == true || original.dispatchKeyEvent(event)
+        // PT-1: swipes during text selection stay with Chromium's selection handles.
+        override fun onActionModeStarted(mode: ActionMode) {
+            reader()?.actionModeChanged(true)
+            original.onActionModeStarted(mode)
+        }
+        override fun onActionModeFinished(mode: ActionMode) {
+            reader()?.actionModeChanged(false)
+            original.onActionModeFinished(mode)
+        }
     }
 }
 

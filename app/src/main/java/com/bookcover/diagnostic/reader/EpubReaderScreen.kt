@@ -110,12 +110,15 @@ internal fun EpubReaderScreen(
             val screenWidth = maxWidth
             Surface(color = background, modifier = Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxSize()) {
+                    val pageBottom = (footerHeight - pageMargin).coerceAtLeast(0.dp)
                     AndroidView(
                         factory = { context ->
-                            FragmentContainerView(context).apply {
+                            // PT-1: the touch layer decides about swipes before Readium's views see them.
+                            val container = FragmentContainerView(context).apply {
                                 id = R.id.epub_reader_container
                                 doOnAttach { post { session.attach(this) } }
                             }
+                            PageTurnTouchLayer(context, container).apply { gestures = session.pageTurns }
                         },
                         update = {
                             // Keep screen-reader focus in the revealed controls instead of the book behind them.
@@ -123,10 +126,15 @@ internal fun EpubReaderScreen(
                                 else View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
                             it.descendantFocusability = if (overlayVisible) ViewGroup.FOCUS_BLOCK_DESCENDANTS else ViewGroup.FOCUS_AFTER_DESCENDANTS
                             if (overlayVisible && it.hasFocus()) it.clearFocus()
-                            if (it.isAttachedToWindow) session.attach(it)
+                            it.gestures = session.pageTurns
+                            if (it.isAttachedToWindow) session.attach(it.container)
                         },
-                        modifier = Modifier.fillMaxSize().padding(bottom = (footerHeight - pageMargin).coerceAtLeast(0.dp)),
+                        modifier = Modifier.fillMaxSize().padding(bottom = pageBottom),
                     )
+                    // Same bounds as the reader; the progress row below draws above it.
+                    PageTurnOverlay(session.pageTurns, background,
+                        bottomClip = if (overlayVisible) 0.dp else minOf(footerHeight, pageMargin),
+                        modifier = Modifier.fillMaxSize().padding(bottom = pageBottom))
                     if (!overlayVisible) Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().heightIn(min = 48.dp)
                         .onSizeChanged { footerHeight = with(density) { it.height.toDp() } }
                         .padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -390,6 +398,9 @@ private fun MoreSheet(session: EpubSession) {
             }
             Switch(checked = session.volumeKeys, onCheckedChange = null)
         }
+        SettingsSwitchRow("Paper page turn", session.paperPageTurn, session::changePaperPageTurn,
+            modifier = Modifier.testTag("paper-page-turn"),
+            summary = "Pages peel from the edge like paper and follow your finger. Off uses a plain slide.")
         Text("Keyboard: Page Down and Page Up follow book order. Left and right arrows follow the book's reading direction. Keys turn pages while controls are closed.",
             style = MaterialTheme.typography.bodySmall)
     }
