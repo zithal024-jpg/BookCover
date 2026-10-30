@@ -47,7 +47,8 @@ import org.readium.r2.shared.util.data.ReadError
 
 /** Remembered reading pace; reader settings stay in "reader". Test hosts clear this file. */
 internal const val PACE_PREFERENCES = "reading-pace"
-private const val USUAL_PACE_KEY = "usualPositionsPerMinute"
+// v2: paces saved by the first build were averaged as speeds and skewed fast; they are ignored.
+private const val USUAL_PACE_KEY = "v2:usualPositionsPerMinute"
 
 @OptIn(ExperimentalReadiumApi::class, DelicateReadiumApi::class)
 internal class EpubSession(
@@ -67,6 +68,9 @@ internal class EpubSession(
     // newly opened book starts from it instead of relearning from nothing.
     private val paceMemory = activity.getSharedPreferences(PACE_PREFERENCES, 0)
     private var paceRecalled = false
+    // The time from opening the book to the first page turn includes loading and finding one's
+    // place, so the opening page is never timed.
+    private var openingPage = true
     private val chapters = ReadingChapters(publication)
     val contentsEntries get() = chapters.entries
     var chapterStatus by mutableStateOf<ChapterStatus?>(null)
@@ -282,13 +286,17 @@ internal class EpubSession(
                     }
                 }
                 if (!paceRecalled) { paceRecalled = true; recallPace() }
-                if (readingPace.observe(resolved.globalPoint, SystemClock.elapsedRealtime(), !controlsVisible && resumed())) {
+                val eligible = !openingPage && !controlsVisible && resumed()
+                openingPage = false
+                if (readingPace.observe(resolved.globalPoint, SystemClock.elapsedRealtime(), eligible)) {
                     rememberPace()
-                    DiagnosticLog.record("Reading pace sample; pages until estimate=${readingPace.pagesUntilEstimate()}")
+                    val (millis, distance) = readingPace.lastSample() ?: (0L to 0.0)
+                    DiagnosticLog.record("Reading pace sample=${millis / 1_000}s, " +
+                        "${"%.5f".format(java.util.Locale.ROOT, distance)} of book; pages until estimate=${readingPace.pagesUntilEstimate()}")
                 }
                 chapterStatus = ChapterStatus(resolved.title, resolved.progression,
                     resolved.globalEnd?.let { readingPace.remainingMinutes(resolved.globalPoint, it) }, resolved.currentTocIndex,
-                    readingPace.bookRemainingMinutes(resolved.globalPoint), readingPace.pagesUntilEstimate())
+                    readingPace.bookRemainingMinutes(resolved.globalPoint), readingPace.pagesUntilEstimate(), readingPace.isRough())
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { /* Missing TOC/geometry must never interrupt reading or position saving. */ }
         }
@@ -310,7 +318,7 @@ internal class EpubSession(
         }.apply()
     }
 
-    private fun bookPaceKey() = "book:${book.id}"
+    private fun bookPaceKey() = "v2:book:${book.id}"
 
     fun goToContents(index: Int) {
         contentsEntries.getOrNull(index)?.let {

@@ -37,6 +37,8 @@ internal class ReadingPace {
         const val MAX_BOOK_REMAINING_MINUTES = 100 * 60
         /** The remembered pace counts as this many live samples; a full 20-sample window outweighs it 5:1. */
         const val PRIOR_WEIGHT = 4.0
+        const val REMEMBER_MIN_SAMPLES = 6
+        const val SETTLED_SAMPLES = 8
     }
 
     private data class Sample(val distance: Double, val elapsedMillis: Long) {
@@ -139,6 +141,9 @@ internal class ReadingPace {
         return true
     }
 
+    /** Diagnostics only: the latest accepted page's reading time and share of the book. */
+    fun lastSample(): Pair<Long, Double>? = samples.lastOrNull()?.let { it.elapsedMillis to it.distance }
+
     fun remainingMinutes(point: Double, chapterEnd: Double): Int? =
         minutesBetween(point, chapterEnd, MAX_REMAINING_MINUTES)
 
@@ -157,8 +162,13 @@ internal class ReadingPace {
         }
     }
 
-    /** The pace worth remembering for later sessions; null until live reading has been measured. */
-    fun learnedRatePerMillis(): Double? = if (liveRatePerMillis() == null) null else currentRatePerMillis()
+    /** The pace worth remembering for later sessions; null until enough live reading has been
+     * measured that a few quick flips cannot be saved as the reader's usual speed. */
+    fun learnedRatePerMillis(): Double? =
+        if (samples.size < REMEMBER_MIN_SAMPLES || liveRatePerMillis() == null) null else currentRatePerMillis()
+
+    /** True while the estimate rests on only a few live pages and no remembered pace. */
+    fun isRough(): Boolean = priorRatePerMillis == null && samples.size < SETTLED_SAMPLES
 
     private fun liveRatePerMillis(): Double? {
         val elapsed = samples.sumOf { it.elapsedMillis }
@@ -176,19 +186,27 @@ internal class ReadingPace {
         return ceil(minutes - MINUTE_ROUNDING_EPSILON).toInt().coerceAtLeast(1)
     }
 
+    /** Winsorized in time-per-distance, then averaged per distance read (recency-weighted).
+     * Remaining time is distance × time-per-distance, so averaging speeds instead let a couple of
+     * quick page flips (4s and 20s beside a 113s page, owner's phone 2026-10-30) cut the estimate
+     * to about a sixth of real reading time. */
     private fun estimatedRatePerMillis(): Double {
         val count = samples.size
         val weighted = samples.mapIndexed { index, sample ->
-            sample.ratePerMillis to RECENCY_DECAY.pow((count - 1 - index).toDouble())
+            sample.elapsedMillis / sample.distance to RECENCY_DECAY.pow((count - 1 - index).toDouble())
         }
-        val medianRate = weightedMedian(weighted)
-        val mad = weightedMedian(weighted.map { (rate, weight) -> abs(rate - medianRate) to weight })
-        val spread = max(MAD_SPREAD_FACTOR * mad, MIN_RELATIVE_SPREAD * medianRate)
-        val low = max(MIN_CLAMP_RATIO * medianRate, medianRate - spread)
-        val high = min(MAX_CLAMP_RATIO * medianRate, medianRate + spread)
-        val totalWeight = weighted.sumOf { it.second }
-        if (totalWeight <= 0.0) return 0.0
-        return weighted.sumOf { (rate, weight) -> weight * rate.coerceIn(low, high) } / totalWeight
+        val medianPace = weightedMedian(weighted)
+        val mad = weightedMedian(weighted.map { (pace, weight) -> abs(pace - medianPace) to weight })
+        val spread = max(MAD_SPREAD_FACTOR * mad, MIN_RELATIVE_SPREAD * medianPace)
+        val low = max(medianPace / MAX_CLAMP_RATIO, medianPace - spread)
+        val high = min(medianPace / MIN_CLAMP_RATIO, medianPace + spread)
+        val distanceWeight = samples.indices.sumOf { weighted[it].second * samples[it].distance }
+        if (distanceWeight <= 0.0) return 0.0
+        val meanPace = samples.indices.sumOf { index ->
+            val (pace, weight) = weighted[index]
+            weight * samples[index].distance * pace.coerceIn(low, high)
+        } / distanceWeight
+        return if (meanPace > 0.0) 1.0 / meanPace else 0.0
     }
 
     private fun weightedMedianRate(): Double {

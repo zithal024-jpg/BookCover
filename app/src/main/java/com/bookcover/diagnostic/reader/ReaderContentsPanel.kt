@@ -48,6 +48,8 @@ internal fun ChapterProgressSummary(status: ChapterStatus?) {
             if (!learning) {
                 Text(timeLeftText(status.bookRemainingMinutes, "book"), style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.testTag("book-time-left"))
+                if (status.roughEstimate) Text("Rough estimate: improves as you read more pages",
+                    style = MaterialTheme.typography.labelSmall, modifier = Modifier.testTag("time-left-rough"))
             }
         }
     }

@@ -621,6 +621,29 @@ class ReadingPaceTest {
         assertTrue(pace.observe(0.352, 3_675_000L, true))
     }
 
+    @Test fun quickFlipsBesideRealReadingDoNotShrinkTheEstimateSixfold() {
+        // Owner's phone 2026-10-30: equal pages read in 4.4s, 20s and 113s. Averaging speeds
+        // implied ~17s per page; per-distance averaging of Winsorized page times gives ~28s, and
+        // further real pages quickly pull it towards the 113s reading pace.
+        val page = 0.0005
+        val pace = ReadingPace()
+        var point = 0.01
+        var now = 0L
+        pace.observe(point, now, true)
+        for (seconds in listOf(4.4, 20.0, 113.0)) {
+            point += page; now += (seconds * 1_000).toLong(); pace.observe(point, now, true)
+        }
+        val early = pace.remainingMinutes(point, point + 100 * page)!!
+        assertTrue("100 pages should take well over 28 minutes at first, got $early", early >= 45)
+        assertTrue(pace.isRough())
+        assertNull("Too few pages to be remembered", pace.learnedRatePerMillis())
+        repeat(5) { point += page; now += 110_000L; pace.observe(point, now, true) }
+        val settled = pace.remainingMinutes(point, point + 100 * page)!!
+        assertTrue("After more real pages, 100 pages should approach 3 hours, got $settled", settled in 150..200)
+        assertTrue(!pace.isRough())
+        assertNotNull(pace.learnedRatePerMillis())
+    }
+
     @Test fun learningTextCountsDownPages() {
         assertEquals("Time left: learning your reading pace (about 3 more pages)", learningText(3))
         assertEquals("Time left: learning your reading pace (about 1 more page)", learningText(1))

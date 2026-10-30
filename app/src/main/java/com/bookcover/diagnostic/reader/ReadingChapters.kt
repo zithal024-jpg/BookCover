@@ -17,6 +17,7 @@ internal data class ChapterStatus(
     val currentTocIndex: Int?,
     val bookRemainingMinutes: Int? = null,
     val pagesUntilEstimate: Int = 0,
+    val roughEstimate: Boolean = false,
 )
 
 /** Readium adapter: the arithmetic and pace policy live in independently testable pure models. */
