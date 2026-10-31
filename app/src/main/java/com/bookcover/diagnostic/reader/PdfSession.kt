@@ -155,7 +155,7 @@ internal class PdfSession(
         return pageKeys.handle(key, down = event.action == KeyEvent.ACTION_DOWN,
             repeated = event.repeatCount > 0, canNavigate = ready && event.hasNoModifiers(),
             volumeEnabled = activity.getSharedPreferences("reader", 0).getBoolean("volumeKeys", false),
-            rightToLeft = fragment.settings.value.readingProgression == ReadingProgression.RTL) { turn ->
+            rightToLeft = fragment.isAdded && fragment.settings.value.readingProgression == ReadingProgression.RTL) { turn ->
             when (turn) { ReadingPageTurn.NEXT -> next(); ReadingPageTurn.PREVIOUS -> previous() }
         }
     }

@@ -86,7 +86,8 @@ class PdfReaderIntegrationTest {
         scenario = ActivityScenario.launch(MainActivity::class.java)
         waitFor("the library loads") { !onActivity { it.busyForTests } }
         val file = File(fixtureFolder, "three-pages.pdf")
-        PdfDocument().use { document ->
+        val document = PdfDocument()
+        try {
             for (page in 1..3) {
                 val item = document.startPage(PdfDocument.PageInfo.Builder(400, 600, page).create())
                 item.canvas.drawColor(if (page == 1) Color.WHITE else if (page == 2) Color.LTGRAY else Color.YELLOW)
@@ -94,7 +95,7 @@ class PdfReaderIntegrationTest {
                 document.finishPage(item)
             }
             file.outputStream().use(document::writeTo)
-        }
+        } finally { document.close() }
         return runBlocking { onActivity { it.libraryForTests }.import(Uri.fromFile(file)).first }
     }
 
