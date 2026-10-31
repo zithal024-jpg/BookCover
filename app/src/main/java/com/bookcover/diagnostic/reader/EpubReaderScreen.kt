@@ -78,6 +78,8 @@ internal fun EpubReaderScreen(
     val pageMargin = if (session.supportsTypography) dimensionResource(NavigatorR.dimen.readium_navigator_epub_vertical_padding) else 0.dp
     val density = LocalDensity.current
     val overlayVisible = session.controlsVisible || contentsVisible || bookmarkDraft != null
+    // PT-1: the same condition keeps swipes native while any panel is over the page (D12).
+    SideEffect { session.panelsOpen = overlayVisible }
     val night = session.themeName == "Night"
     val background = readerBackground(session.themeName)
     // One palette with the library: same accent, light or dark to match the page.
@@ -110,12 +112,15 @@ internal fun EpubReaderScreen(
             val screenWidth = maxWidth
             Surface(color = background, modifier = Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxSize()) {
+                    val pageBottom = (footerHeight - pageMargin).coerceAtLeast(0.dp)
                     AndroidView(
                         factory = { context ->
-                            FragmentContainerView(context).apply {
+                            // PT-1: the touch layer decides about swipes before Readium's views see them.
+                            val container = FragmentContainerView(context).apply {
                                 id = R.id.epub_reader_container
                                 doOnAttach { post { session.attach(this) } }
                             }
+                            PageTurnTouchLayer(context, container).apply { gestures = session.pageTurns }
                         },
                         update = {
                             // Keep screen-reader focus in the revealed controls instead of the book behind them.
@@ -123,10 +128,15 @@ internal fun EpubReaderScreen(
                                 else View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
                             it.descendantFocusability = if (overlayVisible) ViewGroup.FOCUS_BLOCK_DESCENDANTS else ViewGroup.FOCUS_AFTER_DESCENDANTS
                             if (overlayVisible && it.hasFocus()) it.clearFocus()
-                            if (it.isAttachedToWindow) session.attach(it)
+                            it.gestures = session.pageTurns
+                            if (it.isAttachedToWindow) session.attach(it.container)
                         },
-                        modifier = Modifier.fillMaxSize().padding(bottom = (footerHeight - pageMargin).coerceAtLeast(0.dp)),
+                        modifier = Modifier.fillMaxSize().padding(bottom = pageBottom),
                     )
+                    // Same bounds as the reader; the progress row below draws above it.
+                    PageTurnOverlay(session.pageTurns, background,
+                        bottomClip = if (overlayVisible) 0.dp else minOf(footerHeight, pageMargin),
+                        modifier = Modifier.fillMaxSize().padding(bottom = pageBottom))
                     if (!overlayVisible) Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().heightIn(min = 48.dp)
                         .onSizeChanged { footerHeight = with(density) { it.height.toDp() } }
                         .padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -294,6 +304,11 @@ private fun TextSheet(session: EpubSession) {
         onValueChangeFinished = { if (draftSize.toDouble() != session.fontScale) session.changeFont(draftSize.toDouble()) },
         valueRange = 0.8f..2.2f, steps = 13, enabled = canChangeType,
         modifier = Modifier.testTag("text-size-slider").semantics { contentDescription = "EPUB text size" })
+    // PT-1: where the owner looks for how pages look and move (it was hidden under More before). Below
+    // text size, so page colour and text size stay first even with large system text (H3).
+    SettingsSwitchRow("Paper page turn", session.paperPageTurn, session::changePaperPageTurn,
+        modifier = Modifier.testTag("paper-page-turn"), enabled = session.supportsTypography,
+        summary = if (session.supportsTypography) "Pages curl like paper under your finger." else "Fixed-layout books use the standard turn.")
     SettingsSwitchRow("Publisher styles", session.comfort.publisherStyles, session::changePublisherStyles,
         modifier = Modifier.testTag("publisher-styles"), enabled = canChangeType,
         summary = "Keep the book's fonts, spacing, indents and alignment. Text size still applies.")

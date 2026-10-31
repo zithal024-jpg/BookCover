@@ -10,7 +10,9 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
+import android.animation.ValueAnimator
 import android.os.SystemClock
+import androidx.compose.ui.graphics.toArgb
 import android.view.View
 import android.view.KeyEvent
 import com.bookcover.diagnostic.DiagnosticLog
@@ -87,6 +89,11 @@ internal class EpubSession(
             }
             visibleControls = value
         }
+    /**
+     * The screen shows a panel over the page (controls, Contents, bookmark editor). Set by
+     * `EpubReaderScreen`; swipes are never taken over then, or the panel would be in the snapshot (D12).
+     */
+    var panelsOpen = false
     var progress by mutableDoubleStateOf(book.progression)
     var fontScale by mutableDoubleStateOf(ReadingTextSize.percent(initialFontScale) / 100.0)
         private set
@@ -99,6 +106,11 @@ internal class EpubSession(
     private val readerPreferences = activity.getSharedPreferences("reader", 0)
     var volumeKeys by mutableStateOf(readerPreferences.getBoolean("volumeKeys", false))
         private set
+    /** PT-1: paper curl. Off (the default): every page turn is Readium's own, exactly as before PT-1. */
+    var paperPageTurn by mutableStateOf(readerPreferences.paperPageTurn())
+        private set
+    /** Text selection toolbar is open: swipes stay with Readium/Chromium selection handling. */
+    private var actionModeActive = false
     private val pageKeys = ReadingKeyPolicy()
     private var keyTurnJob: Job? = null
     var comfort by mutableStateOf(readerPreferences.readingComfort())
@@ -130,6 +142,8 @@ internal class EpubSession(
     private fun resumed() = activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
     private val layoutListener = View.OnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
         if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) {
+            // Fold, unfold or rotation mid-turn: drop the snapshot; continuity restores the passage.
+            pageTurns.abort()
             readingPace.pause()
             chapters.invalidateLayout()
             currentLocator?.let(::refreshChapter)
@@ -150,6 +164,8 @@ internal class EpubSession(
         catch (error: Exception) { DiagnosticLog.record("Reading position save failed: ${error.javaClass.simpleName}") }
     }
     val fragment: EpubNavigatorFragment
+    /** PT-1 page-turn engine: every user turn (swipe, edge tap, button, key) goes through [turnPage]. */
+    val pageTurns: PageTurnController
 
     init {
         val factory = EpubNavigatorFactory(publication).createFragmentFactory(
@@ -188,10 +204,20 @@ internal class EpubSession(
             },
         )
         fragment = factory.instantiate(activity.classLoader, EpubNavigatorFragment::class.java.name) as EpubNavigatorFragment
+        pageTurns = PageTurnController(activity, publication, fragment,
+            conditions = ::turnConditions,
+            controlsVisible = { controlsVisible || panelsOpen },
+            selectionActive = { actionModeActive },
+            rightToLeft = { fragment.settings.value.readingProgression == ReadingProgression.RTL },
+            pageColor = { readerBackground(themeName).toArgb() },
+            onSwipeTurn = { noteUserTurn(PageTurnSource.SWIPE) },
+            onBlockedTap = ::blockedTap,
+        )
         activity.lifecycle.addObserver(readingLifecycle)
         fragment.addInputListener(object : InputListener {
             override fun onDrag(event: DragEvent): Boolean {
-                // Observe intent only: native Readium/ViewPager remains the sole swipe handler.
+                // Observe intent only. Swipes the PT-1 touch layer takes never reach Readium; the
+                // rest (vertical, selection, fixed layout, controls open) stay native as before.
                 // A user who navigates during reflow must not be pulled back by an old anchor.
                 if (event.type == DragEvent.Type.Start) {
                     readerActive()
@@ -218,8 +244,8 @@ internal class EpubSession(
                         controlsVisible = !controlsVisible
                         DiagnosticLog.record("EPUB controls ${if (controlsVisible) "revealed" else "hidden"}; same host activity")
                     }
-                    ReadingTapAction.PREVIOUS -> { invalidateViewportAnchor(); pendingContentsIndex = null; fragment.goBackward(animated = true); DiagnosticLog.record("EPUB edge completed tap: backward") }
-                    ReadingTapAction.NEXT -> { invalidateViewportAnchor(); pendingContentsIndex = null; fragment.goForward(animated = true); DiagnosticLog.record("EPUB edge completed tap: forward") }
+                    ReadingTapAction.PREVIOUS -> { turnPage(PageTurnDirection.BACKWARD, PageTurnSource.EDGE_TAP); DiagnosticLog.record("EPUB edge completed tap: backward") }
+                    ReadingTapAction.NEXT -> { turnPage(PageTurnDirection.FORWARD, PageTurnSource.EDGE_TAP); DiagnosticLog.record("EPUB edge completed tap: forward") }
                     ReadingTapAction.NONE -> return false
                 }
                 return true
@@ -231,6 +257,7 @@ internal class EpubSession(
         if (closed || activity.isDestroyed || fragment.isAdded || activity.supportFragmentManager.isStateSaved) return
         activity.supportFragmentManager.beginTransaction().replace(container.id, fragment, "bookcover-epub").commitNow()
         fragment.view?.addOnLayoutChangeListener(layoutListener)
+        pageTurns.attach(container)
         if (activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) readingTime.resume(SystemClock.elapsedRealtime())
         readingTimeJob = activity.lifecycleScope.launch {
             // Save running time now and then, so a crash or a killed process loses at most this much.
@@ -286,13 +313,17 @@ internal class EpubSession(
                     }
                 }
                 if (!paceRecalled) { paceRecalled = true; recallPace() }
-                val eligible = !openingPage && !controlsVisible && resumed()
-                openingPage = false
-                if (readingPace.observe(resolved.globalPoint, SystemClock.elapsedRealtime(), eligible)) {
-                    rememberPace()
-                    val (millis, distance) = readingPace.lastSample() ?: (0L to 0.0)
-                    DiagnosticLog.record("Reading pace sample=${millis / 1_000}s, " +
-                        "${"%.5f".format(java.util.Locale.ROOT, distance)} of book; pages until estimate=${readingPace.pagesUntilEstimate()}")
+                // A swipe's silent turn is provisional until it commits: a cancel undoes it, and the
+                // page must not yield a reading-pace sample twice (step 5 review, D9).
+                if (!pageTurns.swipeUncommitted) {
+                    val eligible = !openingPage && !controlsVisible && resumed()
+                    openingPage = false
+                    if (readingPace.observe(resolved.globalPoint, SystemClock.elapsedRealtime(), eligible)) {
+                        rememberPace()
+                        val (millis, distance) = readingPace.lastSample() ?: (0L to 0.0)
+                        DiagnosticLog.record("Reading pace sample=${millis / 1_000}s, " +
+                            "${"%.5f".format(java.util.Locale.ROOT, distance)} of book; pages until estimate=${readingPace.pagesUntilEstimate()}")
+                    }
                 }
                 chapterStatus = ChapterStatus(resolved.title, resolved.progression,
                     resolved.globalEnd?.let { readingPace.remainingMinutes(resolved.globalPoint, it) }, resolved.currentTocIndex,
@@ -335,9 +366,12 @@ internal class EpubSession(
     /** Called before dispatching a display configuration change; never creates another navigator. */
     fun viewportChanging(onSettled: () -> Unit) {
         if (closed || !fragment.isAdded) { onSettled(); return }
+        // A turn mid-flight must not leave its snapshot over the resized page, and a swipe the user
+        // had not committed is turned back: continuity restores the page from before it (D8).
+        val revert = pageTurns.abort()
         viewportSettled = onSettled
         readingPace.pause()
-        viewportContinuity.begin(typographyAnchor ?: currentLocator)
+        viewportContinuity.begin(typographyAnchor ?: revert ?: currentLocator)
         restoreViewportWhenSettled()
     }
 
@@ -475,6 +509,7 @@ internal class EpubSession(
         chapters.invalidateLayout()
         // Persist the selection immediately, even if the reader leaves before a debounced reflow.
         readerPreferences.saveReadingTypography(comfort, fontScale, fontId)
+        pageTurns.abort() // Reflow repaginates under any snapshot; drop it first.
         typographyJob?.cancel()
         if (!typographyUpdating) typographyAnchorInvalidated = false
         typographyUpdating = true
@@ -548,6 +583,57 @@ internal class EpubSession(
         readerPreferences.edit().putBoolean("volumeKeys", enabled).apply()
     }
 
+    fun changePaperPageTurn(enabled: Boolean) {
+        paperPageTurn = enabled
+        readerPreferences.savePaperPageTurn(enabled)
+    }
+
+    /** The window's text-selection toolbar opened or closed (see `installReadingKeyHandler`). */
+    fun actionModeChanged(active: Boolean) { actionModeActive = active }
+
+    /**
+     * PT-1: the single entry point for every user page turn. Side effects live in [noteUserTurn] so
+     * they cannot drift between swipes, edge taps, buttons and keys.
+     */
+    fun turnPage(direction: PageTurnDirection, source: PageTurnSource) {
+        if (closed || !fragment.isAdded) return
+        noteUserTurn(source)
+        pageTurns.turn(direction, source, PageTurnRules.path(turnConditions()))
+    }
+
+    /** A tap that landed while a turn's snapshot hid the page underneath (D5): edge taps still turn. */
+    private fun blockedTap(x: Float, y: Float) {
+        if (closed) return
+        val view = fragment.view ?: return
+        readerActive()
+        when (readingTapAction(x, y, view.width.toFloat(), view.height.toFloat(), view.resources.displayMetrics.density,
+            edgeTaps, controlsVisible, typographyUpdating, hasProtectedTarget = false,
+            rightToLeft = fragment.settings.value.readingProgression == ReadingProgression.RTL)) {
+            ReadingTapAction.PREVIOUS -> { turnPage(PageTurnDirection.BACKWARD, PageTurnSource.EDGE_TAP); DiagnosticLog.record("EPUB edge completed tap: backward") }
+            ReadingTapAction.NEXT -> { turnPage(PageTurnDirection.FORWARD, PageTurnSource.EDGE_TAP); DiagnosticLog.record("EPUB edge completed tap: forward") }
+            // Links, selection and the controls toggle wait until the page under the finger is the one shown.
+            ReadingTapAction.CONTROLS, ReadingTapAction.NONE -> Unit
+        }
+    }
+
+    private fun noteUserTurn(source: PageTurnSource) {
+        readerActive()
+        // A user who navigates during reflow must not be pulled back by an old anchor.
+        invalidateViewportAnchor()
+        pendingContentsIndex = null
+        if (typographyUpdating) typographyAnchorInvalidated = true
+        // Page buttons live in the controls; close them first so they never appear in the snapshot.
+        if (source == PageTurnSource.BUTTON) controlsVisible = false
+    }
+
+    private fun turnConditions() = PageTurnConditions(
+        paperPageTurn = paperPageTurn,
+        reflowable = supportsTypography,
+        typographyUpdating = typographyUpdating,
+        restoringViewport = restoringViewport || viewportContinuity.pending != null,
+        animationsEnabled = ValueAnimator.areAnimatorsEnabled(),
+    )
+
     /** Activity dispatch reaches this before WebView or Android's volume handling. */
     fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val key = event.readingPageKey() ?: return false
@@ -563,7 +649,12 @@ internal class EpubSession(
                 // Text selection belongs to the reader's selection toolbar, not page navigation.
                 try {
                     if (fragment.currentSelection() == null && ready()) {
-                        when (turn) { ReadingPageTurn.NEXT -> next(); ReadingPageTurn.PREVIOUS -> previous() }
+                        val source = if (key == ReadingPageKey.VOLUME_UP || key == ReadingPageKey.VOLUME_DOWN)
+                            PageTurnSource.VOLUME_KEY else PageTurnSource.KEYBOARD
+                        when (turn) {
+                            ReadingPageTurn.NEXT -> turnPage(PageTurnDirection.FORWARD, source)
+                            ReadingPageTurn.PREVIOUS -> turnPage(PageTurnDirection.BACKWARD, source)
+                        }
                     }
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (error: Exception) {
@@ -579,12 +670,16 @@ internal class EpubSession(
         fragment.submitPreferences(preferences())
     }
 
-    fun next() { invalidateViewportAnchor(); pendingContentsIndex = null; fragment.goForward(animated = true); controlsVisible = false }
-    fun previous() { invalidateViewportAnchor(); pendingContentsIndex = null; fragment.goBackward(animated = true); controlsVisible = false }
+    /** Page buttons in the controls. */
+    fun next() = turnPage(PageTurnDirection.FORWARD, PageTurnSource.BUTTON)
+    fun previous() = turnPage(PageTurnDirection.BACKWARD, PageTurnSource.BUTTON)
     val restorationLocator: Locator? get() = viewportContinuity.pending ?: viewportContinuity.anchor ?: currentLocator
     /** Saves a waiting reading position now, e.g. when the app goes to the background. */
-    fun flushPosition() {
-        restorationLocator?.let(positions::submit)
+    fun flushPosition() = flushPosition(null)
+
+    /** [revert]: the page from before a dropped, uncommitted swipe turn, saved instead (D8). */
+    private fun flushPosition(revert: Locator?) {
+        (revert ?: restorationLocator)?.let(positions::submit)
         positions.flush()
     }
 
@@ -606,6 +701,7 @@ internal class EpubSession(
         record(readingTime.pause(SystemClock.elapsedRealtime()))
         readingTimeJob?.cancel()
         closed = true
+        val revert = pageTurns.close()
         search.close()
         locationJob?.cancel()
         chapterJob?.cancel()
@@ -614,7 +710,7 @@ internal class EpubSession(
         viewportSettled = null
         activity.lifecycle.removeObserver(readingLifecycle)
         fragment.view?.removeOnLayoutChangeListener(layoutListener)
-        flushPosition()
+        flushPosition(revert)
         typographyJob?.cancel()
         if (!activity.supportFragmentManager.isDestroyed && fragment.isAdded) {
             runCatching { activity.supportFragmentManager.beginTransaction().remove(fragment).commitNowAllowingStateLoss() }
