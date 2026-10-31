@@ -89,41 +89,40 @@ Expected: one test passes. After Back and reopen, the saved passage is still on 
 
 Record: commit, pass or fail, `OK (1 test)` or the `passage after resize during reopen placement` line, and the receipt path.
 
-## 3. Four hinge checks
+## 3. Three hinge checks
 
-Branch: `claude/reader-test-fixes` (the source of the emulator triage). These four methods are the ones that stopped on `Needs device state 3 of a physical Fold` on the emulator.
+Branch: `main`. These three methods are already on `main`. Pull requests 5, 6, and 9 do not change them. Pull request 6 only adds the reopen test in section 2. Do not check out `claude/reader-test-fixes`.
 
 | Test | Class and method |
 |---|---|
 | Ten fold cycles | `com.bookcover.diagnostic.testing.ReaderContinuityTest#tenFoldCyclesKeepOneReaderAndTheVisiblePassage` |
 | RTL manga fold | `com.bookcover.diagnostic.testing.ReaderContinuityTest#rtlMangaKeepsItsResourceAndNativeNavigation` |
 | Same place after fold | `com.bookcover.diagnostic.testing.ReaderLifecycleTest#foldingAndUnfoldingKeepTheBookAtTheSamePlace` |
-| Idle deadline across fold | `com.bookcover.diagnostic.testing.ScreenIdleTest#recreationAndFoldingKeepTheOriginalDeadline` |
 
-Check out once, then run all four in one command so the phone stays in one build:
+Check out once, then run all three in one command so the phone stays in one build:
 
 ```powershell
 git fetch origin
-git checkout claude/reader-test-fixes
+git checkout main
 git rev-parse --short HEAD
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-Device.ps1 -TaskId fold-sit-hinge -Serial DEVICE_SERIAL -PhoneReleaseEvidence 'Owner is here. Phone is free, unfolded, and unlocked.' -TestClass 'com.bookcover.diagnostic.testing.ReaderContinuityTest#tenFoldCyclesKeepOneReaderAndTheVisiblePassage,com.bookcover.diagnostic.testing.ReaderContinuityTest#rtlMangaKeepsItsResourceAndNativeNavigation,com.bookcover.diagnostic.testing.ReaderLifecycleTest#foldingAndUnfoldingKeepTheBookAtTheSamePlace,com.bookcover.diagnostic.testing.ScreenIdleTest#recreationAndFoldingKeepTheOriginalDeadline'
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-Device.ps1 -TaskId fold-sit-hinge -Serial DEVICE_SERIAL -PhoneReleaseEvidence 'Owner is here. Phone is free, unfolded, and unlocked.' -TestClass 'com.bookcover.diagnostic.testing.ReaderContinuityTest#tenFoldCyclesKeepOneReaderAndTheVisiblePassage,com.bookcover.diagnostic.testing.ReaderContinuityTest#rtlMangaKeepsItsResourceAndNativeNavigation,com.bookcover.diagnostic.testing.ReaderLifecycleTest#foldingAndUnfoldingKeepTheBookAtTheSamePlace'
 ```
 
-Gradle filter (same four methods, comma-separated):
+Gradle filter (same three methods, comma-separated):
 
 ```text
--Pandroid.testInstrumentationRunnerArguments.class=com.bookcover.diagnostic.testing.ReaderContinuityTest#tenFoldCyclesKeepOneReaderAndTheVisiblePassage,com.bookcover.diagnostic.testing.ReaderContinuityTest#rtlMangaKeepsItsResourceAndNativeNavigation,com.bookcover.diagnostic.testing.ReaderLifecycleTest#foldingAndUnfoldingKeepTheBookAtTheSamePlace,com.bookcover.diagnostic.testing.ScreenIdleTest#recreationAndFoldingKeepTheOriginalDeadline
+-Pandroid.testInstrumentationRunnerArguments.class=com.bookcover.diagnostic.testing.ReaderContinuityTest#tenFoldCyclesKeepOneReaderAndTheVisiblePassage,com.bookcover.diagnostic.testing.ReaderContinuityTest#rtlMangaKeepsItsResourceAndNativeNavigation,com.bookcover.diagnostic.testing.ReaderLifecycleTest#foldingAndUnfoldingKeepTheBookAtTheSamePlace
 ```
 
 QA instrumentation command:
 
 ```text
-adb -s DEVICE_SERIAL shell am instrument -w -r -e class com.bookcover.diagnostic.testing.ReaderContinuityTest#tenFoldCyclesKeepOneReaderAndTheVisiblePassage,com.bookcover.diagnostic.testing.ReaderContinuityTest#rtlMangaKeepsItsResourceAndNativeNavigation,com.bookcover.diagnostic.testing.ReaderLifecycleTest#foldingAndUnfoldingKeepTheBookAtTheSamePlace,com.bookcover.diagnostic.testing.ScreenIdleTest#recreationAndFoldingKeepTheOriginalDeadline com.bookcover.diagnostic.qa.test/androidx.test.runner.AndroidJUnitRunner
+adb -s DEVICE_SERIAL shell am instrument -w -r -e class com.bookcover.diagnostic.testing.ReaderContinuityTest#tenFoldCyclesKeepOneReaderAndTheVisiblePassage,com.bookcover.diagnostic.testing.ReaderContinuityTest#rtlMangaKeepsItsResourceAndNativeNavigation,com.bookcover.diagnostic.testing.ReaderLifecycleTest#foldingAndUnfoldingKeepTheBookAtTheSamePlace com.bookcover.diagnostic.qa.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
-Expected: four tests pass. Folding and unfolding keeps one reader on the same passage, the manga page still moves with the reader's own previous-page control, and folding does not reset the screen-awake deadline.
+Expected: three tests pass. Folding and unfolding keeps one reader on the same passage, and the manga page still moves with the reader's own previous-page control. On `main` these tests wait for the screen to change size. They do not print `Needs device state 3 of a physical Fold`.
 
-Record: commit, pass or fail for each of the four names, any `Timed out` or `Needs device state` line, `print-state` and `print-states` from setup, and the receipt path.
+Record: commit, pass or fail for each of the three names, any `display width changed` or `the app moves to the other screen` timeout, `print-state` and `print-states` from setup, and the receipt path.
 
 The same checkout, one method at a time, if you need to repeat a single failure:
 
@@ -139,18 +138,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-Device.ps1 -Tas
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-Device.ps1 -TaskId fold-sit-place -Serial DEVICE_SERIAL -PhoneReleaseEvidence 'Owner is here. Phone is free, unfolded, and unlocked.' -TestClass 'com.bookcover.diagnostic.testing.ReaderLifecycleTest#foldingAndUnfoldingKeepTheBookAtTheSamePlace'
 ```
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-Device.ps1 -TaskId fold-sit-idle -Serial DEVICE_SERIAL -PhoneReleaseEvidence 'Owner is here. Phone is free, unfolded, and unlocked.' -TestClass 'com.bookcover.diagnostic.testing.ScreenIdleTest#recreationAndFoldingKeepTheOriginalDeadline'
-```
-
 ## 4. Right-to-left swipe
 
-Same branch as the hinge checks: `claude/reader-test-fixes`. Run this after section 3, or add the method onto that `-TestClass` list with a comma if you have not started section 3 yet.
+Same branch as the hinge checks: `main`. This method is unchanged on pull requests 5, 6, and 9. Run this after section 3, or add the method onto that `-TestClass` list with a comma if you have not started section 3 yet.
 
 Class `com.bookcover.diagnostic.testing.NativeReaderTest`, method `explicitRtlEdgesFollowBookDirectionAndPreserveNativeInteractions`.
 
 ```powershell
-git checkout claude/reader-test-fixes
+git checkout main
 git rev-parse --short HEAD
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-Device.ps1 -TaskId fold-sit-rtl -Serial DEVICE_SERIAL -PhoneReleaseEvidence 'Owner is here. Phone is free, unfolded, and unlocked.' -TestClass 'com.bookcover.diagnostic.testing.NativeReaderTest#explicitRtlEdgesFollowBookDirectionAndPreserveNativeInteractions'
 ```
@@ -184,7 +179,7 @@ This branch adds one phone test class, `com.bookcover.diagnostic.testing.ScreenI
 | Leaving does not renew | `com.bookcover.diagnostic.testing.ScreenIdleTest#pauseReleasesAndResumeKeepsTheDeadline` |
 | Always is remembered | `com.bookcover.diagnostic.testing.ScreenIdleTest#alwaysAndTheSavedChoiceSurviveRecreation` |
 
-The fold method here is the copy on this branch. It is not the section 3 run, which uses `claude/reader-test-fixes`.
+`recreationAndFoldingKeepTheOriginalDeadline` runs only here. It is the copy that pull request 9 adds. It is not part of section 3.
 
 ```powershell
 git fetch origin
@@ -262,22 +257,37 @@ Write down: QA package `com.bookcover.diagnostic.qa`, **Screen while reading** c
 |---|---|---|---|---|---|---|
 | 1 | Closed-book read | `cursor/r1-zip-lifetime-8665` | | | | |
 | 2 | Reopen while the bars hide | `cursor/r2-keep-opened-passage-01d2` | | | | |
-| 3 | Ten fold cycles | `claude/reader-test-fixes` | | | | |
-| 4 | RTL manga fold | `claude/reader-test-fixes` | | | | |
-| 5 | Same place after fold | `claude/reader-test-fixes` | | | | |
-| 6 | Idle deadline across fold | `claude/reader-test-fixes` | | | | |
-| 7 | Right-to-left swipe | `claude/reader-test-fixes` | | | | |
-| 8 | Touch and page key renew | `cursor/bc22-inner-screen-timeout-652d` | | | | |
-| 9 | Fold keeps the deadline | `cursor/bc22-inner-screen-timeout-652d` | | | | |
-| 10 | Leaving does not renew | `cursor/bc22-inner-screen-timeout-652d` | | | | |
-| 11 | Always is remembered | `cursor/bc22-inner-screen-timeout-652d` | | | | |
-| 12 | Manual: untouched book sleeps | `cursor/bc22-inner-screen-timeout-652d` | | | what you saw | |
-| 13 | Manual: Always stays on | `cursor/bc22-inner-screen-timeout-652d` | | | what you saw | |
-| 14 | Manual: touch or page key restarts | `cursor/bc22-inner-screen-timeout-652d` | | | what you saw | |
-| 15 | Manual: rotate or fold continues | `cursor/bc22-inner-screen-timeout-652d` | | | what you saw | |
-| 16 | Manual: cover Stop, leave, countdown | `cursor/bc22-inner-screen-timeout-652d` | | | what you saw | |
-| 17 | Optional 60-minute battery | `cursor/bc22-inner-screen-timeout-652d` | | | start level / end level | |
+| 3 | Ten fold cycles | `main` | | | | |
+| 4 | RTL manga fold | `main` | | | | |
+| 5 | Same place after fold | `main` | | | | |
+| 6 | Right-to-left swipe | `main` | | | | |
+| 7 | Touch and page key renew | `cursor/bc22-inner-screen-timeout-652d` | | | | |
+| 8 | Fold keeps the deadline | `cursor/bc22-inner-screen-timeout-652d` | | | | |
+| 9 | Leaving does not renew | `cursor/bc22-inner-screen-timeout-652d` | | | | |
+| 10 | Always is remembered | `cursor/bc22-inner-screen-timeout-652d` | | | | |
+| 11 | Manual: untouched book sleeps | `cursor/bc22-inner-screen-timeout-652d` | | | what you saw | |
+| 12 | Manual: Always stays on | `cursor/bc22-inner-screen-timeout-652d` | | | what you saw | |
+| 13 | Manual: touch or page key restarts | `cursor/bc22-inner-screen-timeout-652d` | | | what you saw | |
+| 14 | Manual: rotate or fold continues | `cursor/bc22-inner-screen-timeout-652d` | | | what you saw | |
+| 15 | Manual: cover Stop, leave, countdown | `cursor/bc22-inner-screen-timeout-652d` | | | what you saw | |
+| 16 | Optional 60-minute battery | `cursor/bc22-inner-screen-timeout-652d` | | | start level / end level | |
 
 Device state at the start: `print-state` ________  `print-states` ________
 
 If a run fails because the screen locked or the phone was folded, write "setup" in the result column and run that command again after unlocking and unfolding. Do not treat that as a pass.
+
+When you are finished, set the phone's Display timeout back to the value it had before this sitting. Sections 1 through 4 use 10 minutes so the phone does not lock during a test. Section 5 sets it to 1 minute for the sleep check.
+
+## Not shipping
+
+`claude/reader-test-fixes` will not be merged. None of the hinge or swipe methods exist only there.
+
+| Method | Where the command points | Only on `claude/reader-test-fixes`? |
+|---|---|---|
+| `ReaderContinuityTest#tenFoldCyclesKeepOneReaderAndTheVisiblePassage` | `main` (same method on pull requests 5, 6, and 9) | No. Keep it. |
+| `ReaderContinuityTest#rtlMangaKeepsItsResourceAndNativeNavigation` | `main` (same method on pull requests 5, 6, and 9) | No. Keep it. |
+| `ReaderLifecycleTest#foldingAndUnfoldingKeepTheBookAtTheSamePlace` | `main` (same method on pull requests 5, 6, and 9) | No. Keep it. |
+| `NativeReaderTest#explicitRtlEdgesFollowBookDirectionAndPreserveNativeInteractions` | `main` (same method on pull requests 5, 6, and 9) | No. Keep it. |
+| `ScreenIdleTest#recreationAndFoldingKeepTheOriginalDeadline` | Pull request 9, section 5 | The method ships with pull request 9. The old section 3 copy is dropped so it is not run twice. |
+
+One extra assert, `Needs device state 3 of a physical Fold`, is only on `claude/reader-test-fixes`. It sits in `switchScreen`, in `foldingAndUnfoldingKeepTheBookAtTheSamePlace`, and in that branch's copy of `recreationAndFoldingKeepTheOriginalDeadline`. It makes an emulator fail immediately. The Fold still runs the real hinge checks on `main`, and the idle fold check on pull request 9, without that sentence. Port the assert later if emulator runs should fail fast. Do not drop the tests for lack of it.
