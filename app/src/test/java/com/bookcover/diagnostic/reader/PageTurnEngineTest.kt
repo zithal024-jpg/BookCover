@@ -9,7 +9,7 @@ import org.junit.Test
 class PageTurnEngineTest {
     private val width = 1800f
     private val density = 2.625f
-    private val ready = PageTurnConditions(reflowable = true, typographyUpdating = false, restoringViewport = false, animationsEnabled = true)
+    private val ready = PageTurnConditions(paperPageTurn = true, reflowable = true, typographyUpdating = false, restoringViewport = false, animationsEnabled = true)
 
     @Test fun commitNeedsThirtyPercentOrAFlingInTheTurnDirection() {
         assertFalse(PageTurnRules.shouldCommit(0.29f * width, 0f, width, density))
@@ -61,6 +61,9 @@ class PageTurnEngineTest {
 
     @Test fun pathsFallBackToNativeWhileTypographyOrViewportIsBusyAndForFixedLayout() {
         assertEquals(PageTurnPath.ENGINE, PageTurnRules.path(ready))
+        assertEquals("Paper page turn off: every turn is Readium's own, as before PT-1", PageTurnPath.NATIVE, PageTurnRules.path(ready.copy(paperPageTurn = false)))
+        assertEquals(PageTurnPath.NATIVE, PageTurnRules.path(ready.copy(paperPageTurn = false, animationsEnabled = false)))
+        assertFalse("Paper page turn off: swipes stay native", PageTurnRules.canTakeOverSwipe(ready.copy(paperPageTurn = false), false, false, false))
         assertEquals(PageTurnPath.NATIVE, PageTurnRules.path(ready.copy(typographyUpdating = true)))
         assertEquals(PageTurnPath.NATIVE, PageTurnRules.path(ready.copy(restoringViewport = true)))
         assertEquals(PageTurnPath.NATIVE, PageTurnRules.path(ready.copy(reflowable = false)))
@@ -213,20 +216,14 @@ class PageTurnEngineTest {
         assertEquals("Nothing on screen yet", PageTurnAction.None, engine.abort())
     }
 
-    @Test fun progressAndSettleTimingStayBounded() {
-        assertEquals(0f, PageTurnRules.progress(-50f, width), 0f)
-        assertEquals(0.5f, PageTurnRules.progress(width / 2, width), 0f)
-        assertEquals(1f, PageTurnRules.progress(width * 2, width), 0f)
+    @Test fun settleTimingStaysBounded() {
         assertEquals(PageTurnRules.TURN_MILLIS, PageTurnRules.settleMillis(0f, 1f, 0f, width))
         assertEquals(PageTurnRules.MIN_SETTLE_MILLIS, PageTurnRules.settleMillis(0.95f, 1f, 0f, width))
         val slow = PageTurnRules.settleMillis(0.4f, 1f, 0f, width)
         val fast = PageTurnRules.settleMillis(0.4f, 1f, 30_000f, width)
         assertTrue("A fast finger finishes sooner", fast < slow)
         assertTrue(fast >= PageTurnRules.MIN_SETTLE_MILLIS)
-        val paper = PageTurnRules.turnMillis(PageTurnStyle.PAPER)
-        assertEquals(PageTurnRules.TURN_MILLIS, PageTurnRules.turnMillis(PageTurnStyle.SLIDE))
-        assertEquals(paper, PageTurnRules.settleMillis(0f, 1f, 0f, 2 * width, paper))
-        assertTrue(PageTurnRules.settleMillis(0.4f, 1f, 30_000f, 2 * width, paper) in PageTurnRules.MIN_SETTLE_MILLIS..paper)
+        assertTrue(PageTurnRules.settleMillis(0.4f, 1f, 30_000f, 2 * width) in PageTurnRules.MIN_SETTLE_MILLIS..PageTurnRules.TURN_MILLIS)
     }
 
     @Test fun cancelAfterARefusedSilentTurnUndoesNothing() {

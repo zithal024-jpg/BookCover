@@ -7,15 +7,13 @@ import org.junit.Test
 class PageTurnPreferencesTest {
     @Test fun paperPageTurnDefaultsOffAndRoundTrips() {
         val preferences = MemoryPreferences()
-        assertFalse("First build: the smoothed slide is the default", PAPER_PAGE_TURN_DEFAULT)
+        assertFalse("Off by default: the standard Readium page turn", PAPER_PAGE_TURN_DEFAULT)
         assertFalse(preferences.paperPageTurn())
         preferences.savePaperPageTurn(true)
         assertTrue(preferences.paperPageTurn())
         assertEquals(true, preferences.values["paperPageTurn"])
         preferences.savePaperPageTurn(false)
         assertFalse(preferences.paperPageTurn())
-        assertEquals(PageTurnStyle.PAPER, PageTurnStyle.of(true))
-        assertEquals(PageTurnStyle.SLIDE, PageTurnStyle.of(false))
     }
 
     @Test fun savingTheToggleLeavesOtherReaderSettingsAlone() {

@@ -304,6 +304,11 @@ private fun TextSheet(session: EpubSession) {
         onValueChangeFinished = { if (draftSize.toDouble() != session.fontScale) session.changeFont(draftSize.toDouble()) },
         valueRange = 0.8f..2.2f, steps = 13, enabled = canChangeType,
         modifier = Modifier.testTag("text-size-slider").semantics { contentDescription = "EPUB text size" })
+    // PT-1: where the owner looks for how pages look and move (it was hidden under More before). Below
+    // text size, so page colour and text size stay first even with large system text (H3).
+    SettingsSwitchRow("Paper page turn", session.paperPageTurn, session::changePaperPageTurn,
+        modifier = Modifier.testTag("paper-page-turn"), enabled = session.supportsTypography,
+        summary = if (session.supportsTypography) "Pages curl like paper under your finger." else "Fixed-layout books use the standard turn.")
     SettingsSwitchRow("Publisher styles", session.comfort.publisherStyles, session::changePublisherStyles,
         modifier = Modifier.testTag("publisher-styles"), enabled = canChangeType,
         summary = "Keep the book's fonts, spacing, indents and alignment. Text size still applies.")
@@ -400,9 +405,6 @@ private fun MoreSheet(session: EpubSession) {
             }
             Switch(checked = session.volumeKeys, onCheckedChange = null)
         }
-        SettingsSwitchRow("Paper page turn", session.paperPageTurn, session::changePaperPageTurn,
-            modifier = Modifier.testTag("paper-page-turn"),
-            summary = "Pages peel from the edge like paper and follow your finger. Off uses a plain slide.")
         Text("Keyboard: Page Down and Page Up follow book order. Left and right arrows follow the book's reading direction. Keys turn pages while controls are closed.",
             style = MaterialTheme.typography.bodySmall)
     }

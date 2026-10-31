@@ -29,7 +29,9 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import com.bookcover.diagnostic.DiagnosticLog
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -44,9 +46,14 @@ import kotlin.math.abs
 import kotlin.math.sin
 
 /**
- * PT-1: runs [PageTurnEngine] against the real reader. It snapshots the page with PixelCopy,
- * turns Readium silently under the snapshot, waits until the new page is drawn and animates the
- * snapshot away. [PageTurnOverlay] draws from the state here without recomposing per frame.
+ * PT-1: runs [PageTurnEngine] against the real reader when "Paper page turn" is on. It snapshots
+ * the page with PixelCopy, turns Readium silently under the snapshot, waits until the new page is
+ * drawn and curls the snapshot away. [PageTurnOverlay] draws from the state here without
+ * recomposing per frame. With the setting off every turn is Readium's own ([PageTurnPath.NATIVE]).
+ *
+ * A swipe's snapshot is taken when the finger first touches the page ([touchDown]), not when the
+ * swipe is recognised: copying then took 6 to 43 ms, during which the page sat still under a moving
+ * finger and then jumped to it (owner report, 2026-10-31).
  */
 internal class PageTurnController(
     private val activity: FragmentActivity,
@@ -72,9 +79,6 @@ internal class PageTurnController(
     var pageReady by mutableStateOf(true); private set
     var progress by mutableFloatStateOf(0f); private set
     var snapshotVersion by mutableIntStateOf(0); private set
-    /** The setting; a turn keeps the style it started with ([turnStyle]) even if this changes. */
-    var style by mutableStateOf(PageTurnStyle.SLIDE)
-    var turnStyle = PageTurnStyle.SLIDE; private set
     /** -1: the outgoing page moves left; +1: right. */
     var screenSign = -1; private set
     var rubberBand = false; private set
@@ -88,6 +92,17 @@ internal class PageTurnController(
 
     private var captureJob: Job? = null
     private var readinessJob: Job? = null
+    /** The snapshot started at finger-down for the swipe that may follow ([touchDown]). */
+    private var earlySnapshot: Deferred<Boolean>? = null
+    private var earlyClip = 0f
+    private var earlyGeneration = -1
+    /** The page the early copy shows: its WebView, scroll position and Readium locator at finger-down. */
+    private var earlyWeb: WebView? = null
+    private var earlyScrollX = 0
+    private var earlyLocator: Locator? = null
+    /** Bumped whenever the page on screen may have changed: an early snapshot from before is stale. */
+    private var pageGeneration = 0
+    private var snapshotEarly = false
     private var animating = false
     private var fading = false
     private var animationFrom = 0f
@@ -142,7 +157,6 @@ internal class PageTurnController(
     private fun travel(): Float {
         val view = container ?: return 0f
         val width = view.width.toFloat()
-        if (turnStyle != PageTurnStyle.PAPER) return width
         return PageCurlGeometry.maxTravel(width, travelRadius(width))
     }
 
@@ -164,12 +178,12 @@ internal class PageTurnController(
     }
 
     private fun startTurn(direction: PageTurnDirection, source: PageTurnSource, path: PageTurnPath) {
+        pageGeneration++
         when (path) {
             PageTurnPath.NATIVE -> turnDirectly(direction, animated = true)
             PageTurnPath.INSTANT -> turnDirectly(direction, animated = false)
             PageTurnPath.ENGINE -> {
                 turnSource = source
-                turnStyle = style
                 screenSign = PageTurnRules.screenSign(direction, rightToLeft())
                 dispatch(engine.request(direction, source, atBookEdge(direction)))
             }
@@ -186,7 +200,41 @@ internal class PageTurnController(
 
     override fun blockedTap(x: Float, y: Float) = onBlockedTap(x, y)
 
-    override fun nativeSwipeEnded() { nativeSettleUntil = SystemClock.uptimeMillis() + PageTurnRules.NATIVE_SETTLE_MILLIS }
+    override fun nativeSwipeEnded() {
+        pageGeneration++
+        nativeSettleUntil = SystemClock.uptimeMillis() + PageTurnRules.NATIVE_SETTLE_MILLIS
+    }
+
+    /**
+     * A finger touched the page. If this gesture could become a paper turn, copy the page now, so
+     * the curl can follow the finger from the first move instead of a few frames later. A tap, long
+     * press or vertical drag just leaves the copy unused; the next touch replaces it.
+     */
+    override fun touchDown() {
+        dropEarlySnapshot()
+        if (container == null || engine.busy || overlayVisible || overlayRecentlyShown || pending.isNotEmpty() || pendingPosted) return
+        if (PageTurnRules.path(conditions()) != PageTurnPath.ENGINE || controlsVisible() || selectionActive()) return
+        if (SystemClock.uptimeMillis() < nativeSettleUntil) return // The page may still be moving.
+        earlyGeneration = pageGeneration
+        earlyClip = liveBottomClip
+        earlyWeb = visibleWebView()
+        earlyScrollX = earlyWeb?.scrollX ?: 0
+        earlyLocator = fragment.currentLocator.value
+        earlySnapshot = scope.async {
+            try { timedSnapshot() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { false }
+        }
+    }
+
+    /**
+     * Forgets an unused early snapshot. A copy still in flight may yet write into [bitmap], so the
+     * next snapshot gets a fresh bitmap rather than racing it.
+     */
+    private fun dropEarlySnapshot() {
+        val early = earlySnapshot ?: return
+        earlySnapshot = null
+        earlyWeb = null
+        if (!early.isCompleted) { early.cancel(); bitmap = null }
+    }
 
     /** A swipe the user has not committed yet: its silent turn is provisional (reading pace ignores it). */
     val swipeUncommitted get() = engine.swipeUncommitted
@@ -203,7 +251,6 @@ internal class PageTurnController(
         if (engine.busy) { swipeHeld = true; return } // Still waiting on a page: decide on release.
         swipeHeld = false
         turnSource = PageTurnSource.SWIPE
-        turnStyle = style
         screenSign = PageTurnRules.screenSign(direction, rightToLeft())
         val path = PageTurnRules.path(conditions())
         dispatch(engine.beginSwipe(direction, atBookEdge(direction), withOverlay = path == PageTurnPath.ENGINE))
@@ -218,12 +265,9 @@ internal class PageTurnController(
         if (phase != PageTurnEngine.Phase.CAPTURING && phase != PageTurnEngine.Phase.DRAGGING) return
         val width = (container?.width ?: 0).toFloat()
         rubberBand = engine.atBookEdge
-        // The slide moves with the finger; the curl keeps the lifted page edge under the finger.
-        progress = when {
-            engine.atBookEdge -> PageTurnRules.rubberBand(lastAlong, width)
-            turnStyle == PageTurnStyle.PAPER -> PageCurlGeometry.progressForDrag(lastAlong, width, travelRadius(width))
-            else -> PageTurnRules.progress(lastAlong, width)
-        }
+        // The curl keeps the lifted page edge under the finger.
+        progress = if (engine.atBookEdge) PageTurnRules.rubberBand(lastAlong, width)
+            else PageCurlGeometry.progressForDrag(lastAlong, width, travelRadius(width))
     }
 
     override fun swipeEnded(dx: Float, velocityX: Float, cancelled: Boolean) {
@@ -262,6 +306,8 @@ internal class PageTurnController(
         val before = turnBefore
         pending.clear()
         swipeHeld = false
+        pageGeneration++
+        dropEarlySnapshot()
         captureJob?.cancel(); captureJob = null
         readinessJob?.cancel(); readinessJob = null
         stopAnimation()
@@ -275,6 +321,8 @@ internal class PageTurnController(
     fun close(): Locator? {
         val revert = abort(reverse = false)
         container = null
+        earlyWeb = null
+        earlyLocator = null
         bitmap = null
         return revert
     }
@@ -295,7 +343,7 @@ internal class PageTurnController(
             PageTurnAction.None -> Unit
             PageTurnAction.Capture -> capture()
             is PageTurnAction.ShowOverlay -> showOverlay(action)
-            PageTurnAction.Reveal -> animate(1f, PageTurnRules.turnMillis(turnStyle), reveal)
+            PageTurnAction.Reveal -> animate(1f, PageTurnRules.TURN_MILLIS, reveal)
             is PageTurnAction.Settle -> {
                 // A flick that commits before its page is drawn keeps the full-length settle, so the
                 // snapshot does not slide off over plain page colour (D10).
@@ -304,7 +352,7 @@ internal class PageTurnController(
                     action.target >= progress -> settleVelocity
                     else -> -settleVelocity
                 }
-                animate(action.target, PageTurnRules.settleMillis(progress, action.target, toward, travel(), PageTurnRules.turnMillis(turnStyle)), settle)
+                animate(action.target, PageTurnRules.settleMillis(progress, action.target, toward, travel()), settle)
             }
             PageTurnAction.RubberBand -> { rubberBand = true; animate(0f, PageTurnRules.RUBBER_BAND_MILLIS, linear, bounce = true) }
             PageTurnAction.FadeCover -> fadeCover()
@@ -335,6 +383,7 @@ internal class PageTurnController(
     private var pendingPosted = false
 
     private fun turnDirectly(direction: PageTurnDirection, animated: Boolean) {
+        pageGeneration++
         // Readium's animated turn ends in a settle scroll; swipes during it stay native (D4).
         if (animated) nativeSwipeEnded()
         runCatching { if (direction == PageTurnDirection.FORWARD) fragment.goForward(animated) else fragment.goBackward(animated) }
@@ -342,19 +391,27 @@ internal class PageTurnController(
 
     private fun capture() {
         captureJob?.cancel()
+        // A swipe on the page this finger touched uses the copy started at finger-down.
+        val early = earlySnapshot?.takeIf { engine.source == PageTurnSource.SWIPE && earlyPageStillShown() }
+        if (early == null) dropEarlySnapshot() else earlySnapshot = null
         // A programmatic turn may have just closed the controls; a previous overlay may still be in
         // the last frame. Wait until the screen shows only the page before copying it.
         val waitFrames = if (overlayRecentlyShown || engine.source != PageTurnSource.SWIPE) 2 else 0
         captureJob = scope.launch {
             try {
+                if (early != null && early.await()) {
+                    snapshotEarly = true
+                    turnBottomClip = earlyClip
+                    dispatch(engine.captured(true))
+                    return@launch
+                }
+                snapshotEarly = false
                 repeat(waitFrames) { awaitFrame() }
                 // Read the clip only now: a button turn has just closed the controls, and the overlay's
                 // SideEffect updates liveBottomClip during the frames waited above. The bitmap describes
                 // the screen at this moment; later control changes must not re-clip it (D11).
                 turnBottomClip = liveBottomClip
-                val started = SystemClock.uptimeMillis()
-                val ok = snapshot()
-                snapshotMillis = SystemClock.uptimeMillis() - started
+                val ok = timedSnapshot()
                 if (!ok) DiagnosticLog.record("PT-1 page snapshot failed; using Readium's own turn")
                 dispatch(engine.captured(ok))
             } catch (cancelled: CancellationException) { throw cancelled }
@@ -363,6 +420,22 @@ internal class PageTurnController(
                 dispatch(engine.captured(false))
             }
         }
+    }
+
+    /**
+     * Whether the page under the finger is still the one copied at finger-down. The app also moves the
+     * page without a turn (contents refinement, search, bookmark and link jumps), so the counter alone
+     * is not enough: the same WebView must show the same scroll position and locator.
+     */
+    private fun earlyPageStillShown(): Boolean {
+        if (earlyGeneration != pageGeneration) return false
+        val web = visibleWebView() ?: return false
+        return web === earlyWeb && web.scrollX == earlyScrollX && fragment.currentLocator.value == earlyLocator
+    }
+
+    private suspend fun timedSnapshot(): Boolean {
+        val started = SystemClock.uptimeMillis()
+        return snapshot().also { snapshotMillis = SystemClock.uptimeMillis() - started }
     }
 
     private suspend fun snapshot(): Boolean {
@@ -526,13 +599,15 @@ internal class PageTurnController(
 
     private fun removeOverlay() {
         val source = turnSource
+        pageGeneration++
         overlayVisible = false
         pageReady = true
         progress = 0f
         coverFade = 0f
         rubberBand = false
-        if (debuggable) DiagnosticLog.record("PT-1 turn style=${turnStyle.name.lowercase()}; snapshot=${snapshotMillis}ms via $snapshotMethod; " +
-            "source=${source?.name?.lowercase()}; ready=$readinessPath; ${frameMeter.summary()}")
+        if (debuggable) DiagnosticLog.record("PT-1 turn style=paper; snapshot=${snapshotMillis}ms via $snapshotMethod; " +
+            "early=${if (snapshotEarly) "yes" else "no"}; source=${source?.name?.lowercase()}; ready=$readinessPath; " +
+            "${frameMeter.summary()}")
         scope.launch {
             // The next snapshot must not copy this overlay; it is gone two frames from now.
             awaitFrame(); awaitFrame()

@@ -17,7 +17,6 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 
 /**
  * PT-1: draws the page snapshot above the reader during a turn. It recomposes only when a turn
@@ -36,7 +35,6 @@ internal fun PageTurnOverlay(controller: PageTurnController, pageColor: Color, b
     val clip = with(density) { bottomClip.toPx() }
     SideEffect { controller.liveBottomClip = clip }
     if (!controller.overlayVisible) return
-    val shadowWidth = with(density) { 20.dp.toPx() }
     val color = pageColor.toArgb()
     val pixelDensity = density.density
     Spacer(modifier.drawBehind {
@@ -46,17 +44,14 @@ internal fun PageTurnOverlay(controller: PageTurnController, pageColor: Color, b
         // a committed swipe that outran its page fades that cover off instead of popping (D10).
         val cover = if (!controller.pageReady || controller.rubberBand) 1f else controller.coverFade
         painter.draw(drawContext.canvas.nativeCanvas, controller.bitmap, size.width, size.height, controller.progress,
-            controller.screenSign, controller.turnStyle, cover, color, shadowWidth, controller.turnBottomClip, pixelDensity)
+            controller.screenSign, cover, color, controller.turnBottomClip, pixelDensity)
         controller.drawFinished(started)
     })
 }
 
 /** Preallocated paints, shaders and mesh: drawing a frame allocates nothing. */
 internal class PageTurnPainter {
-    private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG)
     private val fillPaint = Paint()
-    private val shadowPaint = Paint()
-    private var shaderWidth = -1f
 
     // Paper curl.
     private val mesh = PageCurlMesh()
@@ -70,8 +65,8 @@ internal class PageTurnPainter {
     }
 
     fun draw(
-        canvas: Canvas, bitmap: Bitmap?, width: Float, height: Float, progress: Float, sign: Int, style: PageTurnStyle,
-        cover: Float, pageColor: Int, shadowWidth: Float, bottomClip: Float, density: Float = 1f,
+        canvas: Canvas, bitmap: Bitmap?, width: Float, height: Float, progress: Float, sign: Int,
+        cover: Float, pageColor: Int, bottomClip: Float, density: Float = 1f,
     ) {
         if (bitmap == null || width <= 0f || height <= 0f) return
         canvas.save()
@@ -82,33 +77,7 @@ internal class PageTurnPainter {
             fillPaint.alpha = (255 * cover.coerceAtMost(1f)).toInt()
             canvas.drawRect(0f, 0f, width, height, fillPaint)
         }
-        when (style) {
-            PageTurnStyle.SLIDE -> slide(canvas, bitmap, width, height, progress, sign, shadowWidth, bottomClip)
-            PageTurnStyle.PAPER -> curl(canvas, bitmap, width, height, progress, sign, pageColor, bottomClip, density)
-        }
-        canvas.restore()
-    }
-
-    private fun slide(canvas: Canvas, bitmap: Bitmap, width: Float, height: Float, progress: Float, sign: Int, shadowWidth: Float, bottomClip: Float) {
-        val offset = sign * progress.coerceIn(0f, 1f) * width
-        val pageBottom = (height - bottomClip).coerceAtLeast(0f)
-        canvas.save()
-        canvas.clipRect(0f, 0f, width, pageBottom)
-        canvas.drawBitmap(bitmap, offset, 0f, bitmapPaint)
-        canvas.restore()
-        if (progress <= 0f || progress >= 1f || shadowWidth <= 0f) return
-        if (shaderWidth != shadowWidth) {
-            shaderWidth = shadowWidth
-            shadowPaint.shader = LinearGradient(0f, 0f, shadowWidth, 0f, 0x38000000, 0x00000000, Shader.TileMode.CLAMP)
-        }
-        // A faint shadow just beyond the moving page's trailing edge: strongest early in the turn.
-        shadowPaint.alpha = (255 * (1f - progress) * (progress * 12f).coerceAtMost(1f)).toInt().coerceIn(0, 255)
-        val edge = if (sign < 0) offset + width else offset
-        canvas.save()
-        canvas.clipRect(0f, 0f, width, pageBottom)
-        canvas.translate(edge, 0f)
-        if (sign > 0) canvas.scale(-1f, 1f)
-        canvas.drawRect(0f, 0f, shadowWidth, pageBottom, shadowPaint)
+        curl(canvas, bitmap, width, height, progress, sign, pageColor, bottomClip, density)
         canvas.restore()
     }
 

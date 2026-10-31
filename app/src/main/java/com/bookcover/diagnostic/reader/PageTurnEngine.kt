@@ -8,9 +8,13 @@ import kotlin.math.hypot
  *
  * How a turn works: the app snapshots the visible page, shows the snapshot above the reader,
  * turns Readium silently (animated = false) underneath it, waits until the new page is drawn,
- * then animates the snapshot away (slide, or a paper curl in step 3). A swipe drives the same
- * snapshot with the finger; letting go decides commit or cancel, and a cancel undoes the silent
- * turn exactly once while the snapshot still covers the page.
+ * then curls the snapshot away like paper. A swipe drives the same snapshot with the finger;
+ * letting go decides commit or cancel, and a cancel undoes the silent turn exactly once while the
+ * snapshot still covers the page.
+ *
+ * PT-1 rework (2026-10-31, owner report): the app-drawn "smoothed slide" made normal reading
+ * stutter (the revealed page showed plain page colour until it was drawn, then the text faded in),
+ * so with "Paper page turn" off every turn is Readium's own again, exactly as before PT-1.
  */
 
 internal enum class PageTurnDirection {
@@ -21,22 +25,19 @@ internal enum class PageTurnDirection {
 /** Where a user turn came from. Every one of them goes through `EpubSession.turnPage`. */
 internal enum class PageTurnSource { SWIPE, EDGE_TAP, BUTTON, VOLUME_KEY, KEYBOARD }
 
-internal enum class PageTurnStyle {
-    SLIDE, PAPER;
-    companion object { fun of(paper: Boolean) = if (paper) PAPER else SLIDE }
-}
-
 /** How a user turn is carried out right now. */
 internal enum class PageTurnPath {
-    /** Snapshot overlay with a slide or paper animation. */
+    /** Snapshot overlay with the paper curl. */
     ENGINE,
-    /** "Remove animations" is on: turn at once, nothing moves. */
+    /** Paper page turn on, but "Remove animations" is on: turn at once, nothing moves. */
     INSTANT,
     /** Readium's own animated turn and native swipes, exactly as before PT-1. */
     NATIVE,
 }
 
 internal data class PageTurnConditions(
+    /** The "Paper page turn" setting. Off: every turn is Readium's own ([PageTurnPath.NATIVE]). */
+    val paperPageTurn: Boolean,
     /** Fixed-layout books stay entirely native until an FXL fixture is checked on the phone. */
     val reflowable: Boolean,
     val typographyUpdating: Boolean,
@@ -61,9 +62,8 @@ internal object PageTurnRules {
     /** Matches Readium's own fling feel: 400dp/s over at least 25dp. */
     const val FLING_DP_PER_SECOND = 400f
     const val FLING_MIN_DISTANCE_DP = 25f
-    const val TURN_MILLIS = 280L
-    /** The curl travels about twice as far as the slide; a little longer keeps it unhurried. */
-    const val PAPER_TURN_MILLIS = 340L
+    /** A full paper curl: it travels about twice the page width, so a little over a third of a second. */
+    const val TURN_MILLIS = 340L
     const val MIN_SETTLE_MILLIS = 120L
     const val RUBBER_BAND_MILLIS = 260L
     /** At the start or end of the book the page gives a little, then springs back. */
@@ -83,7 +83,8 @@ internal object PageTurnRules {
     const val LANDED_SCROLL_SHARE = 0.4f
 
     fun path(conditions: PageTurnConditions): PageTurnPath = when {
-        !conditions.reflowable || conditions.typographyUpdating || conditions.restoringViewport -> PageTurnPath.NATIVE
+        !conditions.paperPageTurn || !conditions.reflowable || conditions.typographyUpdating ||
+            conditions.restoringViewport -> PageTurnPath.NATIVE
         !conditions.animationsEnabled -> PageTurnPath.INSTANT
         else -> PageTurnPath.ENGINE
     }
@@ -146,8 +147,6 @@ internal object PageTurnRules {
     /** Finger travel measured along the turn: positive means further into the turn. */
     fun along(dx: Float, direction: PageTurnDirection, rightToLeft: Boolean): Float = dx * screenSign(direction, rightToLeft)
 
-    fun progress(along: Float, width: Float): Float = if (width <= 0f) 0f else (along / width).coerceIn(0f, 1f)
-
     fun rubberBand(along: Float, width: Float): Float =
         if (width <= 0f) 0f else (along * RUBBER_BAND_RESISTANCE / width).coerceIn(0f, RUBBER_BAND_MAX)
 
@@ -170,9 +169,6 @@ internal object PageTurnRules {
         if (velocityTowardTarget > 0f && width > 0f) millis = minOf(millis, 2f * share * width / velocityTowardTarget * 1000f)
         return millis.toLong().coerceIn(MIN_SETTLE_MILLIS, fullMillis)
     }
-
-    /** Full-turn duration: the slide, or the paper curl, which travels about twice as far. */
-    fun turnMillis(style: PageTurnStyle): Long = if (style == PageTurnStyle.PAPER) PAPER_TURN_MILLIS else TURN_MILLIS
 }
 
 /** What the controller must do next. Each engine call returns exactly one action. */

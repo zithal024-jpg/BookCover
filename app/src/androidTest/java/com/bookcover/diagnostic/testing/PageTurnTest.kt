@@ -19,7 +19,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.bookcover.diagnostic.DiagnosticLog
 import com.bookcover.diagnostic.reader.EpubSession
-import com.bookcover.diagnostic.reader.PageTurnStyle
 import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -37,8 +36,8 @@ import org.readium.r2.navigator.preferences.ReadingProgression
 import org.readium.r2.shared.ExperimentalReadiumApi
 
 /**
- * PT-1 on-phone checks of the app-owned page-turn engine, in both styles (smoothed slide, paper
- * curl). Isolated QA app, [ReaderTestActivity] and the generated [NativeEpubFixture] only: chapter 0
+ * PT-1 on-phone checks of the paper page turn (the app-owned engine) and of the standard turn,
+ * which with "Paper page turn" off must stay Readium's own, exactly as before PT-1. Isolated QA app, [ReaderTestActivity] and the generated [NativeEpubFixture] only: chapter 0
  * is a long multi-page chapter, chapter 1 a short final chapter, so both chapter boundaries and
  * both ends of the book are reachable.
  *
@@ -81,11 +80,40 @@ class PageTurnTest {
 
     // ---- Swipes within a chapter ----------------------------------------------------------------
 
-    @Test fun slideSwipesTurnExactlyOnePageAndShortSwipesCancel() = checkSwipeTurns(paper = false)
+    /**
+     * Owner report 2026-10-31: the app-drawn slide made normal reading stutter. With the setting off
+     * a swipe, an edge tap and a page button must be Readium's own turns: no snapshot overlay is ever
+     * shown and the engine logs no turn.
+     */
+    @Test fun standardTurnsStayNativeWithNoOverlay() {
+        launch(paper = false)
+        awaitIdle() // Standard turns need no Android animations: Readium animates them itself.
+        val width = pageWidth()
+        val start = settledOffset()
+        val mark = turnLines().lastOrNull()
+        var overlaySeen = false
+        val watch = { if (main { reader.pageTurns.overlayVisible }) overlaySeen = true }
+        drag(0.80f, 0.20f, watch = watch)
+        val afterSwipe = settledOffset()
+        assertEquals("A standard swipe turns exactly one page", width, afterSwipe - start, 2.0)
+        main { reader.changeEdgeTaps(true) }
+        tapViewport(0.98f, 0.60f)
+        repeat(20) { watch(); SystemClock.sleep(16) }
+        assertEquals("A standard edge tap turns exactly one page", width, settledOffset() - afterSwipe, 2.0)
+        main { reader.changeEdgeTaps(false) }
+        click("reader-show-controls")
+        click("reader-more")
+        scrollTo("reader-previous-page")
+        click("reader-previous-page")
+        repeat(20) { watch(); SystemClock.sleep(16) }
+        assertEquals("Previous page returns exactly one page", afterSwipe, settledOffset(), 2.0)
+        assertFalse("The standard turn never shows the paper overlay", overlaySeen)
+        assertTrue("The standard turn never goes through the paper engine: ${linesSince(mark)}", linesSince(mark).isEmpty())
+        assertTrue("No reader error was reported during the turns: ${host.reports}", host.reports.isEmpty())
+    }
 
-    @Test fun paperSwipesTurnExactlyOnePageAndShortSwipesCancel() = checkSwipeTurns(paper = true)
-
-    private fun checkSwipeTurns(paper: Boolean) {
+    @Test fun paperSwipesTurnExactlyOnePageAndShortSwipesCancel() {
+        val paper = true
         launch(paper = paper)
         requireEngine()
         val width = pageWidth()
@@ -116,11 +144,8 @@ class PageTurnTest {
 
     // ---- Chapter boundaries and the end of the book ---------------------------------------------
 
-    @Test fun slideSwipesCrossChapterBoundariesAndStopAtTheEndOfTheBook() = checkChapterBoundaries(paper = false)
-
-    @Test fun paperSwipesCrossChapterBoundariesAndStopAtTheEndOfTheBook() = checkChapterBoundaries(paper = true)
-
-    private fun checkChapterBoundaries(paper: Boolean) {
+    @Test fun paperSwipesCrossChapterBoundariesAndStopAtTheEndOfTheBook() {
+        val paper = true
         launch(paper = paper)
         requireEngine()
         js("readium.scrollToEnd(); true")
@@ -162,11 +187,8 @@ class PageTurnTest {
 
     // ---- Edge taps, the controls tap and the page buttons ---------------------------------------
 
-    @Test fun slideEdgeTapsControlsTapAndPageButtonsStillWork() = checkTapsAndButtons(paper = false)
-
-    @Test fun paperEdgeTapsControlsTapAndPageButtonsStillWork() = checkTapsAndButtons(paper = true)
-
-    private fun checkTapsAndButtons(paper: Boolean) {
+    @Test fun paperEdgeTapsControlsTapAndPageButtonsStillWork() {
+        val paper = true
         launch(paper = paper)
         requireEngine()
         val width = pageWidth()
@@ -203,25 +225,22 @@ class PageTurnTest {
 
     // ---- Right-to-left ---------------------------------------------------------------------------
 
-    @Test fun rtlSwipesFollowTheBookDirectionInBothStyles() {
-        launch(rtl = true)
+    @Test fun rtlPaperSwipesFollowTheBookDirection() {
+        launch(rtl = true, paper = true)
         requireEngine()
         assertEquals(ReadingProgression.RTL, main { reader.fragment.settings.value.readingProgression })
         val width = pageWidth()
         val start = settledOffset()
         // R9: backward in an RTL book is a right-to-left finger; at the start of the book it must not move.
-        engineTurn("RTL backward swipe at the start of the book", false, "swipe") { drag(0.80f, 0.35f, hold = true) }
+        engineTurn("RTL backward swipe at the start of the book", true, "swipe") { drag(0.80f, 0.35f, hold = true) }
         assertEquals("The RTL start of the book rubber-bands; the page stays", start, settledOffset(), 1.0)
 
-        for (paper in listOf(false, true)) {
-            main { reader.changePaperPageTurn(paper) }
-            val before = settledOffset()
-            engineTurn("RTL forward swipe", paper, "swipe") { drag(0.20f, 0.65f, hold = true) }
-            val forward = settledOffset()
-            assertEquals("An RTL forward swipe turns exactly one page in book direction", width, before - forward, 2.0)
-            engineTurn("RTL backward swipe", paper, "swipe") { drag(0.80f, 0.35f, hold = true) }
-            assertEquals("An RTL backward swipe returns exactly one page", before, settledOffset(), 2.0)
-        }
+        val before = settledOffset()
+        engineTurn("RTL forward swipe", true, "swipe") { drag(0.20f, 0.65f, hold = true) }
+        val forward = settledOffset()
+        assertEquals("An RTL forward swipe turns exactly one page in book direction", width, before - forward, 2.0)
+        engineTurn("RTL backward swipe", true, "swipe") { drag(0.80f, 0.35f, hold = true) }
+        assertEquals("An RTL backward swipe returns exactly one page", before, settledOffset(), 2.0)
     }
 
     // ---- The toggle -----------------------------------------------------------------------------
@@ -229,24 +248,22 @@ class PageTurnTest {
     @Test fun paperPageTurnToggleRowPersistsAcrossANewSession() {
         launch()
         assertFalse("Paper page turn is off by default", main { reader.paperPageTurn })
-        assertEquals(PageTurnStyle.SLIDE, main { reader.pageTurns.style })
         click("reader-show-controls")
-        click("reader-more")
+        // Owner report 2026-10-31: the row was hard to find under More; it is now in the Aa sheet.
+        click("reader-text-settings")
         scrollTo("paper-page-turn")
         assertTrue("The toggle row announces its label", label(findTag("paper-page-turn")!!).contains("Paper page turn"))
         assertFalse("The row announces its off state", findTag("paper-page-turn")!!.isChecked)
         click("paper-page-turn")
         waitFor("the row turns the paper style on") { main { reader.paperPageTurn } }
         waitFor("the row announces its on state") { findTag("paper-page-turn")?.isChecked == true }
-        assertEquals(PageTurnStyle.PAPER, main { reader.pageTurns.style })
         waitFor("the setting is saved") { preferences.getBoolean("paperPageTurn", false) }
 
         scenario!!.close(); scenario = null
         launch(paper = null) // Keep what the row saved.
         assertTrue("The paper setting survives opening a new session", main { reader.paperPageTurn })
-        assertEquals(PageTurnStyle.PAPER, main { reader.pageTurns.style })
         click("reader-show-controls")
-        click("reader-more")
+        click("reader-text-settings")
         scrollTo("paper-page-turn")
         assertTrue("The reopened row shows on", findTag("paper-page-turn")!!.isChecked)
         click("reader-sheet-close")
@@ -261,18 +278,18 @@ class PageTurnTest {
 
     // ---- Frame-time sample on the inner screen --------------------------------------------------
 
-    /** Ten swipes per style on the unfolded inner screen; prints the frame-time counts for the record. */
-    @Test fun tenSwipesPerStyleReportFrameTimesOnTheInnerScreen() {
+    /** Ten paper swipes on the unfolded inner screen; prints the frame-time counts for the record. */
+    @Test fun tenPaperSwipesReportFrameTimesOnTheInnerScreen() {
         launch()
         assumeTrue("Unfold the phone: frame times are recorded on the inner screen " +
             "(smallest width ${host.resources.configuration.smallestScreenWidthDp}dp)",
             host.resources.configuration.smallestScreenWidthDp >= 600)
         requireEngine()
         val width = pageWidth()
-        for (paper in listOf(false, true)) {
+        for (paper in listOf(true)) {
             main { reader.changePaperPageTurn(paper) }
-            // Start each style at the top of the long chapter: ten turns per style must stay inside it,
-            // or a later turn would cross into chapter 1 and the in-chapter offset would reset.
+            // Start at the top of the long chapter: ten turns must stay inside it, or a later turn
+            // would cross into chapter 1 and the in-chapter offset would reset.
             js("readium.scrollToStart(); true")
             settledOffset()
             var overBudget = 0
@@ -355,6 +372,8 @@ class PageTurnTest {
         assertTrue("$label is a $source turn: $text", "source=$source;" in text)
         assertNotNull("$label records how and how fast the page was copied: $text", snapshot)
         assertNotNull("$label records its frame counts: $text", frames)
+        // The curl must follow the finger from its first move: the copy is taken at finger-down.
+        if (source == "swipe") assertTrue("$label used the snapshot taken at finger-down: $text", "early=yes;" in text)
         return text
     }
 
@@ -473,7 +492,7 @@ class PageTurnTest {
      * [hold] it takes 240 ms (a fling). With [hold] it moves at a walking pace and then rests for
      * 200 ms before lifting, so the release velocity is about zero and only the distance decides.
      */
-    private fun drag(start: Float, end: Float, hold: Boolean = false, sampler: RevealSamples? = null) {
+    private fun drag(start: Float, end: Float, hold: Boolean = false, sampler: RevealSamples? = null, watch: (() -> Unit)? = null) {
         val frame = webViewFrame()
         val y = frame.top + frame.height() * 0.60f
         fun x(fraction: Float) = frame.left + frame.width() * fraction
@@ -485,6 +504,7 @@ class PageTurnTest {
             SystemClock.sleep(stepMillis)
             send(down, SystemClock.uptimeMillis(), MotionEvent.ACTION_MOVE, x(start + (end - start) * step / steps), y)
             sampler?.sample()
+            watch?.invoke()
         }
         if (hold) repeat(5) {
             SystemClock.sleep(40)
@@ -493,6 +513,7 @@ class PageTurnTest {
         }
         send(down, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, x(end), y)
         instrumentation.waitForIdleSync()
+        if (watch != null) repeat(30) { watch(); SystemClock.sleep(16) }
     }
 
     private fun send(down: Long, time: Long, action: Int, x: Float, y: Float) {

@@ -23,6 +23,8 @@ internal interface PageTurnGestures {
     fun blockedTap(x: Float, y: Float) {}
     /** A passed-through gesture ended after enough sideways travel for Readium to page natively. */
     fun nativeSwipeEnded() {}
+    /** A finger touched the (unblocked) page: a swipe may follow, so its snapshot can start now. */
+    fun touchDown() {}
 }
 
 /**
@@ -87,6 +89,7 @@ internal class PageTurnTouchLayer(context: Context, val container: FragmentConta
                 velocity?.addMovement(event)
                 if (gestures?.touchesBlocked() == true) { mode = Mode.BLOCKED; return true }
                 mode = Mode.UNDECIDED
+                gestures?.touchDown()
                 return super.dispatchTouchEvent(event)
             }
             MotionEvent.ACTION_POINTER_DOWN -> when (mode) {

@@ -531,8 +531,8 @@ class NativeReaderTest {
     }
 
     /**
-     * 12 moves over 240 ms. Every caller drags 60% of the width, so the PT-1 engine commits it by
-     * both of its rules (past 30% of the width, and a fling), exactly like the native swipe did.
+     * 12 moves over 240 ms. With "Paper page turn" off (the default here) Readium pages natively;
+     * with it on, the PT-1 engine commits a 60% drag by both rules (past 30% of the width, and a fling).
      */
     private fun swipeViewport(start: Float, end: Float, y: Float) {
         val frame = webViewFrame()

@@ -89,7 +89,7 @@ internal class EpubSession(
     private val readerPreferences = activity.getSharedPreferences("reader", 0)
     var volumeKeys by mutableStateOf(readerPreferences.getBoolean("volumeKeys", false))
         private set
-    /** PT-1: paper curl instead of the smoothed slide. Off by default until the owner approves the feel. */
+    /** PT-1: paper curl. Off (the default): every page turn is Readium's own, exactly as before PT-1. */
     var paperPageTurn by mutableStateOf(readerPreferences.paperPageTurn())
         private set
     /** Text selection toolbar is open: swipes stay with Readium/Chromium selection handling. */
@@ -191,7 +191,7 @@ internal class EpubSession(
             pageColor = { readerBackground(themeName).toArgb() },
             onSwipeTurn = { noteUserTurn(PageTurnSource.SWIPE) },
             onBlockedTap = ::blockedTap,
-        ).apply { style = PageTurnStyle.of(paperPageTurn) }
+        )
         activity.lifecycle.addObserver(readingLifecycle)
         fragment.addInputListener(object : InputListener {
             override fun onDrag(event: DragEvent): Boolean {
@@ -536,7 +536,6 @@ internal class EpubSession(
 
     fun changePaperPageTurn(enabled: Boolean) {
         paperPageTurn = enabled
-        pageTurns.style = PageTurnStyle.of(enabled)
         readerPreferences.savePaperPageTurn(enabled)
     }
 
@@ -579,6 +578,7 @@ internal class EpubSession(
     }
 
     private fun turnConditions() = PageTurnConditions(
+        paperPageTurn = paperPageTurn,
         reflowable = supportsTypography,
         typographyUpdating = typographyUpdating,
         restoringViewport = restoringViewport || viewportContinuity.pending != null,
