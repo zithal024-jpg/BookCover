@@ -271,6 +271,10 @@ class PageTurnTest {
         val width = pageWidth()
         for (paper in listOf(false, true)) {
             main { reader.changePaperPageTurn(paper) }
+            // Start each style at the top of the long chapter: ten turns per style must stay inside it,
+            // or a later turn would cross into chapter 1 and the in-chapter offset would reset.
+            js("readium.scrollToStart(); true")
+            settledOffset()
             var overBudget = 0
             var frames = 0
             repeat(10) { turn ->
