@@ -221,19 +221,55 @@ changed. `scripts\Build.ps1` does not compile androidTest; `compileQaAndroidTest
   `%LOCALAPPDATA%\BookCoverBuild\tasks\pt1-c273832966f5eaef\evidence\57aff70f5fd6d603462d7066d56a7321d7c3006ef3a67a94d6c6d0599c98913d-4bd87669e9074eafaca30959bd49a607.json`.
   The APK `output\BookCover-pt1-c273832966f5eaef.apk` is git-ignored and was **not installed**.
 
+- Final check and device QA (2026-10-31): see "Step 7" below.
+
+## Step 7 final check and device QA (2026-10-31)
+
+Final independent check of the step-5/6 commits found two issues, fixed in `696dae8`:
+
+| # | Finding | Outcome |
+|---|---|---|
+| F1 | A Previous/Next button turn latched the bottom clip before the controls closed, so the snapshot kept the progress row and slid it with the page. | Fixed: `turnBottomClip` is read after the wait frames, just before the snapshot. |
+| F2 | The R12 reveal check could pass with zero samples. | Fixed: it samples during the drag as well and asserts at least one sample. |
+
+`scripts\Build.ps1 -TaskId pt1 -Owner Claude`: BUILD SUCCESSFUL; assembleDebug, testQaUnitTest
+299/299, lintDebug and lintQa; source snapshot `11a08d8d…93a2`; APK SHA-256 `e322cbc2…ba97`.
+
+Device QA on the owner's Fold (`RFGL710TARJ`), isolated `com.bookcover.diagnostic.qa` app only,
+through `scripts\Test-Device.ps1 -TaskId pt1`, phone unfolded and untouched:
+
+- Before the run the phone had **Android animations off** (Remove animations on, all three
+  animation scales 0). With that setting the engine deliberately takes its instant path, so the
+  owner could not have seen any slide or curl. The owner turned animations back on.
+- Run 1 (`PageTurnTest`, `NativeReaderTest`, `ReadingKeysAccessibilityTest`): 27/28. The failure
+  was a test defect: the frame sample's paper turns continued from where the slide turns stopped
+  and crossed into chapter 1 on the 19th turn. Fixed in `e0e0992` (each style starts at the
+  chapter start).
+- Run 2 (`PageTurnTest`): 9/9, 0 skipped.
+- R12 reveal (backward chapter crossing): 36 to 42 samples per crossing, all showed the correct
+  page. R9 (RTL start of book) passed.
+- Frame times on the inner screen at 120 Hz, ten swipe turns each:
+
+| Style | Frames | Over budget |
+|---|---|---|
+| Slide | 200 | 0 |
+| Paper curl | 320 | 0 |
+
+  The worst single frame in either style was 10.8 ms. Budget is a missed vsync (over 12.5 ms). PixelCopy succeeded on every turn, 6 to 43 ms.
+- Installed in place with `adb install -r`; `firstInstallTime` unchanged, so app data was kept.
+
 ## What is built and what is NOT verified
 
-**Built and checked on this PC (JVM only):** the engine state machine, the commit, cancel and
-rubber-band rules, RTL direction mapping, settle timing, curl geometry and mesh bounds, the
-frame meter, and the toggle preference (default off). The app compiles and passes lint.
+**Verified:** JVM unit tests (299/299), lint, and the isolated on-phone `PageTurnTest` (both
+styles: one-page swipes, cancel, chapter boundaries including the R12 reveal, book ends, edge and
+centre taps, page buttons, RTL, toggle persistence, frame times) plus `NativeReaderTest` and
+`ReadingKeysAccessibilityTest` on the owner's Fold.
 
-**Not verified at all.** This run had no device QA, no `Test-Device.ps1`, no adb and no install:
-- No on-phone test ran. `PageTurnTest` (step 6) is written and compiles but has not run on the
-  phone; the existing swipe tests' waits were adjusted for the engine, also not yet run.
-- Unmeasured on the phone: PixelCopy success and snapshot time on the inner screen, the
-  readiness signal (R12), the 6 dp takeover against Chromium's slop (R8), and RTL book edges (R9).
-- Smoothness is unmeasured on the phone. There are no frame-time numbers for ten turns yet:
-  they come from the `PT-1 turn …` log lines during QA.
-- No owner observation: the look and feel of the slide and the paper curl, a cancelled half
-  swipe, chapter boundaries, Night theme and rotation mid-turn. Only the owner looking at the
-  phone can confirm the feel.
+**Not verified yet:**
+- The owner's own observation of the feel of both styles, the curl radius, a cancelled half
+  swipe, chapter boundaries, the Night theme and a rotation or fold mid-turn. Only the owner
+  looking at the phone can confirm the feel.
+- Fixed-layout books stay on Readium's native turns; no fixed-layout device check was run.
+- The frame meter measures UI-thread frame intervals and overlay draw time, not GPU time.
+- Debug builds still log one `PT-1 turn` line per turn; quiet it to failures only after the
+  owner signs off.
