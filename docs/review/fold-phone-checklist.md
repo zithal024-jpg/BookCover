@@ -7,7 +7,7 @@ Do the steps in order. Each test names the branch to check out. Stay with that b
 ## Before you start
 
 1. On the phone, turn on USB debugging and tap Allow on the computer prompt. Connect the USB cable.
-2. Unlock the phone, unfold it fully, and leave it open on the table. Write down the phone's current screen timeout first (Settings, Display, Screen timeout). Then set it to 10 minutes so it does not lock during a run. The last step of this checklist puts that written-down value back. Do not touch the screen while a command is running.
+2. Unlock the phone, unfold it fully, and leave it open on the table. Before any testing, write down the phone's original screen timeout (Settings, Display, Screen timeout). Then set it to 10 minutes so it does not lock during a run. After the sitting, restore that original timeout. Do not touch the screen while a command is running.
 3. In PowerShell, from the BookCover folder, find the phone. The serial is the first column. Earlier notes for this Fold used `RFGL710TARJ`; use the serial this command prints.
 
 ```powershell
@@ -162,7 +162,7 @@ QA instrumentation command:
 adb -s DEVICE_SERIAL shell am instrument -w -r -e class com.bookcover.diagnostic.testing.NativeReaderTest#explicitRtlEdgesFollowBookDirectionAndPreserveNativeInteractions com.bookcover.diagnostic.qa.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
-Expected: one test passes. A swipe moves the page in the book's direction. On the emulator this wait often timed out (`Timed out waiting for native swipe advances in book direction`). A pass here means the swipe moved the page.
+Expected: one test passes. A swipe moves the page in the book's direction. On the emulator this wait timed out all five attempts (`Timed out waiting for native swipe advances in book direction`), so the triage calls it a likely real issue, confirm on Fold. A pass here means the swipe moved the page.
 
 Record: commit, pass or fail, `OK (1 test)` or that timeout line, and the receipt path.
 

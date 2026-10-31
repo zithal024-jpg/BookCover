@@ -13,7 +13,7 @@ On the owner's Fold, this same source already passed the reader cohort **44/44**
 | Real app bug | 0 | — |
 | Environment (emulator device config) | 4 | the four fold-state checks |
 | Flaky (injected swipe on this emulator) | 5 | five of the six `NativeReaderTest` swipe checks |
-| Unresolved, needs Fold run | 1 | `NativeReaderTest.explicitRtlEdgesFollowBookDirectionAndPreserveNativeInteractions` |
+| Likely real issue, confirm on Fold | 1 | `NativeReaderTest.explicitRtlEdgesFollowBookDirectionAndPreserveNativeInteractions` |
 
 ## What was rerun
 
@@ -48,7 +48,7 @@ The other 63 tests from the original 73 were not rerun. This session does not re
 | 3 | `ReaderLifecycleTest.foldingAndUnfoldingKeepTheBookAtTheSamePlace` | Environment | Same message at `ReaderLifecycleTest.kt:78` |
 | 4 | `ScreenIdleTest.recreationAndFoldingKeepTheOriginalDeadline` | Environment | Same message at `ScreenIdleTest.kt:101` |
 | 5 | `NativeReaderTest.optionalEdgeTapsPreserveSwipesAndFollowLinksInsteadOfTurningPages` | Flaky | `Timed out waiting for a normal swipe advances a page` (`NativeReaderTest.kt:126`), and once `Timed out waiting for swipes still work after toggling edge taps` (`NativeReaderTest.kt:150`) |
-| 6 | `NativeReaderTest.explicitRtlEdgesFollowBookDirectionAndPreserveNativeInteractions` | Unresolved, needs Fold run | `Timed out waiting for native swipe advances in book direction` (`NativeReaderTest.kt:195`) on all 5 attempts |
+| 6 | `NativeReaderTest.explicitRtlEdgesFollowBookDirectionAndPreserveNativeInteractions` | Likely real issue, confirm on Fold | `Timed out waiting for native swipe advances in book direction` (`NativeReaderTest.kt:195`) on all 5 attempts |
 | 7 | `NativeReaderTest.languageInferredRtlUsesTheSameEdgeDirectionAsReadium` | Flaky | Same message at line 195 on 3 of 4 attempts; the fourth attempt passed |
 | 8 | `NativeReaderTest.explicitLtrDirectionOverridesAnRtlLanguageForEdgeTurns` | Flaky | Same message at line 195 on 1 of 3 attempts; the other two passed |
 | 9 | `NativeReaderTest.rtlImagePagesAcceptEdgeTapsOnArtwork` | Flaky | `Timed out waiting for native swipe still advances an RTL image page` (`NativeReaderTest.kt:273`) on 2 of 3 attempts; the third passed |
@@ -169,11 +169,11 @@ The seven `NativeReaderTest` methods that never call `swipeViewport` all passed 
 
 ## 6. `explicitRtlEdgesFollowBookDirectionAndPreserveNativeInteractions`
 
-- **Classification:** unresolved, needs Fold run. This is not a confirmed app bug, and it is not flaky.
+- **Classification:** likely real issue, confirm on Fold.
 - **Test:** `NativeReaderTest.explicitRtlEdgesFollowBookDirectionAndPreserveNativeInteractions` (`NativeReaderTest.kt:165`), which calls `checkDirectionalEdgeTurns(rightToLeft = true)`.
 - **Message:** `Timed out waiting for native swipe advances in book direction` at `NativeReaderTest.kt:195`.
 - **Where:** `swipeViewport(0.20, 0.80, 0.60)` at line 194, then the wait at line 195. The disabled-edge tap assertion just above it had passed, because the timeout is the swipe wait.
-- **Why:** The same method failed 5 of 5 attempts in this session (the full class run, two runs of the six swipe methods, the paired right-to-left rerun, and one more isolated run). A pass was not observed, so there is no local evidence that this check flips. That is why it is not labeled flaky. It is also not a confirmed bug. It uses the same helper and the same wait as `languageInferredRtlUsesTheSameEdgeDirectionAsReadium`, which passed once, and as `explicitLtrDirectionOverridesAnRtlLanguageForEdgeTurns`, which passed twice. The drag listener in `EpubSession.kt` returns false, so BookCover does not consume the gesture. The backlog's Fold cohort passed this method inside `NativeReaderTest` 13/13. Those two facts keep an app-bug label from being settled. The next check is the Fold command in `docs/review/fold-phone-checklist.md`.
+- **Why:** The same method failed 5 of 5 attempts in this session (the full class run, two runs of the six swipe methods, the paired right-to-left rerun, and one more isolated run). A pass was not observed, so there is no local evidence that this check flips. That is why it is not labeled flaky, and why a steady emulator failure is treated as a likely real issue. It is not yet a confirmed bug. It uses the same helper and the same wait as `languageInferredRtlUsesTheSameEdgeDirectionAsReadium`, which passed once, and as `explicitLtrDirectionOverridesAnRtlLanguageForEdgeTurns`, which passed twice. The drag listener in `EpubSession.kt` returns false, so BookCover does not consume the gesture. The backlog's Fold cohort passed this method inside `NativeReaderTest` 13/13. The Fold command in `docs/review/fold-phone-checklist.md` is what confirms it.
 
 ## 7. `languageInferredRtlUsesTheSameEdgeDirectionAsReadium`
 
@@ -210,7 +210,7 @@ The seven `NativeReaderTest` methods that never call `swipeViewport` all passed 
 ## What this session could not settle
 
 - The original `r2fix6` JUnit XML is not in the repository, so the word-for-word assertion text of that run was not re-read. The backlog names the 10 tests. The messages in this document are from the reruns above. Those reruns failed the same four fold tests. Five swipe checks both failed and passed. `explicitRtlEdgesFollowBookDirectionAndPreserveNativeInteractions` only failed.
-- `explicitRtlEdgesFollowBookDirectionAndPreserveNativeInteractions` is unresolved and needs a Fold run. It failed 5 of 5 times here, so it is not flaky. The shared swipe helper did pass for the Hebrew and left-to-right tests, and the recorded Fold cohort passed this method, so it is not a confirmed bug either.
+- `explicitRtlEdgesFollowBookDirectionAndPreserveNativeInteractions` is a likely real issue, to confirm on the Fold. It failed 5 of 5 times here, so it is not flaky. The shared swipe helper did pass for the Hebrew and left-to-right tests, and the recorded Fold cohort passed this method, so it is not a confirmed bug until that phone run.
 - Taskbar `InputDispatcher` drops were captured, including during a passing test. This session did not turn the Taskbar off and rerun, and it did not repeat the older `UiAutomation` injection trial. Which individual pointer event was discarded on each failed swipe was not isolated.
 - The other 63 tests in the 73-test run were not executed again. The full `NativeReaderTest` class was executed once: its seven non-swipe methods passed.
 - This was not the owner's emulator process and not the owner's Fold. WebView versionCode differed (`694313738` here, `694313707` in the backlog's description of the task-owned emulator). The screen size, density, API level, gesture navigation, and "device state 0 only" list matched.
