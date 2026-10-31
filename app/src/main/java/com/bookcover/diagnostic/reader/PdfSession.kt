@@ -13,6 +13,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import com.github.barteksc.pdfviewer.PDFView
+import com.github.barteksc.pdfviewer.util.FitPolicy
 import com.bookcover.diagnostic.DiagnosticLog
 import com.bookcover.diagnostic.library.BookLibrary
 import com.bookcover.diagnostic.library.BookRecord
@@ -77,6 +78,9 @@ internal class PdfSession(
     init {
         val engine = PdfiumEngineProvider(listener = object : PdfiumEngineProvider.Listener {
             override fun onConfigurePdfView(configurator: PDFView.Configurator) {
+                // Readium's PDFium adapter leaves the viewer at its width-fit default, even
+                // when its preferences request contain. Fit every page to both dimensions.
+                configurator.pageFitPolicy(FitPolicy.BOTH).fitEachPage(true).autoSpacing(true)
                 // AndroidPdfViewer otherwise launches external URLs in another app by default.
                 configurator.linkHandler { event ->
                     val link = event.link
