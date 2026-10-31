@@ -154,7 +154,8 @@ internal class EpubSession(
             listener = object : EpubNavigatorFragment.Listener {
                 override fun onJumpToLocator(locator: Locator) {
                     // Readium's own placement of the opened position is not a user navigation.
-                    if (!restoringViewport && !(holdsOpenedPassage && locator == openedLocator)) {
+                    // That placement is the opened locator itself. A different progression is another jump.
+                    if (!restoringViewport && !reportIsOpenedPassage(holdsOpenedPassage, locator, openedLocator)) {
                         invalidateViewportAnchor()
                         viewportContinuity.remember(locator, viewportContinuity.generation)
                     }
@@ -238,16 +239,20 @@ internal class EpubSession(
                     // Readium first reports the opened locator itself, before the page has moved there.
                     // The DOM then still shows the resource start; describing it saved the chapter
                     // start, so the next reopen landed there (R2, Fold logs). Keep the opened passage.
-                    val visible = if (holdsOpenedPassage && locator == openedLocator) locator
-                        else withTimeoutOrNull(1_000) { fragment.visibleReadingAnchor() }
-                            ?: viewportContinuity.anchor ?: locator
+                    // A later report can differ only in progression. That is not this echo: save the
+                    // visible page, which still carries the opened quote when the page has not moved on.
+                    val echo = reportIsOpenedPassage(holdsOpenedPassage, locator, openedLocator)
+                    val screen = if (echo) null else withTimeoutOrNull(1_000) { fragment.visibleReadingAnchor() }
+                    val visible = passageReportedWhileHolding(
+                        holdsOpenedPassage, locator, openedLocator, screen, viewportContinuity.anchor)
                     val semantic = visible.copy(locations = visible.locations.copy(
                         totalProgression = locator.locations.totalProgression, position = locator.locations.position))
                     viewportContinuity.remember(semantic, generation)
                     if (generation == viewportContinuity.generation && viewportContinuity.pending == null) {
                         // Showing any other passage, however it got there, ends the hold on the opened one.
-                        if (semantic.href != openedLocator?.href || semantic.text.highlight != openedLocator?.text?.highlight)
-                            holdsOpenedPassage = false
+                        holdsOpenedPassage = openedHoldContinues(
+                            holdsOpenedPassage, openedLocator?.href, openedLocator?.text?.highlight,
+                            semantic.href, semantic.text.highlight)
                         positions.submit(semantic)
                     }
                 }
