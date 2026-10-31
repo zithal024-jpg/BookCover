@@ -16,6 +16,7 @@ import com.bookcover.diagnostic.library.BookFormat
 import com.bookcover.diagnostic.library.BookRecord
 import com.bookcover.diagnostic.library.LibraryIndex
 import com.bookcover.diagnostic.reader.PdfSession
+import com.github.barteksc.pdfviewer.PDFView
 import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
@@ -53,8 +54,9 @@ class PdfReaderIntegrationTest {
         onActivity { it.openBookForTests(book) }
         val reader = waitForReader(book)
         waitFor("the PDF viewer displays its first page") { viewerPage(reader) == 0 && pagePosition(reader) == 1 }
-        onActivity { reader.next() }
-        waitFor("page two is visible and its position is reported") { viewerPage(reader) == 1 && pagePosition(reader) == 2 }
+        val beforeTurn = onActivity { diagnosticState(reader) }
+        val immediate = onActivity { reader.next(); diagnosticState(reader) }
+        waitForSecondPage(reader, beforeTurn, immediate)
         onActivity { reader.next() }
         waitFor("the last page is visible and its position is reported") { viewerPage(reader) == 2 && pagePosition(reader) == 3 }
         onActivity { reader.flushPosition() }
@@ -124,6 +126,51 @@ class PdfReaderIntegrationTest {
         if (count != 3) null else view.javaClass.getMethod("getCurrentPage").invoke(view) as Int
     }
 
+    /** Generated fixture only: show the viewer, navigator and position without book content. */
+    private fun diagnosticState(reader: PdfSession): String {
+        fun find(view: View): PDFView? = when (view) {
+            is PDFView -> view
+            is ViewGroup -> (0 until view.childCount).firstNotNullOfOrNull { find(view.getChildAt(it)) }
+            else -> null
+        }
+        val view = reader.fragment.view?.let(::find) ?: return "viewer missing"
+        val file = runCatching { PDFView::class.java.getDeclaredField("pdfFile").apply { isAccessible = true }.get(view) }.getOrNull()
+        fun offset(page: Int): Any? = runCatching {
+            file?.javaClass?.getDeclaredMethod("getPageOffset", Int::class.javaPrimitiveType, Float::class.javaPrimitiveType)
+                ?.apply { isAccessible = true }?.invoke(file, page, view.zoom)
+        }.getOrNull()
+        val size0 = view.getPageSize(0)
+        val size1 = view.getPageSize(1)
+        val locator = reader.fragment.currentLocator.value
+        return "viewPage=${view.currentPage}, pageCount=${view.pageCount}, savedPosition=${reader.currentLocator?.locations?.position}, " +
+            "navPosition=${locator.locations.position}, navFragments=${locator.locations.fragments}, " +
+            "x=${view.currentXOffset}, y=${view.currentYOffset}, width=${view.width}, height=${view.height}, zoom=${view.zoom}, " +
+            "page0=${size0.width}x${size0.height}, page1=${size1.width}x${size1.height}, " +
+            "pageOffset0=${offset(0)}, pageOffset1=${offset(1)}"
+    }
+
+    private fun waitForSecondPage(reader: PdfSession, before: String, immediate: String) {
+        val start = SystemClock.uptimeMillis()
+        val deadline = start + 15_000
+        var at500: String? = null
+        var at1500: String? = null
+        var last = immediate
+        while (SystemClock.uptimeMillis() < deadline) {
+            val elapsed = SystemClock.uptimeMillis() - start
+            val snapshot = onActivity {
+                val state = diagnosticState(reader)
+                val position = reader.currentLocator?.locations?.position
+                Triple(state, position, reader.fragment.currentLocator.value.locations.position)
+            }
+            last = snapshot.first
+            if (elapsed >= 500 && at500 == null) at500 = last
+            if (elapsed >= 1500 && at1500 == null) at1500 = last
+            if (viewerPage(reader) == 1 && snapshot.second == 2) return
+            SystemClock.sleep(60)
+        }
+        throw AssertionError("Page two did not settle. Before: $before; immediate: $immediate; " +
+            "500ms: $at500; 1500ms: $at1500; last: $last")
+    }
     private fun <T> onActivity(block: (MainActivity) -> T): T {
         var result: Result<T>? = null
         scenario!!.onActivity { result = runCatching { block(it) } }

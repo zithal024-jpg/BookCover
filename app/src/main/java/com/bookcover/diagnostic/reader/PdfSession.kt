@@ -132,8 +132,8 @@ internal class PdfSession(
         }
     }
 
-    fun next() { readerActive(); if (fragment.isAdded) fragment.goForward(animated = true); controlsVisible = false }
-    fun previous() { readerActive(); if (fragment.isAdded) fragment.goBackward(animated = true); controlsVisible = false }
+    fun next() { readerActive(); if (fragment.isAdded) fragment.goForward(animated = false); controlsVisible = false }
+    fun previous() { readerActive(); if (fragment.isAdded) fragment.goBackward(animated = false); controlsVisible = false }
     private fun goToPage(page: Int) {
         val locator = currentLocator ?: return
         if (page >= 0 && fragment.isAdded) {
