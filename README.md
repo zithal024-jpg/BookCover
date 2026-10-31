@@ -150,7 +150,7 @@ Local `main` (at `cfc9549`) and `origin/main` (at `af0695b`) have diverged and m
 
 - **`UX §2`:** Verify fixed-pixel reflowable publisher CSS vs. relative-size text with publisher styles on/off across narrow/wide and 100%/200% text; document recovery or close without code changes if resizing works as expected.
 - **`UX validation` (`BC-10` follow-up):** Consolidated TalkBack, 200% system text, 48 × 48 dp touch-target, and WCAG contrast verification pass once `S2` and reader surfaces settle.
-- **`BC-22 / S1`:** Configurable inner-screen idle timeout (replacing whole-session `FLAG_KEEP_SCREEN_ON`) and 60-minute unfolded battery drain measurement on physical hardware.
+- **`BC-22 / S1`:** While reading, More → Screen while reading keeps the inner screen on for 2, 5, or 10 minutes after the last touch or key, or Always (default 5). After that, the phone's own timeout applies. The outside-cover countdown is unchanged. A 60-minute unfolded battery measurement on the physical Fold is still open.
 - **`BC-26` acceptance reconciliation:** Confirm visible friendly error messages on device/QA for corrupt EPUB import and non-backup restore.
 - **`BC-15`:** Incremental extraction of remaining `MainActivity`-owned session/operation state into a ViewModel or state holder.
 - **`BC-19 / S3`:** Owner observation of sustained unfolded reading to decide whether an optional two-page spread mode (`ColumnCount`) is warranted.
