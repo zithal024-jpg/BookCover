@@ -102,6 +102,8 @@ internal class EpubSession(
     private val viewportContinuity = ReadingViewportContinuity<Locator>()
     private var viewportJob: Job? = null
     private var restoringViewport = false
+    private val openedLocator = currentLocator
+    private var holdsOpenedPassage = openedLocator != null
     private var viewportSettled: (() -> Unit)? = null
     private val readingLifecycle = object : DefaultLifecycleObserver {
         override fun onPause(owner: LifecycleOwner) { readingPace.pause(); record(readingTime.pause(SystemClock.elapsedRealtime())) }
@@ -112,6 +114,13 @@ internal class EpubSession(
             readingPace.pause()
             chapters.invalidateLayout()
             currentLocator?.let(::refreshChapter)
+            // The system bars can finish hiding just after a reopened book placed its saved passage,
+            // resizing the reader without a configuration change; on the Fold it then showed the
+            // chapter start (R2). Until the reader navigates or shows another passage, hold the opened
+            // passage across such resizes. After navigation the destination may not be reported yet.
+            // Hold the opened passage itself: by now Readium may already report its reset position.
+            if (holdsOpenedPassage && !typographyUpdating && oldRight - oldLeft > 0 && oldBottom - oldTop > 0)
+                viewportContinuity.begin(openedLocator)
             if (viewportContinuity.pending != null) restoreViewportWhenSettled()
         }
     }
@@ -144,7 +153,10 @@ internal class EpubSession(
             },
             listener = object : EpubNavigatorFragment.Listener {
                 override fun onJumpToLocator(locator: Locator) {
-                    if (!restoringViewport) {
+                    // Readium's own placement of the opened position is not a user navigation.
+                    // The same chapter and quote, or the same stable marker, still counts when
+                    // progression or other fields differ. A different passage clears the hold.
+                    if (!restoringViewport && !reportIsOpenedPassage(holdsOpenedPassage, locator, openedLocator) { DiagnosticLog.record(it) }) {
                         invalidateViewportAnchor()
                         viewportContinuity.remember(locator, viewportContinuity.generation)
                     }
@@ -225,13 +237,23 @@ internal class EpubSession(
                     val generation = viewportContinuity.generation
                     // Keep the last precise passage during this asynchronous query (including
                     // resume notifications for an unchanged page). Explicit navigation clears it.
-                    val visible = withTimeoutOrNull(1_000) { fragment.visibleReadingAnchor() }
-                        ?: viewportContinuity.anchor ?: locator
-                    val semantic = visible.copy(locations = visible.locations.copy(
-                        totalProgression = locator.locations.totalProgression, position = locator.locations.position))
+                    // Readium first reports the opened passage before the page has moved there.
+                    // The screen still shows the chapter start. Keep the opened locator when this
+                    // report has the same chapter and quote, or the same stable marker, even if
+                    // progression or other fields differ. Describing the screen saved the chapter start.
+                    val keepOpened = reportIsOpenedPassage(holdsOpenedPassage, locator, openedLocator)
+                    val screen = if (keepOpened) null else withTimeoutOrNull(1_000) { fragment.visibleReadingAnchor() }
+                    val semantic = passageReportedWhileHolding(
+                        holdsOpenedPassage, locator, openedLocator, screen, viewportContinuity.anchor,
+                    ) { DiagnosticLog.record(it) }
                     viewportContinuity.remember(semantic, generation)
-                    if (generation == viewportContinuity.generation && viewportContinuity.pending == null)
+                    if (generation == viewportContinuity.generation && viewportContinuity.pending == null) {
+                        // Showing any other passage, however it got there, ends the hold on the opened one.
+                        holdsOpenedPassage = openedHoldContinues(
+                            holdsOpenedPassage, openedLocator?.href, openedLocator?.text?.highlight,
+                            semantic.href, semantic.text.highlight)
                         positions.submit(semantic)
+                    }
                 }
                 refreshChapter(locator)
                 DiagnosticLog.record("EPUB position=${(progress * 100).toInt()}%; same host activity")
@@ -295,6 +317,7 @@ internal class EpubSession(
     }
 
     private fun invalidateViewportAnchor() {
+        holdsOpenedPassage = false
         viewportJob?.cancel()
         viewportContinuity.navigated()
         viewportSettled?.invoke(); viewportSettled = null
@@ -329,7 +352,16 @@ internal class EpubSession(
                 restoringViewport = true
                 val restored = try { fragment.go(anchor, animated = false) } finally { restoringViewport = false }
                 delay(200)
-                viewportContinuity.complete(generation)?.let { positions.submit(it) }
+                viewportContinuity.complete(generation)?.let { held ->
+                    // A hold that began before any visible passage was described has only Readium's
+                    // locator; describe the restored page so later restores keep a precise passage.
+                    val settled = viewportContinuity.generation
+                    val described = !(held.locations["cssSelector"] as? String).isNullOrBlank() && held.text.highlight != null
+                    val refined = if (described) null else withTimeoutOrNull(1_000) { fragment.visibleReadingAnchor() }
+                        ?.let { it.copy(locations = it.locations.copy(totalProgression = held.locations.totalProgression, position = held.locations.position)) }
+                    refined?.let { viewportContinuity.remember(it, settled) }
+                    if (settled == viewportContinuity.generation && viewportContinuity.pending == null) positions.submit(refined ?: held)
+                }
                 currentLocator?.let(::refreshChapter)
                 DiagnosticLog.record("EPUB viewport resized in place; semantic passage restored=$restored")
             } catch (cancelled: CancellationException) { throw cancelled }
