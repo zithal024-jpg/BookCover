@@ -258,17 +258,51 @@ through `scripts\Test-Device.ps1 -TaskId pt1`, phone unfolded and untouched:
   The worst single frame in either style was 10.8 ms. Budget is a missed vsync (over 12.5 ms). PixelCopy succeeded on every turn, 6 to 43 ms.
 - Installed in place with `adb install -r`; `firstInstallTime` unchanged, so app data was kept.
 
+## Step 8 owner report and rework (2026-10-31)
+
+After the step-7 install the owner reported that the toggle could not be found and that text now
+stuttered between page turns. Both were real:
+
+- The switch was the third row of the **More** sheet, in a short scrolling panel. The step-7
+  directions said "Controls", which was wrong.
+- The app-drawn "smoothed slide" covered the revealed page with plain page colour until the turned
+  page was drawn, then faded the text in (D10). A swipe also froze for the 6-43 ms the snapshot took,
+  then jumped to the finger.
+
+Rework (`107fa4b`):
+
+- "Paper page turn" **off** (the default): `PageTurnRules.path` returns NATIVE, so swipes pass
+  straight to Readium and taps, buttons and keys call `goForward/goBackward(animated = true)`, exactly
+  as before PT-1 (`19cd1f4`). The slide style and its drawing code were removed.
+- **On**: a swipe's snapshot starts at finger-down (`PageTurnController.touchDown`) and is used when the
+  swipe is recognised only if the same WebView, scroll position and locator are still shown.
+- The switch is in the **Aa** (Text and page) sheet, below text size, so page colour and text size stay
+  first at large system text (H3).
+
+Independent review (three lenses, each finding adversarially verified):
+
+| Finding | Outcome |
+|---|---|
+| An early copy could show a page the app had since moved (contents refinement, search, link jumps) | Fixed: the copy is used only if the same page is still shown. |
+| The new row above text size pushed A+ out of view at 200% text on the cover screen | Fixed: the row is below the text-size slider, with a shorter summary. |
+| An orphaned early copy could overwrite the bitmap after an abort | Rejected: later copies are served in order and win; no visible effect. |
+| The disabled switch shows On in fixed-layout books | Rejected: standard disabled-setting display; the summary states the behaviour. |
+
+`scripts\Build.ps1 -TaskId pt1 -Owner Claude`: BUILD SUCCESSFUL; testQaUnitTest 299/299; lintDebug and
+lintQa; source snapshot `e5826719…0a77`; APK SHA-256 `1405e9dc…d9b2`. qa androidTest sources compile.
+`PageTurnTest` now checks that standard turns never show the overlay or reach the engine, and that every
+paper swipe used the finger-down copy (`early=yes`).
+
 ## What is built and what is NOT verified
 
-**Verified:** JVM unit tests (299/299), lint, and the isolated on-phone `PageTurnTest` (both
-styles: one-page swipes, cancel, chapter boundaries including the R12 reveal, book ends, edge and
-centre taps, page buttons, RTL, toggle persistence, frame times) plus `NativeReaderTest` and
-`ReadingKeysAccessibilityTest` on the owner's Fold.
+**Verified:** JVM unit tests (299/299), lint, and compilation of the on-phone tests for the step-8
+rework. The step-7 device results describe the previous build, not this one.
 
 **Not verified yet:**
-- The owner's own observation of the feel of both styles, the curl radius, a cancelled half
-  swipe, chapter boundaries, the Night theme and a rotation or fold mid-turn. Only the owner
-  looking at the phone can confirm the feel.
+- No device run of the step-8 rework (`PageTurnTest`, `NativeReaderTest`, `ReadingKeysAccessibilityTest`);
+  the phone was disconnected. Not installed on the owner's phone.
+- The owner's own observation: that normal turns no longer stutter, that the switch is easy to find, and
+  how the paper curl feels. Only the owner looking at the phone can confirm the feel.
 - Fixed-layout books stay on Readium's native turns; no fixed-layout device check was run.
 - The frame meter measures UI-thread frame intervals and overlay draw time, not GPU time.
 - Debug builds still log one `PT-1 turn` line per turn; quiet it to failures only after the
