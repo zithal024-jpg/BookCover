@@ -602,7 +602,9 @@ internal class PageTurnController(
         pageGeneration++
         overlayVisible = false
         pageReady = true
-        progress = 0f
+        // progress is left where the turn ended: resetting it to 0 here redrew the whole outgoing page
+        // flat for one frame before recomposition removed the overlay (owner report, 2026-10-31). The
+        // next turn sets it before its first draw (showOverlay, swipeMoved).
         coverFade = 0f
         rubberBand = false
         if (debuggable) DiagnosticLog.record("PT-1 turn style=paper; snapshot=${snapshotMillis}ms via $snapshotMethod; " +

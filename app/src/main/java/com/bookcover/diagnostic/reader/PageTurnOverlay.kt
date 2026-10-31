@@ -39,6 +39,9 @@ internal fun PageTurnOverlay(controller: PageTurnController, pageColor: Color, b
     val pixelDensity = density.density
     Spacer(modifier.drawBehind {
         controller.snapshotVersion // A new snapshot redraws even at the same progress.
+        // Read in draw too: a turn can end after this frame's recomposition, and the overlay must not
+        // draw the outgoing page again in the frame before it is removed.
+        if (!controller.overlayVisible) return@drawBehind
         val started = controller.drawStarted()
         // Until the turned page is drawn (and at the book's edge) the uncovered area is plain page;
         // a committed swipe that outran its page fades that cover off instead of popping (D10).
