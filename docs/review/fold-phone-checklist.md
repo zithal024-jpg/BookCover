@@ -171,6 +171,91 @@ Expected: one test passes. A swipe moves the page in the book's direction. On th
 
 Record: commit, pass or fail, `OK (1 test)` or that timeout line, and the receipt path.
 
+## 5. Inner-screen timeout (BC-22)
+
+Branch: `cursor/bc22-inner-screen-timeout-652d` (pull request 9).
+
+This branch adds one phone test class, `com.bookcover.diagnostic.testing.ScreenIdleTest`, with four methods. `InnerScreenAwakeTest` is a computer test and is not part of this sitting. The phone tests move a clock forward. They do not wait out a real minute, so the manual steps after them are the check that the screen actually sleeps.
+
+| Test | Class and method |
+|---|---|
+| Touch and page key renew | `com.bookcover.diagnostic.testing.ScreenIdleTest#onlyGenuineInputRenewsTheReadingScreen` |
+| Fold keeps the deadline | `com.bookcover.diagnostic.testing.ScreenIdleTest#recreationAndFoldingKeepTheOriginalDeadline` |
+| Leaving does not renew | `com.bookcover.diagnostic.testing.ScreenIdleTest#pauseReleasesAndResumeKeepsTheDeadline` |
+| Always is remembered | `com.bookcover.diagnostic.testing.ScreenIdleTest#alwaysAndTheSavedChoiceSurviveRecreation` |
+
+The fold method here is the copy on this branch. It is not the section 3 run, which uses `claude/reader-test-fixes`.
+
+```powershell
+git fetch origin
+git checkout cursor/bc22-inner-screen-timeout-652d
+git rev-parse --short HEAD
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-Device.ps1 -TaskId fold-sit-bc22 -Serial DEVICE_SERIAL -PhoneReleaseEvidence 'Owner is here. Phone is free, unfolded, and unlocked.' -TestClass 'com.bookcover.diagnostic.testing.ScreenIdleTest#onlyGenuineInputRenewsTheReadingScreen,com.bookcover.diagnostic.testing.ScreenIdleTest#recreationAndFoldingKeepTheOriginalDeadline,com.bookcover.diagnostic.testing.ScreenIdleTest#pauseReleasesAndResumeKeepsTheDeadline,com.bookcover.diagnostic.testing.ScreenIdleTest#alwaysAndTheSavedChoiceSurviveRecreation'
+```
+
+Gradle filter:
+
+```text
+-Pandroid.testInstrumentationRunnerArguments.class=com.bookcover.diagnostic.testing.ScreenIdleTest#onlyGenuineInputRenewsTheReadingScreen,com.bookcover.diagnostic.testing.ScreenIdleTest#recreationAndFoldingKeepTheOriginalDeadline,com.bookcover.diagnostic.testing.ScreenIdleTest#pauseReleasesAndResumeKeepsTheDeadline,com.bookcover.diagnostic.testing.ScreenIdleTest#alwaysAndTheSavedChoiceSurviveRecreation
+```
+
+QA instrumentation command:
+
+```text
+adb -s DEVICE_SERIAL shell am instrument -w -r -e class com.bookcover.diagnostic.testing.ScreenIdleTest#onlyGenuineInputRenewsTheReadingScreen,com.bookcover.diagnostic.testing.ScreenIdleTest#recreationAndFoldingKeepTheOriginalDeadline,com.bookcover.diagnostic.testing.ScreenIdleTest#pauseReleasesAndResumeKeepsTheDeadline,com.bookcover.diagnostic.testing.ScreenIdleTest#alwaysAndTheSavedChoiceSurviveRecreation com.bookcover.diagnostic.qa.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+Expected: four tests pass. A touch and a page key start the hold again. Scrolling by code, rotating, folding, and coming back to the app do not. **Always** keeps the hold. Two minutes expires from the same last input.
+
+Record: commit, pass or fail for each of the four names, any assertion line, and the receipt path.
+
+The same checkout, one method at a time, if you need to repeat a single failure:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-Device.ps1 -TaskId fold-sit-input -Serial DEVICE_SERIAL -PhoneReleaseEvidence 'Owner is here. Phone is free, unfolded, and unlocked.' -TestClass 'com.bookcover.diagnostic.testing.ScreenIdleTest#onlyGenuineInputRenewsTheReadingScreen'
+```
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-Device.ps1 -TaskId fold-sit-bc22fold -Serial DEVICE_SERIAL -PhoneReleaseEvidence 'Owner is here. Phone is free, unfolded, and unlocked.' -TestClass 'com.bookcover.diagnostic.testing.ScreenIdleTest#recreationAndFoldingKeepTheOriginalDeadline'
+```
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-Device.ps1 -TaskId fold-sit-pause -Serial DEVICE_SERIAL -PhoneReleaseEvidence 'Owner is here. Phone is free, unfolded, and unlocked.' -TestClass 'com.bookcover.diagnostic.testing.ScreenIdleTest#pauseReleasesAndResumeKeepsTheDeadline'
+```
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Test-Device.ps1 -TaskId fold-sit-always -Serial DEVICE_SERIAL -PhoneReleaseEvidence 'Owner is here. Phone is free, unfolded, and unlocked.' -TestClass 'com.bookcover.diagnostic.testing.ScreenIdleTest#alwaysAndTheSavedChoiceSurviveRecreation'
+```
+
+### Look at the real screen
+
+Do this in the QA app, `com.bookcover.diagnostic.qa`, after the command above. If that app is gone, install only its QA package from this task. Do not install `app-debug.apk` over the main BookCover app.
+
+```powershell
+& "$env:LOCALAPPDATA\BookCoverBuild\sdk\platform-tools\adb.exe" -s DEVICE_SERIAL shell pm path com.bookcover.diagnostic.qa
+Get-ChildItem "$env:LOCALAPPDATA\BookCoverBuild\tasks\fold-sit-bc22-*\project-output\app\outputs\apk\qa\app-qa.apk"
+& "$env:LOCALAPPDATA\BookCoverBuild\sdk\platform-tools\adb.exe" -s DEVICE_SERIAL install -r PATH_FROM_THE_PREVIOUS_LINE
+& "$env:LOCALAPPDATA\BookCoverBuild\sdk\platform-tools\adb.exe" -s DEVICE_SERIAL shell am start -n com.bookcover.diagnostic.qa/com.bookcover.diagnostic.MainActivity
+```
+
+Skip `install` when `pm path` already prints a path. Write down what you see. These steps are your eyes, not a Gradle result.
+
+1. Set the phone's own Display timeout to 1 minute and write that number down. Open a sample book. Tap the middle of the page, tap **More**, and under **Screen while reading** choose **2 min**. Leave the book open and do not touch it. Expected: the inner screen stays on for those 2 minutes, then the phone's own 1 minute runs, then the inner screen sleeps.
+2. Wake the phone and set **Screen while reading** to **Always**. Leave it longer than 2 minutes plus the phone's timeout. Expected: the inner screen stays on.
+3. Set **Screen while reading** back to **2 min**. Touch the page once. Later, press a page key once. Expected: each one starts the 2 minutes again from that moment. If the inner screen had already slept, that touch or page key wakes it and starts the time again.
+4. With **2 min** still selected, note the time, then rotate the phone and fold and unfold it without touching the page. Expected: the remaining time keeps going. The 2 minutes do not start over. The inner screen still sleeps at the original deadline plus the phone's own timeout.
+5. With a book open, look at the outside cover. Expected: its countdown still starts when the cover starts, and turning a page does not start that countdown over. **Stop** turns the cover off. Leaving the book, back to the library, also turns the cover off. That is the same cover behavior as before this change.
+
+### Optional 60-minute battery reading
+
+Skip this if you do not have the hour. It is not pass or fail. Write the conditions before you start, then read the battery at the start and after 60 minutes.
+
+```powershell
+& "$env:LOCALAPPDATA\BookCoverBuild\sdk\platform-tools\adb.exe" -s DEVICE_SERIAL shell dumpsys battery
+```
+
+Write down: QA package `com.bookcover.diagnostic.qa`, **Screen while reading** choice, phone Display timeout, cover on or off and its timer, brightness, airplane mode on or off, plugged in or not, clock time, and the battery `level` from that command. A comparable reading uses the QA app, charge above 80 percent, then unplugged, brightness left fixed, airplane mode on, **Screen while reading** at **5 min**, and the cover on with its 60-minute timer. Do not touch the page during the hour. Run the battery command again after 60 minutes and write the new time and level.
+
 ## Results
 
 | # | Check | Branch | Commit | Pass or fail | What the run printed | Receipt path |
@@ -182,6 +267,16 @@ Record: commit, pass or fail, `OK (1 test)` or that timeout line, and the receip
 | 5 | Same place after fold | `claude/reader-test-fixes` | | | | |
 | 6 | Idle deadline across fold | `claude/reader-test-fixes` | | | | |
 | 7 | Right-to-left swipe | `claude/reader-test-fixes` | | | | |
+| 8 | Touch and page key renew | `cursor/bc22-inner-screen-timeout-652d` | | | | |
+| 9 | Fold keeps the deadline | `cursor/bc22-inner-screen-timeout-652d` | | | | |
+| 10 | Leaving does not renew | `cursor/bc22-inner-screen-timeout-652d` | | | | |
+| 11 | Always is remembered | `cursor/bc22-inner-screen-timeout-652d` | | | | |
+| 12 | Manual: untouched book sleeps | `cursor/bc22-inner-screen-timeout-652d` | | | what you saw | |
+| 13 | Manual: Always stays on | `cursor/bc22-inner-screen-timeout-652d` | | | what you saw | |
+| 14 | Manual: touch or page key restarts | `cursor/bc22-inner-screen-timeout-652d` | | | what you saw | |
+| 15 | Manual: rotate or fold continues | `cursor/bc22-inner-screen-timeout-652d` | | | what you saw | |
+| 16 | Manual: cover Stop, leave, countdown | `cursor/bc22-inner-screen-timeout-652d` | | | what you saw | |
+| 17 | Optional 60-minute battery | `cursor/bc22-inner-screen-timeout-652d` | | | start level / end level | |
 
 Device state at the start: `print-state` ________  `print-states` ________
 
