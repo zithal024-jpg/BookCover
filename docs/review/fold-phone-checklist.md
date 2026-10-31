@@ -7,7 +7,7 @@ Do the steps in order. Each test names the branch to check out. Stay with that b
 ## Before you start
 
 1. On the phone, turn on USB debugging and tap Allow on the computer prompt. Connect the USB cable.
-2. Unlock the phone, unfold it fully, and leave it open on the table. Set the screen timeout to 10 minutes so it does not lock during a run. Do not touch the screen while a command is running.
+2. Unlock the phone, unfold it fully, and leave it open on the table. Write down the phone's current screen timeout first (Settings, Display, Screen timeout). Then set it to 10 minutes so it does not lock during a run. The last step of this checklist puts that written-down value back. Do not touch the screen while a command is running.
 3. In PowerShell, from the BookCover folder, find the phone. The serial is the first column. Earlier notes for this Fold used `RFGL710TARJ`; use the serial this command prints.
 
 ```powershell
