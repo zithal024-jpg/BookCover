@@ -26,6 +26,33 @@ below. This document records work, not release readiness.
   uses isolated QA through the supported helper, required resource release evidence
   and owner availability.
 
+## Owner-phone installs
+
+Adopted 2026-10-27 after an in-place F3 install (from a branch without S2) replaced
+the owner-confirmed S2 Library Home build on the phone. No data was lost, but the
+redesign silently disappeared. Before installing anything on the owner's phone:
+
+1. **No-regression check:** confirm the candidate build's commit contains the last
+   installed commit below (`git merge-base --is-ancestor <installed> <candidate>`).
+   If it does not, stop and integrate first.
+2. **Integrated builds only:** install from a build containing current `main`
+   (local and GitHub reconciled), not from a feature branch that is behind it.
+3. **Whole-app owner check:** after installing, ask the owner to glance at Library,
+   reader and outer cover, not only the feature under test.
+4. **Update the record below** in the same change as the install evidence.
+
+**Currently installed on `RFGL710TARJ`:** integration merge `7ce3066` (local `main`
+`cf2c339` + GitHub `main` `af0695b`, including S2, F1–F4, BC-26, BC-28), APK SHA-256
+`17ea4c8f…19915e400`, installed in place 2026-10-27 16:29 (UTC−4) by Opus at the
+owner's request. Read back from the phone: installed `base.apk` hash matches,
+`versionCode` 6, `firstInstallTime` unchanged (2026-10-26 14:35). It replaced the F3
+build `db379d4` (installed 14:51), which `7ce3066` contains. Before install: 248 unit
+tests and lint passed; emulator Library Home, accessibility and BC-26 tests passed;
+`ReaderProcessDeathTest` is intermittent on the emulator (3 of 7 combined runs passed)
+with reader code identical to `db379d4`. Owner whole-app check 2026-10-27: the owner
+reported that the redesigned Library shows, and reading, the outer cover and their
+books all look fine.
+
 ## Active queue
 
 F1/F4 and S2 can proceed in parallel in separate data/activity and Library UI files.
@@ -46,7 +73,7 @@ independently where its dependencies and shared files permit.
 | **BC-19 / S3** | Later; original P2 | Open enhancement; observation before implementation priority | — | Observe sustained long-real-book reading at preferred size/margins; use results to rank a spread option. If pursued, retain folded single-page reading, safe hinge layout and passage continuity. Do not force two pages to fill width. | Owner observation; H3 uncertainty before reader edits. | [Original spread scope](EXPERT-PANEL-REVIEW.md#prioritized-issue-register), UX “Later”; `ColumnCount.ONE` at `5eed90b`. Wide screenshots alone do not establish harm. |
 | **BC-20** (calibration only) | Later; original P2 | Estimator calibrated; natural-reading owner validation pending | Argon; review follow-up Claude | Calibrated `ReadingPace.kt` (Winsorized recency-weighted rate, `1e-6` float-jitter guard, `0.00001` min step (lowered from `0.0002` in review so long books still get estimates), `1%/s` ceiling, multi-page skim-burst filter, backward-turn retrace high-water mark kept across controls pauses, `< 0.5 min` -> `0`, `> 600 min` -> `null`). Observe reading-speed/time-left estimates during natural reading; record usefulness or needed calibration, conditions and owner feedback. Contents, chapter progress and named bookmarks stay complete. | Owner reading observation; reader wiring untouched (`EpubSession.kt` untouched). | [BC-20 evidence](../BC-20-READING-NAVIGATION.md#validation-record): core owner-confirmed; `Build.ps1 -TaskId bc20-pace -Owner Argon` passed (**257/257 unit tests**, `ReadingPaceTest` 17/17 including side-by-side legacy vs. calibrated synthetic benchmarks, `assembleDebug`, `lintDebug`, `lintQa` zero errors); task `bc20-pace-8a60708d62ea442a`, snapshot `8304137d8a27ce5a99fa02a57753bacd9b2bb8820067962d950d8e1ab0ec6118`, evidence manifest `8304137d8a27ce5a99fa02a57753bacd9b2bb8820067962d950d8e1ab0ec6118-aef3403ff4c8423a9b599b49d6b9a4f2.json`. Review follow-up (Claude, `claude/bc20-pace-calibration-review-5b20c5`, merged with local main): `Build.ps1 -TaskId bc20-review -Owner Claude` **259/259 units** (`ReadingPaceTest` 19/19), `assembleDebug`, `lintDebug`, `lintQa` zero errors; task `bc20-review-2b02507aac1b942e`, snapshot `ce28d4c4ae495d8a457417d17e1a0be5ac9ded0c6b9022a868fd1cb486bb5a86`. Not pushed; not installed. Natural-reading owner observation on phone remains explicitly pending. |
 | **BC-28** | Later; original P3 | Review found documentation corrections needed | Argon | Consolidate current README, architecture/contribution/change guidance and clearly archived history: a contributor finds one supported build/test route. Preserve history/safety; no second active tracker. | This queue/pointers complete a subset only. | [BC-28 evidence](EXPERT-PANEL-REVIEW.md#completion-tracker), `90e25bb` + Argon follow-up (`README.md`, `START-HERE.md`, `docs/DEVELOPMENT.md`, `docs/review/BUILD-AND-INSTALL.md`, `docs/review/KNOWN-LIMITATIONS.md`, `docs/review/OVERVIEW.md`): consolidated current `0.4.0-prototype` build/unit/lint/isolated-QA commands verified against `Build.ps1`, `Test-Device.ps1` and `Package-Review.py` (including `-ToolRoot` and `-TestClass`); documented safe `adb install -r` in-place updates and signature-mismatch/downgrade recovery without ever uninstalling or clearing data; aligned backup/restore guidance and limits with `BC-05`, `F1/F4` (`db27ced`), `F2` (`ea697d2`/`094811a`), `F3` (`5b083e3` / `origin/main` `db379d4`), `BC-27` (`74ed155`) and local-only Streak `reading-days.json`; added an honest release-readiness summary separating owner-validated `main`, automated-tested `main`, diverged `origin/main` / worktrees (`S2` `224b907`/`1cfc2cd` and `F3` `db379d4`/`2f8df76` on `origin/main` `af0695b` vs `F2` `094811a` on local `main` `cfc9549`, plus `h3` `a8f6d9e` and `911beba`) and open items (`UX §2`, `UX validation`, `BC-22/S1`, `BC-26` phone check, `BC-15`, `BC-19/S3`, `BC-20` calibration, `BC-11`); archived historical `0.3.0` and `2026-10-26` baseline prose in `<details>`. Verified all relative links, file paths and `git diff --check`. **2026-10-27 Codex documentation review:** original `df0ef2d` contains factual errors; existing `a61a48f` corrects the test package, evidence directory, save delay, developer taps, reader themes, configChanges and unsupported claims (not yet in local main). Even `27f6c54` still misstates `-Plan` as reporting locks, JDK folder layout, current recovery copy (`books.last-good.json`, with `.bak` only legacy fallback), the UI label (`Save backup`, not Export backup), and full BC-01–29 completion. After BC-26 integration, distinguish completed emulator checks from unperformed owner-phone validation in overview text. Relative Markdown file targets exist; whitespace checks pass. Documentation follow-up branches and Opus BC-22 changes remain separate from this two-commit BC-26 integration. |
-| **BC-11** | Owner decision; original P1 | Decisions pending; engineering unassigned | Owner for decisions | Final name/application ID, signing and release/distribution intent. After owner choices, audit existing release setup and define remaining signed-release acceptance. Keep keys out of Git and preserve installed library. | Owner choices, then relevant fix/validation evidence. Queue authorizes no publication/release. | [BC-11 scope](EXPERT-PANEL-REVIEW.md#prioritized-issue-register); BC-24 already records unsigned-release manifest checks, so original absence of release build cannot be assumed. |
+| **BC-11** | Owner decision; original P1 | Display name and application ID recorded; signing and release still open | Owner for decisions | Display name is BookCover. Application ID is com.frankrodriguez.bookcover. Both are recorded in the private tester handoff. Signing and release/distribution intent remain open. After those remaining choices, audit existing release setup and define remaining signed-release acceptance. Keep keys out of Git and preserve installed library. This record does not change the built application ID. | Remaining owner choices, then relevant fix/validation evidence. Queue authorizes no publication/release. | [BC-11 scope](EXPERT-PANEL-REVIEW.md#prioritized-issue-register); [private tester handoff](PRIVATE-TESTER-HANDOFF.md). BC-24 already records unsigned-release manifest checks, so original absence of release build cannot be assumed. |
 
 ## Shared-file caution and scope limits
 
