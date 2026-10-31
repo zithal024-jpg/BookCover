@@ -154,8 +154,9 @@ internal class EpubSession(
             listener = object : EpubNavigatorFragment.Listener {
                 override fun onJumpToLocator(locator: Locator) {
                     // Readium's own placement of the opened position is not a user navigation.
-                    // That placement is the opened locator itself. A different progression is another jump.
-                    if (!restoringViewport && !reportIsOpenedPassage(holdsOpenedPassage, locator, openedLocator)) {
+                    // The same chapter and quote, or the same stable marker, still counts when
+                    // progression or other fields differ. A different passage clears the hold.
+                    if (!restoringViewport && !reportIsOpenedPassage(holdsOpenedPassage, locator, openedLocator) { DiagnosticLog.record(it) }) {
                         invalidateViewportAnchor()
                         viewportContinuity.remember(locator, viewportContinuity.generation)
                     }
@@ -236,17 +237,15 @@ internal class EpubSession(
                     val generation = viewportContinuity.generation
                     // Keep the last precise passage during this asynchronous query (including
                     // resume notifications for an unchanged page). Explicit navigation clears it.
-                    // Readium first reports the opened locator itself, before the page has moved there.
-                    // The DOM then still shows the resource start; describing it saved the chapter
-                    // start, so the next reopen landed there (R2, Fold logs). Keep the opened passage.
-                    // A later report can differ only in progression. That is not this echo: save the
-                    // visible page, which still carries the opened quote when the page has not moved on.
-                    val echo = reportIsOpenedPassage(holdsOpenedPassage, locator, openedLocator)
-                    val screen = if (echo) null else withTimeoutOrNull(1_000) { fragment.visibleReadingAnchor() }
-                    val visible = passageReportedWhileHolding(
-                        holdsOpenedPassage, locator, openedLocator, screen, viewportContinuity.anchor)
-                    val semantic = visible.copy(locations = visible.locations.copy(
-                        totalProgression = locator.locations.totalProgression, position = locator.locations.position))
+                    // Readium first reports the opened passage before the page has moved there.
+                    // The screen still shows the chapter start. Keep the opened locator when this
+                    // report has the same chapter and quote, or the same stable marker, even if
+                    // progression or other fields differ. Describing the screen saved the chapter start.
+                    val keepOpened = reportIsOpenedPassage(holdsOpenedPassage, locator, openedLocator)
+                    val screen = if (keepOpened) null else withTimeoutOrNull(1_000) { fragment.visibleReadingAnchor() }
+                    val semantic = passageReportedWhileHolding(
+                        holdsOpenedPassage, locator, openedLocator, screen, viewportContinuity.anchor,
+                    ) { DiagnosticLog.record(it) }
                     viewportContinuity.remember(semantic, generation)
                     if (generation == viewportContinuity.generation && viewportContinuity.pending == null) {
                         // Showing any other passage, however it got there, ends the hold on the opened one.
