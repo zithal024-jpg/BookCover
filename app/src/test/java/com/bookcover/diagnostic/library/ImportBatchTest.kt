@@ -130,11 +130,11 @@ class ImportBatchTest {
             failed = listOf(ImportFailure("broken.epub", ZipException("zip END header not found")),
                 ImportFailure("locked.epub", IllegalArgumentException("This EPUB is protected. The prototype opens DRM-free EPUBs."))))
         assertEquals("Imported 17 of 20 books. 1 was already in your library. 2 couldn't be imported: " +
-            "broken.epub (not a readable EPUB), locked.epub (copy-protected). Your other books are safe.", importSummaryMessage(summary))
+            "broken.epub (not a readable EPUB or PDF), locked.epub (copy-protected). Your other books are safe.", importSummaryMessage(summary))
         val all = ImportSummary(3, imported = listOf("a", "b", "c"))
         assertEquals("Imported 3 books. Tap a cover to read.", importSummaryMessage(all))
         val many = ImportSummary(6, imported = listOf("a"), failed = (1..5).map { ImportFailure("f$it.epub", ZipException("x")) })
-        assertTrue(importSummaryMessage(many), importSummaryMessage(many).contains("f3.epub (not a readable EPUB) and 2 more"))
+        assertTrue(importSummaryMessage(many), importSummaryMessage(many).contains("f3.epub (not a readable EPUB or PDF) and 2 more"))
     }
 
     @Test fun progressReadsNaturally() {

@@ -68,6 +68,7 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
     val books = mutableBooks.asStateFlow()
     fun book(id: String): BookRecord? = mutableBooks.value.firstOrNull { it.id == id }
     fun epubFile(book: BookRecord): File = File(directory, "${book.id}.epub")
+    fun bookFile(book: BookRecord): File = File(directory, "${book.id}.${book.format.extension}")
     fun coverFile(book: BookRecord): File = File(directory, "${book.id}.png")
     fun thumbnailFile(book: BookRecord): File = File(directory, "${book.id}.thumb.png")
     // Recently shown library tiles, keyed by book and cover revision so a replaced cover is never stale.
@@ -101,7 +102,7 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
     private fun extractColor(book: BookRecord): Int = coverThemeSeed(thumbnailBitmap(book))
 
     /**
-     * Deletes `import-*.epub` copies that no running import owns, left behind when the app was killed
+     * Deletes `import-*.epub` and `import-*.pdf` copies that no running import owns, left behind when the app was killed
      * mid-import (BC-27). Books, covers, the library list and any other file are never touched.
      */
     internal fun cleanAbandonedImports(): Int = synchronized(activeImports) {
@@ -112,8 +113,8 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
     }
 
     /** Creates and registers an import copy in one step, so cleanup can never see it unregistered. */
-    internal fun newImportTemp(): File = synchronized(activeImports) {
-        File.createTempFile("import-", ".epub", directory).also { activeImports += it.absolutePath }
+    internal fun newImportTemp(format: BookFormat = BookFormat.EPUB): File = synchronized(activeImports) {
+        File.createTempFile("import-", ".${format.extension}", directory).also { activeImports += it.absolutePath }
     }
 
     internal fun finishImportTemp(file: File) = synchronized(activeImports) {
@@ -147,15 +148,26 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
 
     suspend fun import(uri: Uri): Pair<BookRecord, Boolean> = withContext(Dispatchers.IO) {
         val input = context.contentResolver.openInputStream(uri) ?: throw IOException("Could not read the selected file")
-        input.use { importStream(it, "Books") }
+        input.use { importStream(it, "Books", displayName(uri)) }
     }
 
     suspend fun importSample(assetName: String): Pair<BookRecord, Boolean> = withContext(Dispatchers.IO) {
         context.assets.open(assetName).use { importStream(it, "Samples") }
     }
 
-    private suspend fun importStream(input: InputStream, collection: String): Pair<BookRecord, Boolean> {
-        val temporary = newImportTemp()
+    private suspend fun importStream(input: InputStream, collection: String, displayName: String? = null): Pair<BookRecord, Boolean> {
+        val buffered = input.buffered()
+        buffered.mark(1024)
+        val header = ByteArray(1024)
+        var headerLength = 0
+        while (headerLength < header.size) {
+            val read = buffered.read(header, headerLength, header.size - headerLength)
+            if (read <= 0) break
+            headerLength += read
+        }
+        buffered.reset()
+        val format = detectBookFormat(header, headerLength)
+        val temporary = newImportTemp(format)
         try {
             val digest = MessageDigest.getInstance("SHA-256")
             temporary.outputStream().use { output ->
@@ -163,33 +175,34 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
                 var total = 0L
                 while (true) {
                     currentCoroutineContext().ensureActive() // Stop importing: abandon the copy promptly.
-                    val read = input.read(buffer)
+                    val read = buffered.read(buffer)
                     if (read < 0) break
                     total += read
-                    require(total <= 200L * 1024 * 1024) { "This prototype imports EPUBs up to 200 MB" }
+                    require(total <= 200L * 1024 * 1024) { "This prototype imports books up to 200 MB" }
                     output.write(buffer, 0, read); digest.update(buffer, 0, read)
                 }
             }
-            checkEpubArchive(temporary)
+            if (format == BookFormat.EPUB) checkEpubArchive(temporary)
             currentCoroutineContext().ensureActive()
             val id = digest.digest().joinToString("") { "%02x".format(it) }
             book(id)?.let { return it to false }
             val publication = engine.open(temporary)
             try {
                 val now = System.currentTimeMillis()
-                val record = BookRecord(id, publication.metadata.title?.takeIf { it.isNotBlank() } ?: "Untitled",
+                val record = BookRecord(id, publication.metadata.title?.takeIf { it.isNotBlank() }
+                    ?: displayName?.substringBeforeLast('.')?.takeIf { it.isNotBlank() } ?: "Untitled",
                     publication.metadata.authors.map { it.name }.filter { it.isNotBlank() }.joinToString(", ").ifBlank { "Unknown author" },
-                    now, collection, coverRevision = now)
+                    now, collection, coverRevision = now, format = format)
                 val cover = runCatching { publication.coverFitting(Size(1080, 1600)) }.getOrNull() ?: placeholder(record)
                 lock.withLock {
                     check(loaded) { "Your library list could not be read, so BookCover is not saving changes to protect it." }
                     val operation = currentCoroutineContext()
                     operation.ensureActive()
                     book(id)?.let { return it to false }
-                    importFinalization.commit(id, writeAssets = {
+                    importFinalization.commit(id, format, writeAssets = {
                         // New files only: never replace an existing/recoverable copy. No AtomicFile
                         // sidecars here; each completed asset is synced before the index can refer to it.
-                        writeImportAsset(epubFile(record)) { output -> temporary.inputStream().use { it.copyTo(output) } }
+                        writeImportAsset(bookFile(record)) { output -> temporary.inputStream().use { it.copyTo(output) } }
                         operation.ensureActive()
                         writeImportAsset(coverFile(record)) { output ->
                             if (!cover.compress(Bitmap.CompressFormat.PNG, 100, output)) throw IOException("Could not save the book cover")
@@ -228,7 +241,7 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
         lock.withLock {
             val record = book(id) ?: return@withLock
             persist(mutableBooks.value.filterNot { it.id == id })
-            epubFile(record).delete(); coverFile(record).delete(); thumbnailFile(record).delete()
+            bookFile(record).delete(); coverFile(record).delete(); thumbnailFile(record).delete()
             forgetThumbnails(id)
         }
     }

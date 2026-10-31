@@ -217,7 +217,7 @@ class FriendlyErrorActivityTest {
         // Existing MainActivity declaration order, also used by BackupPickerRecreationTest.
         const val IMPORT = "activity_rq#0"
         const val RESTORE = "activity_rq#3"
-        const val IMPORT_ERROR = "This file isn't a readable EPUB. It may be damaged, not fully downloaded, or a different kind of file. Try downloading it again. Your library is unchanged."
+        const val IMPORT_ERROR = "This file isn't a readable EPUB or PDF. It may be damaged, not fully downloaded, or a different kind of file. Try downloading it again. Your library is unchanged."
         const val RESTORE_ERROR = "That file isn't a BookCover backup. Choose a file made with Save backup. Your library is unchanged."
     }
 }

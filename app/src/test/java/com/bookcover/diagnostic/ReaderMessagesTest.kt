@@ -112,7 +112,7 @@ class ReaderMessagesTest {
             technical.forEach { word -> assertFalse("'$reason' contains $word", reason.lowercase().contains(word)) }
             assertTrue("'$reason' too long", reason.length <= 40)
         }
-        assertEquals("not a readable EPUB", shortFailureReason(FailureReason.NOT_EPUB))
+        assertEquals("not a readable EPUB or PDF", shortFailureReason(FailureReason.NOT_EPUB))
         assertEquals("copy-protected", shortFailureReason(FailureReason.PROTECTED_BOOK))
         assertEquals("over 200 MB", shortFailureReason(FailureReason.TOO_LARGE))
     }

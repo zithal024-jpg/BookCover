@@ -174,7 +174,7 @@ class LibraryAccessibilityTest {
     @Test fun twoHundredPercentTextKeepsImportBooksOptionsAndSettingsReachable() {
         launch(fontScale = 2f)
         assertEquals("Only this QA activity uses 200% system text", 2f, main { host.resources.configuration.fontScale }, 0.01f)
-        click("Import EPUB")
+        click("Import books")
         assertEquals("Import can be activated through accessibility", 1, main { host.importRequests })
         click("Open ${book.title}, by ${book.author}")
         assertEquals("The full book label opens the expected book", book.id, main { host.openedBookId })

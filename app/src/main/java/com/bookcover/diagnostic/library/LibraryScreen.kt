@@ -186,7 +186,7 @@ private fun HomeHeader(joined: Boolean, hasBooks: Boolean, busy: Boolean, query:
         else Spacer(Modifier.weight(1f))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Home.Gap)) {
             FilledTonalButton(onClick = onImport, enabled = !busy, contentPadding = PaddingValues(start = 12.dp, end = 16.dp),
-                modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "Import EPUB" }) {
+                modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "Import books" }) {
                 PlusGlyph(); Spacer(Modifier.width(Home.Gap)); Text("Import")
             }
             IconButton(onClick = onSettings, modifier = Modifier.size(48.dp).semantics { contentDescription = "Settings" }) { GearGlyph() }
@@ -324,11 +324,11 @@ private fun EmptyLibrary(onImport: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Your library is empty", style = MaterialTheme.typography.headlineSmall.copy(fontFamily = Home.Serif),
             textAlign = TextAlign.Center, modifier = Modifier.semantics { heading() })
-        Text("Import a DRM-free EPUB from your phone's files to start reading. BookCover keeps its own copy; the original stays in Files.",
+        Text("Import a DRM-free EPUB or PDF from your phone's files to start reading. BookCover keeps its own copy; the original stays in Files.",
             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center, modifier = Modifier.widthIn(max = 420.dp))
         Button(onClick = onImport, modifier = Modifier.padding(top = Home.Gap).heightIn(min = 48.dp)) {
-            PlusGlyph(); Spacer(Modifier.width(Home.Gap)); Text("Import EPUB")
+            PlusGlyph(); Spacer(Modifier.width(Home.Gap)); Text("Import books")
         }
     }
 }

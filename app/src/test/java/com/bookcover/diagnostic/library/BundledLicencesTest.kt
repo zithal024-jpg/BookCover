@@ -54,7 +54,7 @@ class BundledLicencesTest {
             .findAll(buildScript.readText()).map { it.groupValues[3] }.toSet()
         // Runtime libraries pulled in by those (./gradlew :app:dependencies, debugRuntimeClasspath, 2026-10-26).
         val transitive = setOf("androidx.media3", "androidx.appcompat", "com.google.guava", "com.jakewharton.timber",
-            "com.mcxiaoke.koi", "org.jetbrains.kotlin", "org.jetbrains.kotlinx", "org.jetbrains", "org.jspecify")
+            "com.mcxiaoke.koi", "com.github.marain87", "org.jetbrains.kotlin", "org.jetbrains.kotlinx", "org.jetbrains", "org.jspecify")
         (declared + transitive).forEach { group ->
             assertTrue("$group has no licence notice", BUNDLED_LICENCES.any { notice -> notice.covers.any { group == it || group.startsWith("$it.") } })
         }

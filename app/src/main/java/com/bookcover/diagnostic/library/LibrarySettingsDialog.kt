@@ -108,7 +108,7 @@ internal fun LibrarySettingsDialog(
                         }
                         LibrarySettingsPage.BACKUP -> {
                             Text("Saves reading positions, bookmarks and collections to a file you choose. " +
-                                "Book files are not included; keep your EPUBs. To restore after reinstalling, import your EPUBs first.",
+                                "Book files are not included; keep your EPUBs and PDFs. To restore after reinstalling, import your books first.",
                                 style = MaterialTheme.typography.bodySmall)
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 TextButton(onClick = { onDismiss(); onExportBackup() }, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp)) { Text("Save backup") }
@@ -116,7 +116,7 @@ internal fun LibrarySettingsDialog(
                             }
                         }
                         LibrarySettingsPage.ABOUT -> {
-                            Text("EPUB engine: Readium 3.4.0 · BSD 3-Clause\nOpenDyslexic font by Abelardo Gonzalez · CC BY 3.0, based on Bitstream Vera",
+                            Text("Reading engine: Readium 3.4.0 · BSD 3-Clause\nOpenDyslexic font by Abelardo Gonzalez · CC BY 3.0, based on Bitstream Vera",
                                 style = MaterialTheme.typography.bodySmall)
                             TextButton(onClick = { showLicences = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("library-settings-licences")) { Text("Licences") }
                             Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("library-settings-version")

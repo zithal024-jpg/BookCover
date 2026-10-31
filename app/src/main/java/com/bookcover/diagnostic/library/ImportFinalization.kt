@@ -22,23 +22,26 @@ internal class ImportFinalization(directory: File) {
         private val indexPattern = Regex("books(?:\\.last-good|\\.damaged-[0-9]+)?\\.json(?:\\.bak)?(?:\\.(?:tmp|new))?")
     }
 
-    fun <T> commit(id: String, writeAssets: () -> Unit, persist: () -> T): T {
+    fun <T> commit(id: String, writeAssets: () -> Unit, persist: () -> T): T =
+        commit(id, BookFormat.EPUB, writeAssets, persist)
+
+    fun <T> commit(id: String, format: BookFormat, writeAssets: () -> Unit, persist: () -> T): T {
         require(idPattern.matches(id))
         val receipt = File(directory, "pending-import-$id")
         synchronized(guard) {
-            if (receipt.exists() || assets(id).any { it.exists() }) {
+            if (receipt.exists() || BookFormat.entries.any { format -> assets(id, format).any { it.exists() } }) {
                 throw IOException("An earlier copy of this book needs to be preserved")
             }
             // CREATE_NEW prevents replacing even an unexpected receipt. Failure here creates no assets.
             Files.newOutputStream(receipt.toPath(), StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE).use {
-                it.write(receiptText(id).toByteArray(Charsets.UTF_8))
+                it.write(receiptText(id, format).toByteArray(Charsets.UTF_8))
             }
             FileOutputStream(receipt, true).use { it.fd.sync() }
             active += receipt.absolutePath
         }
         try {
             writeAssets()
-            if (assets(id).any { !it.isFile || it.length() == 0L }) throw IOException("The imported book files are incomplete")
+            if (assets(id, format).any { !it.isFile || it.length() == 0L }) throw IOException("The imported book files are incomplete")
             val result = persist()
             // The committed index now owns the files; failure to remove a receipt is harmless.
             runCatching { receipt.delete() }
@@ -74,14 +77,15 @@ internal class ImportFinalization(directory: File) {
 
     private fun recoverReceipt(receipt: File, referenced: Set<String>?): Int {
         val id = receiptPattern.matchEntire(receipt.name)?.groupValues?.get(1) ?: return 0
-        if (referenced == null || !receipt.isFile || receipt.length() != receiptText(id).length.toLong() ||
-            receipt.readText() != receiptText(id)) return 0
+        if (referenced == null || !receipt.isFile || receipt.length() > 200) return 0
+        val text = receipt.readText()
+        val format = BookFormat.entries.firstOrNull { text == receiptText(id, it) } ?: return 0
         if (id in referenced) {
             // A committed/recoverable index owns these assets, so retire our deletion authority.
             receipt.delete()
             return 0
         }
-        val files = assets(id)
+        val files = assets(id, format)
         val removed = files.count { it.isFile && it.delete() }
         if (files.none { it.exists() }) receipt.delete()
         return removed
@@ -106,6 +110,9 @@ internal class ImportFinalization(directory: File) {
         } catch (_: Exception) { null }
     }
 
-    private fun assets(id: String) = listOf("$id.epub", "$id.png", "$id.thumb.png").map { File(directory, it) }
-    private fun receiptText(id: String) = "BookCover import 1\n$id\n"
+    private fun assets(id: String, format: BookFormat) = listOf("$id.${format.extension}", "$id.png", "$id.thumb.png").map { File(directory, it) }
+    private fun receiptText(id: String, format: BookFormat) = when (format) {
+        BookFormat.EPUB -> "BookCover import 1\n$id\n"
+        BookFormat.PDF -> "BookCover import 2\n$id\npdf\n"
+    }
 }

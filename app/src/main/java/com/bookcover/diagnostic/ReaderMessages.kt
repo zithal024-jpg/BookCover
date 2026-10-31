@@ -28,13 +28,14 @@ internal fun failureReason(error: Throwable): FailureReason {
         error is LibraryBackupException || "library backup" in text -> FailureReason.NOT_A_BACKUP
         "DRM-free" in text || "is protected" in text -> FailureReason.PROTECTED_BOOK
         "up to 200 MB" in text || "exceeds the prototype's import limit" in text -> FailureReason.TOO_LARGE
-        "no readable chapters" in text -> FailureReason.NO_CHAPTERS
+        "no readable chapters" in text || "no readable pages" in text -> FailureReason.NO_CHAPTERS
         "Could not write the backup file" in text -> FailureReason.BACKUP_NOT_WRITTEN
         "Could not save the book" in text || "imported book files are incomplete" in text ||
             "earlier copy of this book" in text -> FailureReason.IMPORT_NOT_SAVED
         "Remote publication resources" in text -> FailureReason.REMOTE_BLOCKED
         error is ZipException || error is EOFException || "valid EPUB" in text ||
-            "opened as an EPUB" in text || "choose an EPUB" in text -> FailureReason.NOT_EPUB
+            "opened as an EPUB" in text || "opened as a PDF" in text || "choose an EPUB" in text ||
+            "opened as a book" in text || "choose an EPUB or PDF" in text -> FailureReason.NOT_EPUB
         error is FileNotFoundException || error is SecurityException || "Could not read" in text -> FailureReason.UNREADABLE_FILE
         else -> error.cause?.takeIf { it !== error }?.let(::failureReason) ?: FailureReason.UNKNOWN
     }
@@ -54,8 +55,8 @@ private fun messageForFailure(action: ReaderAction, reason: FailureReason): Stri
         "nothing was deleted. Restart BookCover to try again."
     FailureReason.NOT_A_BACKUP -> "That file isn't a BookCover backup. Choose a file made with Save backup. Your library is unchanged."
     FailureReason.PROTECTED_BOOK -> "This book is copy-protected (DRM), so BookCover can't open it. " +
-        "Look for a DRM-free EPUB download of it. Your library is unchanged."
-    FailureReason.TOO_LARGE -> "This book is too big to import: BookCover handles EPUBs up to 200 MB. Your library is unchanged."
+        "Look for a DRM-free EPUB or PDF copy of it. Your library is unchanged."
+    FailureReason.TOO_LARGE -> "This book is too big to import: BookCover handles books up to 200 MB. Your library is unchanged."
     FailureReason.NO_CHAPTERS -> if (action == ReaderAction.OPEN) "This book has no chapters BookCover can show. Its copy may be damaged; " +
         "remove it and import it again." else "This EPUB has no chapters BookCover can show. It may be damaged; " +
         "try downloading it again. Your library is unchanged."
@@ -68,7 +69,7 @@ private fun messageForFailure(action: ReaderAction, reason: FailureReason): Stri
         ReaderAction.OPEN -> "This book couldn't be opened; its copy may be damaged. Your reading position is saved. " +
             "Remove the book and import it again."
         ReaderAction.REPLACE_COVER -> "That file couldn't be used as a cover. Choose a picture such as a JPEG or PNG."
-        else -> "This file isn't a readable EPUB. It may be damaged, not fully downloaded, or a different kind of file. " +
+        else -> "This file isn't a readable EPUB or PDF. It may be damaged, not fully downloaded, or a different kind of file. " +
             "Try downloading it again. Your library is unchanged."
     }
     FailureReason.UNREADABLE_FILE -> when (action) {
@@ -93,7 +94,7 @@ private fun messageForFailure(action: ReaderAction, reason: FailureReason): Stri
 /** A few words for one file in a batch import summary, e.g. "broken.epub (not a readable EPUB)" (BC-27). */
 internal fun shortFailureReason(reason: FailureReason): String = when (reason) {
     FailureReason.LIBRARY_PROTECTED -> "library list unreadable"
-    FailureReason.NOT_A_BACKUP, FailureReason.NOT_EPUB -> "not a readable EPUB"
+    FailureReason.NOT_A_BACKUP, FailureReason.NOT_EPUB -> "not a readable EPUB or PDF"
     FailureReason.PROTECTED_BOOK -> "copy-protected"
     FailureReason.TOO_LARGE -> "over 200 MB"
     FailureReason.NO_CHAPTERS -> "no chapters to show"

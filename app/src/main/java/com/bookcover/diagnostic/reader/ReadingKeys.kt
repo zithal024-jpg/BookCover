@@ -5,11 +5,11 @@ import android.view.KeyEvent
 import android.view.Window
 
 /** Observe hardware keys before focused WebViews, while preserving the window's normal dispatch. */
-internal fun Activity.installReadingKeyHandler(reader: () -> EpubSession?) {
+internal fun Activity.installReadingKeyHandler(pdfReader: () -> PdfSession? = { null }, reader: () -> EpubSession?) {
     val original = window.callback
     window.callback = object : Window.Callback by original {
         override fun dispatchKeyEvent(event: KeyEvent): Boolean =
-            reader()?.dispatchKeyEvent(event) == true || original.dispatchKeyEvent(event)
+            reader()?.dispatchKeyEvent(event) == true || pdfReader()?.dispatchKeyEvent(event) == true || original.dispatchKeyEvent(event)
     }
 }
 

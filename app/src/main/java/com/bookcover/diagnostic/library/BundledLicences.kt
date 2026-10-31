@@ -23,7 +23,7 @@ internal val BUNDLED_LICENCES = listOf(
         "OPENDYSLEXIC-LICENSE.txt",
     ),
     LicenceNotice(
-        "Readium Kotlin Toolkit", "Opening and displaying EPUB books, including Readium CSS",
+        "Readium Kotlin Toolkit", "Opening and displaying EPUB and PDF books, including Readium CSS",
         "BSD 3-Clause", "© 2017 Readium", "READIUM-LICENSE.txt", listOf("org.readium"),
     ),
     LicenceNotice(
@@ -44,6 +44,16 @@ internal val BUNDLED_LICENCES = listOf(
     LicenceNotice(
         "jsoup", "Cleaning book HTML before display", "MIT", "© 2009–2026 Jonathan Hedley",
         "JSOUP-LICENSE.txt", listOf("org.jsoup"),
+    ),
+    LicenceNotice(
+        "PdfiumAndroid and PDFium", "Rendering PDF pages",
+        "Apache License 2.0 and PDFium BSD 3-Clause",
+        "PdfiumAndroid © 2015 Bekket McClane, © 2016 Bartosz Schiller; PDFium © 2014 PDFium Authors",
+        "PDFIUM-LICENSE.txt", listOf("com.github.marain87"),
+    ),
+    LicenceNotice(
+        "AndroidPdfViewer", "Displaying PDF pages", "Apache License 2.0",
+        "© 2017 Bartosz Schiller and contributors", "APACHE-2.0-LICENSE.txt",
     ),
     LicenceNotice(
         "AndroidX, Jetpack Compose and Kotlin libraries",

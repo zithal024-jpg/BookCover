@@ -48,6 +48,8 @@ dependencies {
     implementation("org.readium.kotlin-toolkit:readium-shared:3.4.0")
     implementation("org.readium.kotlin-toolkit:readium-streamer:3.4.0")
     implementation("org.readium.kotlin-toolkit:readium-navigator:3.4.0")
+    implementation("org.readium.kotlin-toolkit:readium-adapter-pdfium:3.4.0")
+    implementation("com.github.marain87:AndroidPdfViewer:3.2.8")
     implementation("org.jsoup:jsoup:1.23.2")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20250517")

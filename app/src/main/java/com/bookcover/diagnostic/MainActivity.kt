@@ -24,6 +24,8 @@ import com.bookcover.diagnostic.cover.ExteriorCoverController
 import com.bookcover.diagnostic.library.*
 import com.bookcover.diagnostic.reader.EpubReaderScreen
 import com.bookcover.diagnostic.reader.EpubSession
+import com.bookcover.diagnostic.reader.PdfSession
+import com.bookcover.diagnostic.reader.PdfReaderScreen
 import com.bookcover.diagnostic.reader.readerBackground
 import com.bookcover.diagnostic.reader.installReadingKeyHandler
 import kotlinx.coroutines.CancellationException
@@ -38,6 +40,7 @@ open class MainActivity : FragmentActivity() {
     private lateinit var library: BookLibrary
     private lateinit var exterior: ExteriorCoverController
     private var session by mutableStateOf<EpubSession?>(null)
+    private var pdfSession by mutableStateOf<PdfSession?>(null)
     // Set while a book that was open before rotation/fold is reopened; the library stays hidden meanwhile.
     private var reopeningBookId by mutableStateOf<String?>(null)
     private val operations = OperationState()
@@ -66,7 +69,7 @@ open class MainActivity : FragmentActivity() {
         coverBookId = null
         if (uri != null && id != null) work(ReaderAction.REPLACE_COVER) {
             library.replaceCover(id, uri)
-            if (session?.book?.id == id) library.book(id)?.let { book ->
+            if (session?.book?.id == id || pdfSession?.book?.id == id) library.book(id)?.let { book ->
                 exterior.artwork = withContext(Dispatchers.IO) { CoverArtwork.from(library.coverBitmap(book)) }
             }
             message = "Cover updated. Start the outside cover again from reading controls."
@@ -86,7 +89,7 @@ open class MainActivity : FragmentActivity() {
                 result.restored == 0 && result.missing == 0 -> "That backup has no books in it."
                 result.missing == 0 -> "Restored ${result.restored} books from the backup."
                 else -> "Restored ${result.restored} books. ${result.missing} books in the backup are not in your library: " +
-                    "import those EPUBs, then restore again."
+                    "import those books, then restore again."
             }
         }
     }
@@ -98,7 +101,7 @@ open class MainActivity : FragmentActivity() {
         // Keep picker routing/pending results even though navigator fragments cannot be restored.
         coverBookId = savedInstanceState?.getString("pendingCoverBook")
         savedInstanceState?.getBundle("documentPickerResults")?.let(activityResultRegistry::onRestoreInstanceState)
-        installReadingKeyHandler { session }
+        installReadingKeyHandler(pdfReader = { pdfSession }) { session }
         DiagnosticLog.init(this)
         library = BookLibrary.forApp(this)
         engine = library.engine
@@ -131,12 +134,13 @@ open class MainActivity : FragmentActivity() {
             }
             MaterialTheme(colorScheme = libraryColorScheme(libraryTheme, seed, systemDark)) {
                 val current = session
-                if (current == null && reopeningBookId != null)
+                val pdf = pdfSession
+                if (current == null && pdf == null && reopeningBookId != null)
                     Box(Modifier.fillMaxSize().background(readerBackground(preferences.getString("theme", "Paper"))))
-                else if (current == null) LibraryScreen(books, library, busy, message, autoCover, timer,
+                else if (current == null && pdf == null) LibraryScreen(books, library, busy, message, autoCover, timer,
                     onAutoCover = { autoCover = it; preferences.edit().putBoolean("autoCover", it).apply() },
                     onTimer = { timer = it; preferences.edit().putInt("coverTimer", it).apply() },
-                    onImport = { importBook.launch(arrayOf("application/epub+zip", "application/octet-stream", "application/zip")) },
+                    onImport = { importBook.launch(arrayOf("application/epub+zip", "application/pdf", "application/octet-stream", "application/zip")) },
                     onOpen = ::openBook,
                     onMove = { book, collection -> work(ReaderAction.ORGANIZE) { library.move(book.id, collection); message = "Collection updated." } },
                     onRemove = { book -> work(ReaderAction.ORGANIZE) { library.remove(book.id); message = "Local copy removed." } },
@@ -145,7 +149,21 @@ open class MainActivity : FragmentActivity() {
                     onDiagnostics = { showDiagnostics = true }, libraryTheme = libraryTheme,
                     onLibraryTheme = { libraryTheme = it; preferences.edit().putString("libraryTheme", it).apply() },
                     importProgress = importProgress, onStopImport = { importCancellation?.cancel() }, coverColors = coverColors)
-                else EpubReaderScreen(current, books.firstOrNull { it.id == current.book.id } ?: current.book,
+                else if (pdf != null) PdfReaderScreen(pdf, books.firstOrNull { it.id == pdf.book.id } ?: pdf.book,
+                    exterior.active, exterior.busy || exterior.requested, exterior.stopPending, exterior.available && !busy,
+                    message + "\n" + exterior.status,
+                    onStartCover = { exterior.start(timer) }, onStopCover = { exterior.stop("reader Stop button") },
+                    onHome = ::goHome, onChooseCover = {
+                        exterior.stop("selecting cover image")
+                        coverBookId = pdf.book.id
+                        selectCover.launch(arrayOf("image/*"))
+                    }, onSaveBookmark = { name, existingValue -> work(ReaderAction.BOOKMARK) {
+                        if (existingValue != null) library.renameBookmark(pdf.book.id, existingValue, name)
+                        else pdf.bookmarkLocator()?.let { library.bookmark(pdf.book.id, it, name, null) }
+                        message = "Bookmark saved. Open Contents to return to it."
+                    } }, onRemoveBookmark = { value -> work(ReaderAction.BOOKMARK) { library.removeBookmark(pdf.book.id, value) } },
+                    libraryTheme = libraryTheme, coverSeed = seed)
+                else EpubReaderScreen(current!!, books.firstOrNull { it.id == current.book.id } ?: current.book,
                     exterior.active, exterior.busy || exterior.requested, exterior.stopPending, exterior.available && !busy,
                     message + "\n" + exterior.status,
                     onStartCover = { exterior.start(timer) }, onStopCover = { exterior.stop("reader Stop button") },
@@ -189,7 +207,7 @@ open class MainActivity : FragmentActivity() {
                 reopeningBookId = null
                 restoredCover = null
                 restoredReaderLocator = null
-                if (session == null) setReadingWindow(false)
+                if (session == null && pdfSession == null) setReadingWindow(false)
             }
         }
     }
@@ -197,9 +215,10 @@ open class MainActivity : FragmentActivity() {
     // Hooks for the lifecycle tests in the separate QA app (app/src/androidTest); the app does not use them.
     internal val libraryForTests: BookLibrary get() = library
     internal val sessionForTests: EpubSession? get() = session
+    internal val pdfSessionForTests: PdfSession? get() = pdfSession
     internal val busyForTests: Boolean get() = busy
     internal val messageForTests: String get() = message
-    internal val showsLibraryForTests: Boolean get() = session == null && reopeningBookId == null
+    internal val showsLibraryForTests: Boolean get() = session == null && pdfSession == null && reopeningBookId == null
     internal fun openBookForTests(book: BookRecord) = openBook(book)
 
     internal val importProgressForTests: ImportProgress? get() = importProgress
@@ -227,14 +246,15 @@ open class MainActivity : FragmentActivity() {
     }
 
     private fun openBook(book: BookRecord) {
-        if (busy || session != null) return
+        if (busy || session != null || pdfSession != null) return
         work(ReaderAction.OPEN) { loadBook(book) }
     }
 
     private suspend fun loadBook(book: BookRecord) {
+        if (book.format == BookFormat.PDF) { loadPdfBook(book); return }
         openBookWithCleanup(
             ioContext = Dispatchers.IO,
-            openPublication = { engine.open(library.epubFile(book)) },
+            openPublication = { engine.open(library.bookFile(book)) },
             closePublication = { it.close() },
             loadArtwork = { CoverArtwork.from(library.coverBitmap(book)) },
             createSession = { publication ->
@@ -265,9 +285,37 @@ open class MainActivity : FragmentActivity() {
         )
     }
 
+    private suspend fun loadPdfBook(book: BookRecord) {
+        openBookWithCleanup(
+            ioContext = Dispatchers.IO,
+            openPublication = { engine.open(library.bookFile(book)) },
+            closePublication = { it.close() },
+            loadArtwork = { CoverArtwork.from(library.coverBitmap(book)) },
+            createSession = { publication ->
+                val record = library.book(book.id) ?: book
+                val restoredRecord = restoredReaderLocator?.takeIf { book.id == reopeningBookId }
+                    ?.let { record.copy(locator = it) } ?: record
+                PdfSession(this, restoredRecord, publication, library, report = { message = it })
+            },
+            closeSession = { it.close() },
+            markOpened = { library.markOpened(book.id) },
+            commit = { current, artwork ->
+                pdfSession = current
+                exterior.artwork = artwork
+                setReadingWindow(true)
+                message = "Swipe to turn PDF pages."
+                val previousCover = restoredCover
+                restoredCover = null
+                if (previousCover != null) exterior.restore(previousCover.first, previousCover.second)
+                else if (autoCover && exterior.available) exterior.start(timer)
+            },
+        )
+    }
+
     private fun goHome() {
         exterior.stop("returning to library")
         session?.close(); session = null
+        pdfSession?.close(); pdfSession = null
         setReadingWindow(false)
         message = "Your reading position is saved."
     }
@@ -299,18 +347,21 @@ open class MainActivity : FragmentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("pendingCoverBook", coverBookId)
         outState.putBundle("documentPickerResults", Bundle().also(activityResultRegistry::onSaveInstanceState))
-        outState.putString("openBook", session?.book?.id ?: reopeningBookId)
-        outState.putString("openLocator", session?.restorationLocator?.toJSON()?.toString() ?: restoredReaderLocator)
+        outState.putString("openBook", session?.book?.id ?: pdfSession?.book?.id ?: reopeningBookId)
+        outState.putString("openLocator", session?.restorationLocator?.toJSON()?.toString() ?: pdfSession?.restorationLocator?.toJSON()?.toString() ?: restoredReaderLocator)
         outState.putBoolean("coverRequested", exterior.requested)
         outState.putLong("coverDeadline", exterior.deadline)
         session?.flushPosition()
+        pdfSession?.flushPosition()
         super.onSaveInstanceState(outState)
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         // Freeze the last visible semantic passage before the navigator receives the new viewport.
         exterior.viewportChanging()
-        session?.viewportChanging { exterior.viewportSettled() } ?: exterior.viewportSettled()
+        if (session != null) session?.viewportChanging { exterior.viewportSettled() }
+        else if (pdfSession != null) pdfSession?.viewportChanging { exterior.viewportSettled() }
+        else exterior.viewportSettled()
         super.onConfigurationChanged(newConfig)
     }
 
@@ -322,12 +373,14 @@ open class MainActivity : FragmentActivity() {
     override fun onStop() {
         // Android may end the process while the app is in the background; save the position first.
         session?.flushPosition()
+        pdfSession?.flushPosition()
         super.onStop()
     }
 
     override fun onDestroy() {
         exterior.close()
         session?.close()
+        pdfSession?.close()
         super.onDestroy()
     }
 }

@@ -25,6 +25,7 @@ import org.readium.r2.shared.util.resource.map
 import org.readium.r2.shared.util.toUrl
 import org.readium.r2.streamer.PublicationOpener
 import org.readium.r2.streamer.parser.DefaultPublicationParser
+import org.readium.adapter.pdfium.document.PdfiumDocumentFactory
 
 @OptIn(ExperimentalReadiumApi::class)
 internal class ReadiumEngine(context: Context) {
@@ -39,30 +40,31 @@ internal class ReadiumEngine(context: Context) {
             Try.failure(HttpError.IO(IOException("Remote publication resources are disabled")))
     }
     private val retriever = AssetRetriever(context.contentResolver, http)
-    private val opener = PublicationOpener(DefaultPublicationParser(context, httpClient = http, assetRetriever = retriever, pdfFactory = null))
+    private val opener = PublicationOpener(DefaultPublicationParser(context, httpClient = http, assetRetriever = retriever, pdfFactory = PdfiumDocumentFactory(context)))
 
     suspend fun open(file: File): Publication {
-        val asset = retriever.retrieve(file.toUrl(isDirectory = false)).getOrElse { throw IOException("Could not read this EPUB file") }
+        val isPdf = file.extension.equals("pdf", ignoreCase = true)
+        val asset = retriever.retrieve(file.toUrl(isDirectory = false)).getOrElse { throw IOException("Could not read this book file") }
         // Readium 3.4.0's PublicationOpener never calls the constructor's onCreatePublication and calls the
         // per-open one twice, so the markup filter is passed here and guarded to be installed once.
         var filtered = false
         val publication = opener.open(asset, allowUserInteraction = false, onCreatePublication = {
-            if (!filtered) {
+            if (!isPdf && !filtered) {
                 filtered = true
                 val searchContainer = container
                 installMarkupFilter()
                 servicesBuilder.searchServiceFactory = bookSearchServiceFactory(searchContainer)
             }
-        }).getOrElse { throw IOException("This file could not be opened as an EPUB") }
+        }).getOrElse { throw IOException(if (isPdf) "This file could not be opened as a PDF" else "This file could not be opened as an EPUB") }
         try {
-            require(publication.conformsTo(Publication.Profile.EPUB)) { "Please choose an EPUB book" }
-            require(!publication.isRestricted) { "This EPUB is protected. The prototype opens DRM-free EPUBs." }
+            require(publication.conformsTo(if (isPdf) Publication.Profile.PDF else Publication.Profile.EPUB)) { "Please choose an EPUB or PDF book" }
+            require(!publication.isRestricted) { "This book is protected. The prototype opens DRM-free books." }
             // Readium only flags DRM schemes it has a protection service for. Any other encrypted chapter or
             // resource would display as scrambled text, so refuse it; font obfuscation is ordinary and allowed.
-            require((publication.readingOrder + publication.resources).none { link ->
+            require(isPdf || (publication.readingOrder + publication.resources).none { link ->
                 link.properties.encryption?.let { it.algorithm !in FONT_OBFUSCATION } == true
             }) { "This EPUB is protected. The prototype opens DRM-free EPUBs." }
-            require(publication.readingOrder.isNotEmpty()) { "This EPUB has no readable chapters" }
+            require(publication.readingOrder.isNotEmpty()) { "This book has no readable pages" }
             publication.positions() // Populate the cached position service before constructing the navigator.
             currentCoroutineContext().ensureActive()
             return publication

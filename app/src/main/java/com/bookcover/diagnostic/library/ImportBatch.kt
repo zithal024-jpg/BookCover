@@ -138,7 +138,7 @@ internal fun importSummaryMessage(summary: ImportSummary): String {
 
 private fun books(count: Int) = if (count == 1) "1 book" else "$count books"
 
-private val importTempName = Regex("""import--?\d+\.epub""")
+private val importTempName = Regex("""import--?\d+\.(?:epub|pdf)""")
 
 /** A copy made by [BookLibrary] while importing: `import-` plus the random number File.createTempFile adds. */
 internal fun isImportTempName(name: String): Boolean = importTempName.matches(name)

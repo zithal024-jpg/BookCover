@@ -8,10 +8,10 @@ class ImportTempFilesTest {
     private val book = "a".repeat(64)
 
     @Test fun onlyAbandonedImportCopiesAreSelected() {
-        val names = listOf("import-123456789.epub", "import--42.epub", "import-77.epub", "$book.epub", "$book.png",
+        val names = listOf("import-123456789.epub", "import--42.epub", "import-77.epub", "import-18.pdf", "import-19.pdf", "$book.pdf", "$book.epub", "$book.png",
             "$book.thumb.png", "books.json", "books.last-good.json", "books.json.tmp", "import-notes.txt",
             "import-12.epub.part", "my-import-5.epub", "import-.epub", "IMPORT-5.EPUB", "import-1a.epub")
-        assertEquals(listOf("import-123456789.epub", "import--42.epub"), abandonedImportTemps(names, active = setOf("import-77.epub")))
+        assertEquals(listOf("import-123456789.epub", "import--42.epub", "import-18.pdf"), abandonedImportTemps(names, active = setOf("import-77.epub", "import-19.pdf")))
     }
 
     @Test fun anImportStillRunningIsNeverSelected() {
