@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.RectF
 import android.os.SystemClock
 import android.view.View
@@ -377,8 +378,11 @@ class RelicCoverViewTest {
         await { view.motionRunningForTests }
 
         lateinit var scroll: ScrollView
-        val spacerHeight = view.height * 2
+        var spacerHeight = 0
         instrumentation.runOnMainSync {
+            val viewportHeight = host.window.decorView.height
+            assertTrue("Clipping requires a measured host viewport", viewportHeight > 0)
+            spacerHeight = maxOf(view.height * 2, viewportHeight + 1)
             // Detach first, then exercise real clipping inside a scrolling native parent.
             host.setContentView(View(host))
             assertFalse(view.motionRunningForTests)
@@ -389,9 +393,10 @@ class RelicCoverViewTest {
             scroll.addView(column); host.setContentView(scroll)
         }
         instrumentation.waitForIdleSync()
+        await { view.isLaidOut && !view.getGlobalVisibleRect(Rect()) }
         await { !view.motionRunningForTests }
         instrumentation.runOnMainSync { scroll.scrollTo(0, spacerHeight) }
-        await { view.motionRunningForTests }
+        await { view.getGlobalVisibleRect(Rect()) && view.motionRunningForTests }
         instrumentation.runOnMainSync { view.release() }
         SystemClock.sleep(100)
         assertFalse(view.motionRunningForTests)
