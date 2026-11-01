@@ -1,6 +1,6 @@
 # Reading Relics — Relic cabinet design draft
 
-**Status:** Moonlit Archive implementation authorized by the owner on 2026-11-01, including adaptive colors, optional overlays, standalone display and animated Mythic Cover Edges. Use the six Moonlit milestones and approved restrained style below. Wayfarer's Atlas and Hearthkeeper remain future design. Implementation and app/device validation are in progress; preview evidence is separate from shipping behavior.
+**Status:** Moonlit Archive implementation authorized by the owner on 2026-11-01, including adaptive colors, optional overlays, standalone display and animated Mythic Cover Edges. Use the six Moonlit milestones and approved restrained style below. Wayfarer's Atlas and Hearthkeeper remain future design. The native Moonlit implementation is complete and passed build, unit, lint and isolated Android validation. Owner-phone installation and inspection of the new outside appearance remain pending. Wayfarer/Hearthkeeper concepts and historical browser previews are separate from this app implementation.
 
 ## Product intent
 
@@ -23,7 +23,7 @@ Keep names and written rarity labels visible; color is supplementary. The recogn
 
 ## Art direction — approved style, assets in progress
 
-The **original Relic cabinet is the visual baseline**. The owner wanted only a touch more character than the first minimal symbols and rejected both subsequent detailed raster studies as overcorrections. The latest subtle direction is now approved: "Like that lets build out a full set lets make sure the Cover Edges evolve Mythic Cover edges should be animated" (2026-11-01). This approves the style direction and asks for a full-set visual build-out; final production assets are not yet approved.
+The **original Relic cabinet is the visual baseline**. The owner wanted only a touch more character than the first minimal symbols and rejected both subsequent detailed raster studies as overcorrections. The latest subtle direction is now approved: "Like that lets build out a full set lets make sure the Cover Edges evolve Mythic Cover edges should be animated" (2026-11-01). The owner subsequently authorized implementing this Moonlit direction in the app, including the adaptive appearance requirements below.
 
 Retain the clear minimal cabinet symbols and familiar simple settings, adding **one subtle second tone, a small highlight or a tiny decorative accent**. Preserve generous quiet space and a recognizable silhouette at cabinet and cover-seal sizes. Do not replace the baseline with painterly objects, storybook illustrations or more elaborate compositions.
 
@@ -31,7 +31,7 @@ Bookplates remain quiet ownership labels with a modest border and a small set sy
 
 Photoreal textures, material realism, dense filigree, gemstone encrusting, scenery and dramatic glow remain outside this direction. Rarity differences stay small and deliberate within one consistent minimal family.
 
-Relic symbols, Bookplates and original cover artwork stay static. Mythic Cover Edges are the sole requested motion exception: a slow subtle trace confined to the decoration bounds, with an off control, reduced-motion behavior, hidden-state pause and static fallback. The path and tier geometry are unchanged by adaptive color or presentation mode. This is design work only; set names, rarity tiers, unlock thresholds and proposed earning rules are unchanged.
+Relic symbols, Bookplates and original cover artwork stay static. Mythic Cover Edges are the sole requested motion exception: a slow subtle trace confined to the decoration bounds, with an off control, reduced-motion behavior, hidden-state pause and static fallback. The path and tier geometry are unchanged by adaptive color or presentation mode. The native Moonlit implementation follows this direction. Set names, rarity tiers and unlock thresholds remain as agreed; the other two sets remain future design.
 
 ## Set 1 — Moonlit Archive
 
@@ -123,7 +123,7 @@ The reader may independently select **one relic seal, one Bookplate and one Cove
 
 These are appearance modes, not separate rewards or earning paths. Default to the cover-preserving margin. The original EPUB/PDF and imported cover image remain unchanged. Preserve the original cover's colors and pixels in cover-based modes: no cover-wide tint, color wash, recoloring filter or destructive export. The opt-in overlay can cover part of the rendered image, but it never changes the underlying cover file.
 
-### Adaptive appearance — proposed algorithm
+### Adaptive appearance — implemented approach
 
 The owner requires decoration to be complementary to any book-cover color. Here **complementary means visually harmonious**, not automatically choosing the opposite hue on a color wheel. Adapt the color treatment while keeping the approved subtle forms, tier details and motion recognizable.
 
@@ -135,7 +135,7 @@ This is a plan for a future local appearance algorithm, not an implemented or un
 4. In standalone mode, evaluate the chosen family-template background and the title/author/Bookplate regions with the same contrast logic. Separate metadata areas from decoration so the presentation remains readable without an imported cover.
 5. Preview the result on the actual selected cover, including its corners and Bookplate region. Manual overrides remain available when the automatic suggestion is unsatisfactory. Arbitrary artwork can defeat a simple palette choice; the design does not guarantee universal visibility, harmony or protection of title text.
 
-The in-conversation palette demonstration can compare representative covers and show the intended behavior. It is not the final local sampling, contrast or fallback algorithm, and its sample appearances do not prove that all book covers will work. Future implementation needs varied light, dark, saturated, monochrome, busy and high-contrast cover checks, plus owner inspection on the physical exterior screen.
+The earlier in-conversation palette demonstration records intended behavior rather than the shipping algorithm. Native palette checks cover light, dark, saturated, monochrome, busy and high-contrast samples and readable opaque Bookplates. Those samples do not prove universal visibility on arbitrary artwork; owner inspection on the physical exterior screen remains necessary.
 
 Anchor ornaments to the actual fitted cover rectangle, preserving the original aspect ratio without stretching or cropping. Clamp line weight and corner size for narrow or unusually shaped covers. Sample the projected regions beneath the ornament, including the actual matte in margin mode. Recompute and cache the appearance for a cover revision, presentation-mode change or layout change; do not resample or change the palette on every Mythic animation frame. Existing global and exterior-edge palette helpers can supply harmony seeds, while local ornament-footprint checks still need to be designed for app integration.
 
@@ -180,19 +180,23 @@ Guaranteed milestones are the starting design. Random drops, duplicates, craftin
 
 Earned records need stable IDs and versioned rules, including set-finish unlocks. Reward recalculation may add newly eligible pieces; a later rule change or incomplete restored history must not revoke a stored award.
 
-Before implementation is considered ready to ship, design backup and restoration of reading history, earned relics and appearance choices. The current library metadata backup omits reading-day history. A complete local backup should retain rewards even when all supporting history is not present. Keep the system local and offline, without an account or server validation.
+The implemented local backup includes reading-day history, earned relics and appearance choices alongside the existing book metadata. Earlier metadata-only backups remain accepted. History restores by maximum time per date, earned items remain permanent, and retained history floors let new reading count immediately after missing-history recovery. Current explicit appearance choices, including a reset to global inheritance, take priority over restored choices. Each file replacement is atomic; restoring several files is retryable rather than one all-or-nothing transaction. The app remains offline, with no account or server validation.
 
-Support an optional Rewards off setting that hides prompts and decorations without erasing earned pieces or equipped appearance choices. Re-enabling it restores the selected appearance. Reader features and accessibility controls remain available independently of rewards.
+Enable decorations can be turned off without erasing collected pieces or selected appearance settings. Re-enabling restores the chosen treatment. The library uses a quiet collection count; awards do not interrupt reading with dialogs or sound. Reader features and accessibility controls remain available independently of rewards.
 
-## Decisions still open
+## Approved implementation and remaining review
 
-- Approve or adjust the 18 names and thresholds, especially the long-term Mythic milestones.
-- Review the six Moonlit Archive relic concepts, evolving Cover Edge variants, prestige Bookplate and exact Mythic animation. The subtle style is approved and the earlier full-set concept preview is complete; the new adaptive appearance, inset overlay and standalone requirements are still being developed. Final production assets are not yet approved.
-- Confirm the proposed unlock cadence: Bookplate at 2, Cover Edges at 3, prestige pair at 6.
-- Confirm the cover-preserving default, opt-in inset overlay and standalone layouts, their decoration bounds and the amount of added margin. Review the proposed Auto Harmonize / Light / Dark / Original Set / Manual Accent controls and optional global default.
-- Set the reward/history backup scope before implementation.
+Moonlit Archive uses the six names and thresholds above, Bookplate at 1 hour, Rare edges at 5 hours, evolved Epic/Legendary edges at 15/40 hours, and animated Mythic edges plus the prestige Bookplate at 100 hours. Earlier variants stay selectable. The default is disabled decorations; enabling uses cover-preserving margin placement unless the reader explicitly chooses inset overlay or standalone.
 
-## Design verification
+1. Open **Relic cabinet** below Reading Streak in the library, or from Settings → Outside cover.
+2. Preview a tier, then choose global default or a book. Choose layout, color treatment, edges, Bookplate, seal and optional Mythic motion.
+3. Tap **Save appearance**. Locked pieces can be previewed but cannot be saved. A per-book appearance can be reset to the global default.
+
+Remaining design work covers the other two sets. Physical exterior appearance, performance and battery use need owner observation of this new implementation; earlier owner confirmation of PDF outside-cover display remains separate.
+
+## Historical design verification
+
+The following records describe the earlier concept previews. Native implementation evidence is recorded separately below.
 
 This draft follows a read-only inspection of the existing tracker: stored daily time, qualifying-day flags and best/current streak support the proposed milestone inputs for EPUB and PDF. These are design and data-availability findings, not newly run app tests. No app code, installation or device tests were performed for this design work.
 
@@ -201,7 +205,7 @@ This draft follows a read-only inspection of the existing tracker: stored daily 
 
 The earlier full-set interactive preview covers all six exact names and milestones. These checks establish that preview only; they do not establish completion of the later adaptive appearance, inset overlay or standalone work. Browser checks verified each staged appearance: no decorations at Common, Bookplate at Uncommon, corners at Rare, lines and crest at Epic, added star/corner accents at Legendary, and margin motion plus prestige Bookplate at Mythic. The animated traveler changed position during playback (260.219 px to 72.7656 px); Pause held its position at 70.0156 px across separate observations and Play resumed the running state. The Bookplate toggle worked, and the 320 px viewport had equal client/scroll widths, with no horizontal overflow. Reduced-motion and document-hidden fallbacks are present in the preview source; those host preference/visibility transitions were not separately exercised. No app, device, performance or battery validation is implied.
 
-Read-only integration review found that the current outside presentation uses a static ImageView. A future app implementation needs a separate decoration layer, measured margin/inset/template bounds, local palette and contrast handling, and animator teardown on Stop, screen-off, timeout, session end and controller close. Preserve the existing cover deadline and full-image fit. No adaptive algorithm or new presentation mode has been implemented or phone-verified by this document.
+At the initial read-only design review, the outside presentation used a static ImageView. The review identified the need for a separate decoration layer, measured margin/inset/template bounds, local palette and contrast handling, and animator teardown on Stop, screen-off, timeout, session end and controller close. Preserve the existing cover deadline and full-image fit. That historical inspection did not implement or verify an adaptive algorithm or a new presentation mode.
 
 
 ### Adaptive preview verification (2026-11-01)
@@ -209,3 +213,17 @@ Read-only integration review found that the current outside presentation uses a 
 The separate adaptive-appearance demonstration uses real canvas pixel sampling from generated synthetic covers. Browser checks covered Forest, Crimson, Ivory, Night, Ocean and busy monochrome, plus custom black, white, mid-gray, bright yellow, blue and magenta. Auto selected cover-related pale/deep tones; busy monochrome retained a neutral accent. Controlled opaque Bookplate foreground/background contrast was at least 12.1:1 in these samples. The primary stroke alone had weak contrast over some busy pixels, confirming the need for the opposing keyline or added margin rather than a universal visibility claim.
 
 A full-canvas checksum stayed `7ba0ace2` while light/dark/set/auto treatments, tier, margin placement and decoration visibility changed on the same Forest sample. The source artwork was not repainted or filtered by those controls. Standalone rendered its own title/author template and selected relic label, with separate Common/Mythic canvas checksums. The Bookplate text/backing transition issue found during review was corrected: the pair switches together while only the border interpolates. The 320px viewport had equal client/scroll widths with no horizontal overflow. The demonstration remains a heuristic and design preview, not the shipping app algorithm or phone validation.
+
+
+## Native implementation validation (2026-11-01)
+
+The implementation contains the permanent local collection, cabinet/editor, local palette and contrast handling, full-fit margin/inset/standalone rendering, and a cached static cover with an optional 10-second Mythic trace. Motion honors system animation settings and pauses on hidden/clipped/detached views, host backgrounding and presentation teardown without renewing the existing cover deadline. Original publication and cover files are unchanged.
+
+Implementation `a2d2384` and native-test follow-up `242409d` passed the guarded build, **369/369 JVM checks**, debug/QA lint and **16/16 isolated Android checks** with zero skipped. Tests used task-owned read-only `emulator-5556`, generated fixtures and the bundled sample books. They exercised backup roundtrip/idempotency/corruption safety, original pixel preservation, margin/inset/standalone drawing, real moving Mythic pixels with cached-cover reuse, visibility/teardown pauses, locked choices, global/per-book Save/reset and 200% text labels and activation. A short-window native preview was also inspected during integration. Relic tiles are repeatable labeled buttons, so an already selected item can still apply its preview preset.
+
+Native motion evidence recorded system animations enabled, phase advancing from `0.0037` to `0.0404`, changed rendered pixels, unchanged preparation count, a held hidden phase, clipping pause/resume and terminal release. These are native-view checks, not physical exterior-display evidence.
+
+Task: `moonlit-f44b4cc347ee7e18`. Source snapshot: `bb597ebb8162185d74e816e93f508e4eb68b73bb20e1a1432f434bbbefeab821`. Combined source-bound evidence under `%LOCALAPPDATA%\BookCoverBuild\tasks\moonlit-f44b4cc347ee7e18\evidence\`:
+`bb597ebb8162185d74e816e93f508e4eb68b73bb20e1a1432f434bbbefeab821-a82e9cf14f8348d2900c4c9c039bf4f9.json`.
+
+APK: `BookCover-moonlit-f44b4cc347ee7e18.apk`; SHA-256 `47ab645728f82c229b9b0c68d33e2f0cdb1f5602bab9385490849c49259b47dd`. The generated APK, receipts and screenshots remain outside Git. No owner-phone installation or physical confirmation of this new treatment is established. Exterior appearance, performance and battery use still require owner observation; previous PDF outside-display confirmation remains recorded separately.
