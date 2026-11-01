@@ -234,3 +234,12 @@ Task: `moonlit-f44b4cc347ee7e18`. Source snapshot: `bb597ebb8162185d74e816e93f50
 `bb597ebb8162185d74e816e93f508e4eb68b73bb20e1a1432f434bbbefeab821-a82e9cf14f8348d2900c4c9c039bf4f9.json`.
 
 Initial APK: `BookCover-moonlit-f44b4cc347ee7e18.apk`; SHA-256 `47ab645728f82c229b9b0c68d33e2f0cdb1f5602bab9385490849c49259b47dd`. Installed in place on the owner's phone on 2026-11-01 at their request; installed APK readback matched and the original installation time was unchanged. The generated APK, receipts and screenshots remain outside Git. Exterior appearance, performance and battery use still require owner observation; previous PDF outside-display confirmation remains recorded separately. The testing/live-preview follow-up has its separate validation record in the active backlog.
+
+### Live outside preview and temporary testing validation
+
+Follow-up `5aebb24` passed the guarded build, **385/385 JVM checks**, debug/QA lint and **21/21 isolated Android checks**, with no skipped tests. Coverage includes test-access expiry and profile/backup isolation, preservation of the original reader deadline and Stop choice, narrow-display original pixels and visible rails, real Mythic motion and cached content reuse, live cabinet callbacks, accessible controls at 200% text, and the real activity's explicit-intent activation and preview teardown. Generated narrow margin and standalone renderings were visually inspected. A task-owned local Android bridge and read-only emulator isolated the completed run from interruptions to the shared connection.
+
+Source snapshot: `a0657b8bce7676363cb5aa6ff4e93d6b7fcdc0cbb0d8d7bcd642a04db3b1d73c`. Combined evidence in the same task's evidence directory:
+`a0657b8bce7676363cb5aa6ff4e93d6b7fcdc0cbb0d8d7bcd642a04db3b1d73c-621a8fe3f138425bb9bd50dafc5e19f0.json`.
+
+Installed in place on the owner's phone on 2026-11-01 at 14:50 (UTC−5), then opened the cabinet with testing access confirmed through **2026-11-02 14:50:59 (UTC−5)**. Installed APK readback matches SHA-256 `432b6b76408305efdea18cd9e9928830f6aa5b157a754ebd7740e7bcf7b148cb`; signing identity matches and the original install time remains unchanged. System animator scale was 1. No main-app instrumentation, data clear or personal-book screenshot/file inspection was used. The owner must still confirm the physical outside-screen appearance and animation; automated preview requests do not establish that observation.
