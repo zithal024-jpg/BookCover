@@ -35,11 +35,16 @@ private fun readableRelicColor(preferred: Int, background: Int, ratio: Double): 
 
 /** One settled palette per cover/layout. A keyline and opaque plate protect busy-cover overlays. */
 internal fun relicCoverPalette(globalSamples: IntArray, footprintSamples: IntArray, fallbackBackground: Int,
-    mode: RelicColorMode, customAccent: Int): RelicCoverPalette {
+    mode: RelicColorMode, customAccent: Int, set: RelicSet = RelicSet.MOONLIT): RelicCoverPalette {
     val usableGlobal = globalSamples.filter { it ushr 24 >= 192 }.toIntArray()
     val usableLocal = footprintSamples.filter { it ushr 24 >= 192 }.toIntArray()
     val background = if (usableLocal.isEmpty()) opaqueRelicColor(fallbackBackground) else matchingCoverColor(usableLocal)
     val source = if (usableGlobal.isEmpty()) MOONLIT_ACCENT else extractCoverSeed(usableGlobal)
+    val setAccent = when (set) {
+        RelicSet.MOONLIT -> MOONLIT_ACCENT
+        RelicSet.WAYFARER -> 0xff4b8c88.toInt()
+        RelicSet.HEARTHKEEPER -> 0xffba7744.toInt()
+    }
     val grey = run {
         val value = ((source ushr 16 and 255) + (source ushr 8 and 255) + (source and 255)) / 3
         (0xff shl 24) or (value shl 16) or (value shl 8) or value
@@ -47,7 +52,7 @@ internal fun relicCoverPalette(globalSamples: IntArray, footprintSamples: IntArr
     val preferred = when (mode) {
         RelicColorMode.LIGHT -> RELIC_LIGHT
         RelicColorMode.DARK -> RELIC_DARK
-        RelicColorMode.SET -> MOONLIT_ACCENT
+        RelicColorMode.SET -> setAccent
         RelicColorMode.CUSTOM -> opaqueRelicColor(customAccent)
         RelicColorMode.AUTO -> if (neutralRelicColor(source)) grey else mixColors(source, grey, 0.34)
     }
@@ -61,8 +66,15 @@ internal fun relicCoverPalette(globalSamples: IntArray, footprintSamples: IntArr
             0xff000000.toInt() else 0xffffffff.toInt()
     } else readableRelicColor(preferred, background, 3.0)
     val keyline = if (relativeLuminance(ink) > 0.35) 0xff000000.toInt() else 0xffffffff.toInt()
-    // Text is placed on this opaque backing, never directly on arbitrary book pixels.
-    val plate = mixColors(source, if (relativeLuminance(ink) > 0.35) 0xff111918.toInt() else 0xfffcfaf3.toInt(), 0.93)
+    // Standalone titles and seals use an opaque backing, never arbitrary book pixels. Original
+    // set colors also supply a parchment/amber surface; Automatic stays independent of the set.
+    val darkSurface = relativeLuminance(ink) > 0.35
+    val surface = if (mode == RelicColorMode.SET) when (set) {
+        RelicSet.MOONLIT -> if (darkSurface) 0xff111918.toInt() else 0xfffcfaf3.toInt()
+        RelicSet.WAYFARER -> if (darkSurface) 0xff172f30.toInt() else 0xfff4eddc.toInt()
+        RelicSet.HEARTHKEEPER -> if (darkSurface) 0xff2b1c16.toInt() else 0xffffefda.toInt()
+    } else if (darkSurface) 0xff111918.toInt() else 0xfffcfaf3.toInt()
+    val plate = mixColors(if (mode == RelicColorMode.SET) setAccent else source, surface, 0.93)
     val plateText = readableRelicColor(preferred, plate, 4.5)
     return RelicCoverPalette(background, ink, keyline, plate, plateText,
         readableRelicColor(mixColors(ink, background, 0.15), background, 3.0))

@@ -7,17 +7,27 @@ import org.junit.Test
 import kotlin.random.Random
 
 class RelicCoverPaletteTest {
-    @Test fun plateTextAndMatteEdgeContrastAcrossLightDarkAndCustomColors() {
+    @Test fun standaloneTextAndMatteEdgeContrastAcrossEveryFamilyAndColorMode() {
         val random = Random(614)
         val colors = listOf(0xff000000.toInt(), 0xffffffff.toInt(), 0xff777777.toInt(),
             0xfff2cbd6.toInt(), 0xff102a4a.toInt(), 0xffffe600.toInt()) + List(100) { random.nextInt() or (0xff shl 24) }
-        for (cover in colors) for (mode in RelicColorMode.entries) {
-            val result = relicCoverPalette(IntArray(32) { cover }, IntArray(24) { cover }, cover, mode, cover)
-            assertTrue("Plate text lacks contrast for $mode", contrastRatio(result.plateText, result.plate) >= 4.5 - 1e-6)
+        for (cover in colors) for (mode in RelicColorMode.entries) for (set in RelicSet.entries) {
+            val result = relicCoverPalette(IntArray(32) { cover }, IntArray(24) { cover }, cover, mode, cover, set)
+            assertTrue("Standalone text lacks contrast for $set / $mode", contrastRatio(result.plateText, result.plate) >= 4.5 - 1e-6)
             assertTrue("Edge lacks contrast for $mode", contrastRatio(result.ink, result.background) >= 3.0 - 1e-6)
             assertEquals(255, result.plate ushr 24)
             assertEquals(255, result.plateText ushr 24)
         }
+    }
+
+    @Test fun originalSetPalettesAreDistinctWhileAutomaticKeepsMatchingTheSameCover() {
+        val global = IntArray(32) { 0xff718c53.toInt() }
+        val local = IntArray(32) { 0xffeee9dc.toInt() }
+        val originals = RelicSet.entries.map { relicCoverPalette(global, local, 0, RelicColorMode.SET, 0, it) }
+        assertEquals(3, originals.map { it.ink }.toSet().size)
+        assertEquals(3, originals.map { it.plate }.toSet().size)
+        val automatic = RelicSet.entries.map { relicCoverPalette(global, local, 0, RelicColorMode.AUTO, 0, it) }
+        assertEquals("Family shape must not impose its original hue on adaptive cover colors", 1, automatic.toSet().size)
     }
 
     @Test fun automaticMonochromeCoversStayNeutral() {

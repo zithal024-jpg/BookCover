@@ -37,7 +37,7 @@ private fun fitRelicImage(bounds: RelicRect, imageWidth: Int, imageHeight: Int):
 }
 
 /**
- * Fit the book, its rails and its plate as one composition. Framing the entire phone instead
+ * Fit the book and its rails as one composition. Framing the entire phone instead
  * puts the corners far away from a normal cover on a tall, narrow outside display. Limit only
  * the composition's aspect for unusual source images; the source itself always stays contain-fit.
  */
@@ -46,13 +46,7 @@ private fun fitRelicComposition(bounds: RelicRect, imageWidth: Int, imageHeight:
     val coverAspect = if (appearance.mode == RelicMode.STANDALONE || imageWidth <= 0 || imageHeight <= 0)
         2f / 3f else (imageWidth.toDouble() / imageHeight).coerceIn(.5, 1.6).toFloat()
     val rail = .07f
-    val plate = when (appearance.bookplate) {
-        RelicBookplate.NONE -> 0f
-        RelicBookplate.STANDARD -> .20f
-        RelicBookplate.PRESTIGE -> .23f
-    }
-    val heightPerWidth = (1f - rail * 2f) / coverAspect + rail * 2f +
-        if (plate > 0f) plate + rail else 0f
+    val heightPerWidth = (1f - rail * 2f) / coverAspect + rail * 2f
     val width = min(bounds.width, bounds.height / heightPerWidth)
     val height = width * heightPerWidth
     return RelicRect(bounds.centerX - width / 2f, bounds.centerY - height / 2f,
@@ -73,24 +67,18 @@ internal fun relicCoverLayout(width: Int, height: Int, imageWidth: Int, imageHei
         fullImage.inset(min(fullImage.width, fullImage.height) * 0.045f)
         else fitRelicComposition(viewport.inset(padding), imageWidth, imageHeight, appearance)
     val strip = min(frame.width, frame.height) * 0.07f
-    val plateHeight = when (appearance.bookplate) {
-        RelicBookplate.NONE -> 0f
-        RelicBookplate.STANDARD -> min(frame.height * .16f, frame.width * .20f)
-        RelicBookplate.PRESTIGE -> min(frame.height * .18f, frame.width * .23f)
-    }
-    val plate = if (plateHeight > 0f) RelicRect(frame.left + strip, frame.bottom - strip - plateHeight,
-        frame.right - strip, frame.bottom - strip) else null
     val image = when (appearance.mode) {
         RelicMode.OVERLAY -> if (imageWidth > 0 && imageHeight > 0) fullImage else frame.inset(strip)
-        RelicMode.STANDALONE -> RelicRect(frame.left + strip, frame.top + strip,
-            frame.right - strip, (plate?.top?.minus(strip) ?: (frame.bottom - strip)).coerceAtLeast(frame.top + strip))
+        RelicMode.STANDALONE -> frame.inset(strip)
         RelicMode.MARGIN -> fitRelicImage(RelicRect(frame.left + strip, frame.top + strip,
-            frame.right - strip, max(frame.top + strip, plate?.top?.minus(strip) ?: (frame.bottom - strip))), imageWidth, imageHeight)
+            frame.right - strip, max(frame.top + strip, frame.bottom - strip)), imageWidth, imageHeight)
     }
     val sealSize = strip * 0.72f
     val seal = RelicRect(frame.left + (strip - sealSize) / 2, frame.centerY - sealSize / 2,
         frame.left + (strip + sealSize) / 2, frame.centerY + sealSize / 2)
-    return RelicCoverLayout(viewport, image, frame, plate, seal)
+    // Kept nullable for compatibility with earlier layout consumers. Legacy appearance fields
+    // never reserve space or render a Bookplate.
+    return RelicCoverLayout(viewport, image, frame, null, seal)
 }
 
 internal fun relicMotionAllowed(appearance: RelicAppearance, attached: Boolean, visible: Boolean,

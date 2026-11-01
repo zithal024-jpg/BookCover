@@ -53,6 +53,13 @@ class MoonlitArchiveBackupTest {
                 JSONObject().put("millis", 20 * 3_600_000L).put("completed", true)) }
             ReadingDayStore(history).mergeBackup(JSONObject().put("version", 1).put("days", days))
         }
+        fun seedAllSets() {
+            val days = JSONObject()
+            val start = LocalDate.of(2025, 1, 1)
+            repeat(365) { index -> days.put(start.plusDays(index.toLong()).toString(),
+                JSONObject().put("millis", 3_600_000L).put("completed", true)) }
+            ReadingDayStore(history).mergeBackup(JSONObject().put("version", 1).put("days", days))
+        }
         fun protectedFiles(): Map<String, ByteArray> = listOf(index, history, relicFile, relicBackup)
             .associate { it.name to it.readBytes() }
         fun assertProtectedFiles(expected: Map<String, ByteArray>) {
@@ -81,9 +88,9 @@ class MoonlitArchiveBackupTest {
         assertTrue("Existing reading is retroactive credit", library.relics.collection.value.earned.values.all { it == 0L })
         val default = RelicAppearance(enabled = true, colorMode = RelicColorMode.CUSTOM,
             customAccent = 0xff8ac4a7.toInt(), edgeTier = MoonlitTier.MYTHIC,
-            bookplate = RelicBookplate.PRESTIGE, seal = MoonlitTier.MYTHIC, motion = false, inscription = "Fixture archive")
+            seal = MoonlitTier.MYTHIC, motion = false, inscription = "Fixture archive")
         val perBook = RelicAppearance(enabled = true, mode = RelicMode.OVERLAY,
-            edgeTier = MoonlitTier.EPIC, bookplate = RelicBookplate.STANDARD, seal = MoonlitTier.RARE,
+            edgeTier = MoonlitTier.EPIC, seal = MoonlitTier.RARE,
             colorMode = RelicColorMode.DARK, inscription = "Fixture edition")
         library.relics.setAppearance(null, default)
         library.relics.setAppearance(fixtureBook.id, perBook)
@@ -132,6 +139,41 @@ class MoonlitArchiveBackupTest {
         reopened.reconcileRelics(reopened.readingDays.load())
         assertEquals(hundredHours + 60_000L, reopened.relics.collection.value.totalMillis)
         assertEquals(hundredHours + 60_000L, fixture.library().apply { load() }.relics.collection.value.totalMillis)
+    }
+
+    @Test fun allEighteenRelicsAndMixedFamilyEdgesSurviveRealBackupWithoutRestoringBookplates() = runBlocking {
+        val source = Fixture("all-sets-source").apply { seedBook(); seedAllSets() }
+        val library = source.library().apply { load() }
+        val collection = library.relics.collection.value
+        assertEquals(RelicCatalog.all.toSet(), collection.unlockedRelics)
+        assertEquals(365, collection.qualifyingDays)
+        assertEquals(365, collection.bestStreak)
+        assertTrue(collection.earned.values.all { it == 0L })
+        val mixed = RelicAppearance(enabled = true, edgeTier = MoonlitTier.MYTHIC,
+            edgeSet = RelicSet.WAYFARER, seal = MoonlitTier.LEGENDARY, sealSet = RelicSet.HEARTHKEEPER)
+        val hearth = RelicAppearance(enabled = true, mode = RelicMode.STANDALONE,
+            edgeTier = MoonlitTier.MYTHIC, edgeSet = RelicSet.HEARTHKEEPER,
+            seal = MoonlitTier.RARE, sealSet = RelicSet.WAYFARER)
+        // Legacy Bookplate preferences are accepted for migration and then ignored.
+        library.relics.setAppearance(null, mixed.copy(bookplate = RelicBookplate.PRESTIGE))
+        library.relics.setAppearance(fixtureBook.id, hearth.copy(bookplate = RelicBookplate.STANDARD))
+        assertEquals(mixed, library.relics.collection.value.defaultAppearance)
+        assertEquals(hearth, library.relics.collection.value.appearanceForRelics(fixtureBook.id))
+        val expected = library.relics.collection.value
+        val expectedDays = library.readingDays.load()
+        val backup = File(root, "all-sets-backup.json")
+        library.exportBackup(Uri.fromFile(backup))
+        val destination = Fixture("all-sets-destination").apply { seedBook() }
+        val restored = destination.library().apply { load() }
+        restored.restoreBackup(Uri.fromFile(backup))
+        assertEquals(expected, restored.relics.collection.value)
+        assertEquals(expectedDays, restored.readingDays.load())
+        assertEquals(mixed, restored.relics.collection.value.appearanceForRelics(null))
+        assertEquals(hearth, restored.relics.collection.value.appearanceForRelics(fixtureBook.id))
+        val durable = destination.protectedFiles()
+        restored.restoreBackup(Uri.fromFile(backup))
+        destination.assertProtectedFiles(durable)
+        assertEquals(expected, destination.library().apply { load() }.relics.collection.value)
     }
 
     @Test fun malformedRewardOrHistoryExtrasCannotChangeIndexHistoryOrRelics() = runBlocking {

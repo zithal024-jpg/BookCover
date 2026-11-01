@@ -2,6 +2,7 @@ package com.bookcover.diagnostic.rewards
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
@@ -27,13 +28,13 @@ class RelicCoverGeometryTest {
         }
     }
 
-    @Test fun marginFitsWholeImageAndKeepsPlateAndSealOutsideArtwork() {
+    @Test fun marginFitsWholeImageAndKeepsSealOutsideArtworkWithoutAPlate() {
         for ((w, h) in listOf(900 to 1800, 1800 to 900, 1 to 1, 0 to 900)) {
             for ((iw, ih) in listOf(600 to 900, 900 to 600, 1 to 10000, 10000 to 1, Int.MAX_VALUE to 1)) {
                 val result = relicCoverLayout(w, h, iw, ih, RelicAppearance(enabled = true,
                     mode = RelicMode.MARGIN, bookplate = RelicBookplate.PRESTIGE, seal = MoonlitTier.MYTHIC))
                 contained(result.frame, result.viewport); contained(result.image, result.frame)
-                result.plate?.let { contained(it, result.frame); assertTrue(result.image.bottom <= it.top + .001f) }
+                assertNull(result.plate)
                 assertTrue(result.seal.right <= result.image.left + .001f)
                 if (result.image.width > .001f && result.image.height > .001f) {
                     val difference = abs(result.image.width.toDouble() * ih - result.image.height.toDouble() * iw)
@@ -73,7 +74,7 @@ class RelicCoverGeometryTest {
         }
     }
 
-    @Test fun unusualArtAspectDoesNotCollapseTheMarginFrameOrBookplate() {
+    @Test fun unusualArtAspectDoesNotCollapseTheMarginFrameOrSeal() {
         for ((iw, ih) in listOf(1 to 100_000, 100_000 to 1, 900 to 600)) {
             val result = relicCoverLayout(360, 880, iw, ih, RelicAppearance(enabled = true,
                 mode = RelicMode.MARGIN, edgeTier = MoonlitTier.MYTHIC,
@@ -81,10 +82,29 @@ class RelicCoverGeometryTest {
             contained(result.frame, result.viewport)
             contained(result.image, result.frame)
             assertTrue("Extreme artwork must not shrink the ornaments to a hairline", result.frame.width > 360 * .7f)
-            assertTrue(result.frame.height > 360 * .7f)
-            assertTrue(result.plate!!.height > 360 * .1f)
+            assertTrue(result.frame.height > 360 * .5f)
+            assertNull(result.plate)
             assertTrue(result.seal.width > 360 * .03f)
             assertTrue(result.seal.right < result.image.left)
+        }
+    }
+
+    @Test fun legacyBookplatesReserveNoSpaceInAnyFamilyOrPresentationMode() {
+        for (set in RelicSet.entries) for (mode in RelicMode.entries) {
+            for ((w, h) in listOf(360 to 880, 1080 to 2520, 900 to 900, 1200 to 600)) {
+                val appearance = RelicAppearance(enabled = true, mode = mode, edgeTier = MoonlitTier.MYTHIC,
+                    seal = MoonlitTier.RARE, edgeSet = set, sealSet = set)
+                val expected = relicCoverLayout(w, h, 600, 900, appearance)
+                assertNull(expected.plate)
+                contained(expected.frame, expected.viewport)
+                if (mode == RelicMode.OVERLAY) contained(expected.frame, expected.image)
+                else contained(expected.image, expected.frame)
+                for (legacy in RelicBookplate.entries) {
+                    assertEquals("An old plate field must not leave empty space in $set / $mode",
+                        expected, relicCoverLayout(w, h, 600, 900,
+                            appearance.copy(bookplate = legacy, inscription = "Old plate label")))
+                }
+            }
         }
     }
 
@@ -93,7 +113,7 @@ class RelicCoverGeometryTest {
         fun allowed(a: RelicAppearance = mythic, attached: Boolean = true, visible: Boolean = true,
             presentation: Boolean = true, system: Boolean = true, released: Boolean = false) =
             relicMotionAllowed(a, attached, visible, presentation, system, released)
-        assertTrue(allowed())
+        for (set in RelicSet.entries) assertTrue(allowed(mythic.copy(edgeSet = set)))
         assertFalse(allowed(mythic.copy(enabled = false)))
         assertFalse(allowed(mythic.copy(edgeTier = MoonlitTier.LEGENDARY)))
         assertFalse(allowed(mythic.copy(motion = false)))

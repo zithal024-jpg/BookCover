@@ -30,15 +30,14 @@ internal class RelicCoverView(context: Context) : View(context) {
     private var title = ""
     private var author = ""
     private var hasBound = false
-    private var inscription = "My library"
     private var layout = relicCoverLayout(0, 0, 0, 0, appearance)
     private var palette = relicCoverPalette(intArrayOf(), intArrayOf(), 0xff18231f.toInt(), RelicColorMode.SET, 0)
     // Match ImageView's smooth scaling. This samples the original texture; there is no color filter
     // or altered/recolored/cropped bitmap, and the source is never replaced by the result.
     private val bitmapPaint = Paint().apply { isFilterBitmap = true }
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG)
     private val tracePath = Path()
+    private val traceHead = Path()
     private val perimeter = Path()
     private val perimeterMeasure = PathMeasure()
     private val traceDot = FloatArray(2)
@@ -92,13 +91,12 @@ internal class RelicCoverView(context: Context) : View(context) {
         this.appearance = appearance
         this.title = boundedTitle
         this.author = boundedAuthor
-        inscription = relicInscription(appearance.inscription)
         contentDescription = buildString {
             append(if (appearance.enabled && appearance.mode == RelicMode.STANDALONE) "Standalone book cover" else "Current book cover")
             if (boundedTitle.isNotBlank()) append(": $boundedTitle")
             if (appearance.enabled) {
-                appearance.edgeTier?.let { append(". ${it.rarity} Moonlit Archive edges") }
-                if (appearance.bookplate != RelicBookplate.NONE) append(". Bookplate: $inscription")
+                appearance.edgeTier?.let { append(". ${it.rarity} ${familyName(appearance.edgeSet)} edges") }
+                appearance.seal?.let { append(". ${it.rarity} ${familyName(appearance.sealSet)} relic seal") }
             }
         }
         prepareArtwork()
@@ -232,9 +230,6 @@ internal class RelicCoverView(context: Context) : View(context) {
                     sample(f.left + f.width * t, f.top); sample(f.left + f.width * t, f.bottom)
                     sample(f.left, f.top + f.height * t); sample(f.right, f.top + f.height * t)
                 }
-                layout.plate?.let { p ->
-                    for (y in 0 until 4) for (x in 0 until 8) sample(p.left + p.width * (x + .5f) / 8, p.top + p.height * (y + .5f) / 4)
-                }
             } else {
                 for (i in 0 until 32) {
                     val x = i * (bitmap.width - 1) / 31; val y = i * (bitmap.height - 1) / 31
@@ -244,7 +239,7 @@ internal class RelicCoverView(context: Context) : View(context) {
             }
         }
         palette = relicCoverPalette(global.toIntArray(), footprint.toIntArray(), artwork?.background ?: 0xff18231f.toInt(),
-            appearance.colorMode, appearance.customAccent)
+            appearance.colorMode, appearance.customAccent, if (appearance.edgeTier != null) appearance.edgeSet else appearance.sealSet)
         perimeter.reset()
         perimeter.addRoundRect(layout.frame.inset(stroke() * 1.5f).androidRect(), stroke() * 2, stroke() * 2, Path.Direction.CW)
         perimeterMeasure.setPath(perimeter, false)
@@ -256,6 +251,12 @@ internal class RelicCoverView(context: Context) : View(context) {
     }
 
     private fun stroke(): Float = (min(layout.frame.width, layout.frame.height) * .0045f).coerceAtLeast(1f)
+
+    private fun familyName(set: RelicSet): String = when (set) {
+        RelicSet.MOONLIT -> "Moonlit Archive"
+        RelicSet.WAYFARER -> "Wayfarer's Atlas"
+        RelicSet.HEARTHKEEPER -> "Hearthkeeper's Collection"
+    }
 
     private fun prepareText() {
         val rect = layout.image
@@ -270,7 +271,7 @@ internal class RelicCoverView(context: Context) : View(context) {
                 .setAlignment(android.text.Layout.Alignment.ALIGN_CENTER).setIncludePad(false)
                 .setMaxLines(lines).setEllipsize(TextUtils.TruncateAt.END).build()
         }
-        titleLayout = textLayout(title.ifBlank { "Moonlit Archive" }, titleSize, 4)
+        titleLayout = textLayout(title.ifBlank { familyName(if (appearance.edgeTier != null) appearance.edgeSet else appearance.sealSet) }, titleSize, 4)
         authorLayout = textLayout(author, titleSize * .45f, 2)
     }
 
@@ -289,7 +290,6 @@ internal class RelicCoverView(context: Context) : View(context) {
             canvas.drawBitmap(art.bitmap, null, layout.image.androidRect(), bitmapPaint)
         if (!appearance.enabled) return
         appearance.edgeTier?.takeIf { it.ordinal >= MoonlitTier.RARE.ordinal }?.let { drawEdges(canvas, it) }
-        layout.plate?.let { drawPlate(canvas, it) }
         appearance.seal?.let { tier ->
             val rect = layout.seal.androidRect()
             paint.style = Paint.Style.FILL; paint.color = palette.plate; paint.alpha = 255
@@ -297,7 +297,7 @@ internal class RelicCoverView(context: Context) : View(context) {
             paint.style = Paint.Style.STROKE; paint.color = palette.ink; paint.strokeWidth = stroke() * .75f
             canvas.drawOval(rect, paint)
             rect.inset(rect.width() * .15f, rect.height() * .15f)
-            drawMoonlitGlyph(canvas, tier, rect, palette.plateText)
+            drawRelicGlyph(canvas, appearance.sealSet, tier, rect, palette.plateText)
         }
     }
 
@@ -306,7 +306,8 @@ internal class RelicCoverView(context: Context) : View(context) {
         paint.style = Paint.Style.FILL; paint.color = palette.plate; paint.alpha = 255
         canvas.drawRect(rect, paint)
         val glyphSize = min(rect.width(), rect.height()) * .22f
-        drawMoonlitGlyph(canvas, appearance.seal ?: appearance.edgeTier ?: MoonlitTier.COMMON,
+        drawRelicGlyph(canvas, if (appearance.seal != null) appearance.sealSet else appearance.edgeSet,
+            appearance.seal ?: appearance.edgeTier ?: MoonlitTier.COMMON,
             RectF(rect.centerX() - glyphSize / 2, rect.top + rect.height() * .13f,
                 rect.centerX() + glyphSize / 2, rect.top + rect.height() * .13f + glyphSize), palette.plateText)
         var y = rect.top + rect.height() * .47f
@@ -326,6 +327,14 @@ internal class RelicCoverView(context: Context) : View(context) {
     }
 
     private fun drawEdges(canvas: Canvas, tier: MoonlitTier) {
+        when (appearance.edgeSet) {
+            RelicSet.MOONLIT -> drawMoonlitEdges(canvas, tier)
+            RelicSet.WAYFARER -> drawAtlasEdges(canvas, tier)
+            RelicSet.HEARTHKEEPER -> drawHearthEdges(canvas, tier)
+        }
+    }
+
+    private fun drawMoonlitEdges(canvas: Canvas, tier: MoonlitTier) {
         val f = layout.frame; val corner = min(f.width, f.height) * .11f
         for (right in listOf(false, true)) for (bottom in listOf(false, true)) {
             val x = if (right) f.right else f.left; val y = if (bottom) f.bottom else f.top
@@ -362,33 +371,99 @@ internal class RelicCoverView(context: Context) : View(context) {
         canvas.drawPath(path, paint); paint.style = Paint.Style.FILL; paint.color = palette.ink; canvas.drawPath(path, paint)
     }
 
-    private fun star(canvas: Canvas, x: Float, y: Float, r: Float) {
-        line(canvas, x - r, y, x + r, y, true); line(canvas, x, y - r, x, y + r, true)
+    private fun edgePath(canvas: Canvas, path: Path, thin: Boolean = false) {
+        paint.style = Paint.Style.STROKE; paint.alpha = 255
+        paint.strokeCap = Paint.Cap.ROUND; paint.strokeJoin = Paint.Join.ROUND
+        paint.color = palette.keyline; paint.strokeWidth = stroke() * if (thin) 1.8f else 2.8f
+        canvas.drawPath(path, paint)
+        paint.color = palette.ink; paint.strokeWidth = stroke() * if (thin) .6f else 1.1f
+        canvas.drawPath(path, paint)
     }
 
-    private fun drawPlate(canvas: Canvas, p: RelicRect) {
-        val rect = p.androidRect(); val inset = stroke() * 1.5f
-        paint.style = Paint.Style.FILL; paint.color = palette.plate; paint.alpha = 255
-        canvas.drawRoundRect(rect, inset * 2, inset * 2, paint)
-        paint.style = Paint.Style.STROKE; paint.color = palette.plateText; paint.strokeWidth = stroke() * .65f
-        rect.inset(inset, inset); canvas.drawRoundRect(rect, inset, inset, paint)
-        if (appearance.bookplate == RelicBookplate.PRESTIGE) {
-            rect.inset(inset * 1.7f, inset * 1.7f); canvas.drawRoundRect(rect, inset, inset, paint)
+    private fun drawConnectingRails(canvas: Canvas, corner: Float, gap: Float) {
+        val f = layout.frame
+        line(canvas, f.left + corner + gap, f.top, f.centerX - gap, f.top, true)
+        line(canvas, f.centerX + gap, f.top, f.right - corner - gap, f.top, true)
+        line(canvas, f.left + corner + gap, f.bottom, f.right - corner - gap, f.bottom, true)
+        line(canvas, f.left, f.top + corner + gap, f.left, f.bottom - corner - gap, true)
+        line(canvas, f.right, f.top + corner + gap, f.right, f.bottom - corner - gap, true)
+    }
+
+    private fun drawAtlasEdges(canvas: Canvas, tier: MoonlitTier) {
+        val f = layout.frame; val corner = min(f.width, f.height) * .11f
+        for (right in listOf(false, true)) for (bottom in listOf(false, true)) {
+            val x = if (right) f.right else f.left; val y = if (bottom) f.bottom else f.top
+            val dx = if (right) -1f else 1f; val dy = if (bottom) -1f else 1f
+            fun contour(inset: Float, length: Float, thin: Boolean) {
+                val cx = x + dx * inset; val cy = y + dy * inset
+                val bend = length * .32f
+                val path = Path().apply {
+                    moveTo(cx + dx * length, cy); lineTo(cx + dx * bend, cy)
+                    quadTo(cx, cy, cx, cy + dy * bend); lineTo(cx, cy + dy * length)
+                }
+                edgePath(canvas, path, thin)
+            }
+            contour(0f, corner, false)
+            if (tier.ordinal >= MoonlitTier.LEGENDARY.ordinal) contour(stroke() * 2.8f, corner * .74f, true)
         }
-        val size = p.height * .56f
-        drawMoonlitGlyph(canvas, if (appearance.bookplate == RelicBookplate.PRESTIGE) MoonlitTier.MYTHIC else MoonlitTier.UNCOMMON,
-            RectF(p.left + p.height * .17f, p.centerY - size / 2, p.left + p.height * .17f + size, p.centerY + size / 2), palette.plateText)
-        val textLeft = p.left + p.height * .93f
-        val textRight = p.right - p.height * .16f
-        val available = (textRight - textLeft).coerceAtLeast(0f)
-        if (available <= 0f) return
-        textPaint.typeface = android.graphics.Typeface.create("serif", android.graphics.Typeface.NORMAL)
-        textPaint.color = palette.plateText; textPaint.textAlign = Paint.Align.CENTER
-        textPaint.textSize = p.height * .20f
-        canvas.drawText("EX LIBRIS", (textLeft + textRight) / 2, p.top + p.height * .40f, textPaint)
-        textPaint.textSize = p.height * .29f
-        val label = TextUtils.ellipsize(inscription, textPaint, available, TextUtils.TruncateAt.END)
-        canvas.drawText(label, 0, label.length, (textLeft + textRight) / 2, p.top + p.height * .76f, textPaint)
+        if (tier.ordinal >= MoonlitTier.EPIC.ordinal) {
+            val gap = min(f.width, f.height) * .045f
+            drawConnectingRails(canvas, corner, gap)
+            diamond(canvas, f.centerX, f.top, gap * .63f)
+            line(canvas, f.centerX, f.top - gap * .8f, f.centerX, f.top + gap * .8f, true)
+        }
+        if (tier.ordinal >= MoonlitTier.LEGENDARY.ordinal)
+            for (x in listOf(f.left, f.right)) for (t in listOf(.32f, .68f))
+                diamond(canvas, x, f.top + f.height * t, stroke() * 1.8f)
+    }
+
+    private fun drawHearthEdges(canvas: Canvas, tier: MoonlitTier) {
+        val f = layout.frame; val corner = min(f.width, f.height) * .11f
+        for (right in listOf(false, true)) for (bottom in listOf(false, true)) {
+            val x = if (right) f.right else f.left; val y = if (bottom) f.bottom else f.top
+            val dx = if (right) -1f else 1f; val dy = if (bottom) -1f else 1f
+            fun copperCorner(inset: Float, length: Float, thin: Boolean) {
+                val cx = x + dx * inset; val cy = y + dy * inset; val bevel = length * .20f
+                val path = Path().apply {
+                    moveTo(cx + dx * length, cy); lineTo(cx + dx * bevel, cy)
+                    lineTo(cx, cy + dy * bevel); lineTo(cx, cy + dy * length)
+                }
+                edgePath(canvas, path, thin)
+            }
+            copperCorner(0f, corner, false)
+            if (tier.ordinal >= MoonlitTier.LEGENDARY.ordinal) copperCorner(stroke() * 2.8f, corner * .74f, true)
+        }
+        if (tier.ordinal >= MoonlitTier.EPIC.ordinal) {
+            val gap = min(f.width, f.height) * .045f
+            drawConnectingRails(canvas, corner, gap)
+            flame(canvas, f.centerX, f.top, gap * .66f)
+        }
+        if (tier.ordinal >= MoonlitTier.LEGENDARY.ordinal)
+            for (x in listOf(f.left, f.right)) for (t in listOf(.32f, .68f))
+                flame(canvas, x, f.top + f.height * t, stroke() * 1.8f)
+    }
+
+    private fun diamond(canvas: Canvas, x: Float, y: Float, radius: Float) {
+        val path = Path().apply {
+            moveTo(x, y - radius); lineTo(x + radius * .7f, y)
+            lineTo(x, y + radius); lineTo(x - radius * .7f, y); close()
+        }
+        edgePath(canvas, path, true)
+    }
+
+    private fun flame(canvas: Canvas, x: Float, y: Float, radius: Float) {
+        val path = Path().apply {
+            moveTo(x + radius * .1f, y - radius)
+            cubicTo(x + radius * .2f, y - radius * .3f, x + radius * .7f, y, x + radius * .6f, y + radius * .4f)
+            cubicTo(x + radius * .4f, y + radius * 1.2f, x - radius * .7f, y + radius * 1.2f, x - radius * .6f, y + radius * .3f)
+            cubicTo(x - radius * .5f, y - radius * .2f, x - radius * .1f, y - radius * .4f, x + radius * .1f, y - radius)
+        }
+        paint.style = Paint.Style.STROKE; paint.color = palette.keyline; paint.alpha = 255; paint.strokeWidth = stroke() * 1.8f
+        canvas.drawPath(path, paint); paint.style = Paint.Style.FILL; paint.color = palette.ink; canvas.drawPath(path, paint)
+    }
+
+    private fun star(canvas: Canvas, x: Float, y: Float, r: Float) {
+        line(canvas, x - r, y, x + r, y, true); line(canvas, x, y - r, x, y + r, true)
     }
 
     private fun drawTrace(canvas: Canvas) {
@@ -409,10 +484,31 @@ internal class RelicCoverView(context: Context) : View(context) {
         paint.color = palette.ink; paint.alpha = 230; paint.strokeWidth = stroke() * 1.3f
         canvas.drawPath(tracePath, paint)
         perimeterMeasure.getPosTan(head, traceDot, null)
-        paint.style = Paint.Style.FILL; paint.color = palette.keyline; paint.alpha = 200
-        canvas.drawCircle(traceDot[0], traceDot[1], stroke() * 2.1f, paint)
-        paint.color = palette.ink; paint.alpha = 240
-        canvas.drawCircle(traceDot[0], traceDot[1], stroke() * 1.3f, paint)
+        drawTraceHead(canvas)
         paint.alpha = 255
+    }
+
+    private fun drawTraceHead(canvas: Canvas) {
+        val x = traceDot[0]; val y = traceDot[1]; val radius = stroke() * 1.6f
+        if (appearance.edgeSet == RelicSet.MOONLIT) {
+            paint.style = Paint.Style.FILL; paint.color = palette.keyline; paint.alpha = 200
+            canvas.drawCircle(x, y, stroke() * 2.1f, paint)
+            paint.color = palette.ink; paint.alpha = 240
+            canvas.drawCircle(x, y, stroke() * 1.3f, paint)
+            return
+        }
+        traceHead.reset()
+        if (appearance.edgeSet == RelicSet.WAYFARER) {
+            traceHead.moveTo(x, y - radius); traceHead.lineTo(x + radius * .75f, y)
+            traceHead.lineTo(x, y + radius); traceHead.lineTo(x - radius * .75f, y); traceHead.close()
+        } else {
+            traceHead.moveTo(x, y - radius)
+            traceHead.cubicTo(x + radius * .2f, y - radius * .3f, x + radius, y + radius * .1f, x + radius * .5f, y + radius * .7f)
+            traceHead.cubicTo(x, y + radius * 1.3f, x - radius, y + radius * .5f, x - radius * .5f, y)
+            traceHead.quadTo(x - radius * .15f, y - radius * .4f, x, y - radius)
+        }
+        paint.style = Paint.Style.STROKE; paint.color = palette.keyline; paint.alpha = 200; paint.strokeWidth = stroke() * 1.6f
+        canvas.drawPath(traceHead, paint)
+        paint.style = Paint.Style.FILL; paint.color = palette.ink; paint.alpha = 240; canvas.drawPath(traceHead, paint)
     }
 }

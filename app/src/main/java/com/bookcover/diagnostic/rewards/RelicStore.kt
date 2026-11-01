@@ -1,6 +1,7 @@
 package com.bookcover.diagnostic.rewards
 
 import com.bookcover.diagnostic.streak.ReadingDays
+import com.bookcover.diagnostic.streak.ReadingDay
 import com.bookcover.diagnostic.streak.ReadingDayStore
 import java.io.File
 import java.io.FileOutputStream
@@ -30,12 +31,14 @@ internal class RelicStoreException(message: String, cause: Throwable? = null) : 
 internal class RelicStore(private val file: File, private val clock: () -> Long = System::currentTimeMillis) {
     private data class Document(
         val collection: RelicCollection = RelicCollection(),
-        val readingFloor: Map<LocalDate, Long> = emptyMap(),
+        val readingFloor: Map<LocalDate, ReadingDay> = emptyMap(),
         val initialized: Boolean = false,
         val defaultConfigured: Boolean = false,
         val revision: Long = 0,
         /** A reset is an explicit preference too; older backups must not resurrect its override. */
         val inheritedBooks: Set<String> = emptySet(),
+        /** The first full history reconciliation after v1 load is retrospective too. */
+        val catalogUpgradePending: Boolean = false,
     )
 
     private data class Candidate(val file: File, val bytes: ByteArray, val document: Document)
@@ -86,19 +89,22 @@ internal class RelicStore(private val file: File, private val clock: () -> Long 
         var total = document.collection.totalMillis
         for ((date, day) in days.days) {
             require(date.year in 1..9999 && day.millis in 0..ReadingDayStore.MAX_DAY_MILLIS) { "Invalid dated reading time" }
-            val previous = floors[date] ?: 0
-            if (day.millis > previous) {
-                total = saturatedAdd(total, day.millis - previous)
-                floors[date] = day.millis
-            }
+            val previous = floors[date] ?: ReadingDay()
+            if (day.millis > previous.millis) total = saturatedAdd(total, day.millis - previous.millis)
+            // A restored historical completed flag remains authoritative even below today's goal.
+            floors[date] = ReadingDay(maxOf(previous.millis, day.millis), previous.completed || day.completed)
         }
+        val stats = document.collection.copy(totalMillis = total,
+            qualifyingDays = maxOf(document.collection.qualifyingDays, floors.values.count { it.completed }),
+            bestStreak = maxOf(document.collection.bestStreak, ReadingDays(floors).longestStreak()))
         val earned = document.collection.earned.toMutableMap()
-        MoonlitTier.entries.filter { total >= it.thresholdMillis && it.id !in earned }.forEach {
-            earned[it.id] = if (document.initialized) clock().coerceAtLeast(0) else 0
+        RelicCatalog.all.filter { it.eligible(stats) && it.id !in earned }.forEach {
+            // Newly introduced families use honest retroactive dates from the migrated floor.
+            earned[it.id] = if (document.initialized && !document.catalogUpgradePending) clock().coerceAtLeast(0) else 0
         }
         val updated = document.copy(
-            collection = document.collection.copy(totalMillis = total, earned = earned.toMap()),
-            readingFloor = floors.toMap(), initialized = true,
+            collection = stats.copy(earned = earned.toMap()),
+            readingFloor = floors.toMap(), initialized = true, catalogUpgradePending = false,
         )
         if (updated != document) save(updated)
         return state.value
@@ -115,7 +121,7 @@ internal class RelicStore(private val file: File, private val clock: () -> Long 
     fun setAppearance(bookId: String?, appearance: RelicAppearance) {
         load()
         bookId?.let(::validateBookId)
-        val permitted = appearance.permitted(document.collection.unlocked)
+        val permitted = appearance.permittedRelics(document.collection.unlockedRelics)
         val updated = if (bookId == null) document.copy(
             collection = document.collection.copy(defaultAppearance = permitted), defaultConfigured = true,
         ) else document.copy(collection = document.collection.copy(
@@ -155,21 +161,27 @@ internal class RelicStore(private val file: File, private val clock: () -> Long 
         val local = document.collection
         val incoming = restored.collection
         val floors = document.readingFloor.toMutableMap()
-        restored.readingFloor.forEach { (date, millis) -> floors[date] = maxOf(floors[date] ?: 0, millis) }
+        restored.readingFloor.forEach { (date, incomingDay) ->
+            val existing = floors[date] ?: ReadingDay()
+            floors[date] = ReadingDay(maxOf(existing.millis, incomingDay.millis), existing.completed || incomingDay.completed)
+        }
         val earned = local.earned.toMutableMap()
         incoming.earned.forEach { (id, time) -> earned[id] = earned[id]?.let { minOf(it, time) } ?: time }
-        val total = maxOf(local.totalMillis, incoming.totalMillis, saturatedSum(floors.values))
+        val total = maxOf(local.totalMillis, incoming.totalMillis, saturatedSum(floors.values.map { it.millis }))
+        val qualifyingDays = maxOf(local.qualifyingDays, incoming.qualifyingDays, floors.values.count { it.completed })
+        val bestStreak = maxOf(local.bestStreak, incoming.bestStreak, ReadingDays(floors).longestStreak())
+        val stats = RelicReadingStats(total, qualifyingDays, bestStreak)
         // Restore may provide enough historic time for another tier even when the older export did not
         // include that catalog item. It is retroactive credit, rather than a new reading celebration.
-        MoonlitTier.entries.filter { total >= it.thresholdMillis && it.id !in earned }.forEach { earned[it.id] = 0 }
-        val unlocked = earned.keys.mapNotNull(MoonlitTier::fromId).toSet()
+        RelicCatalog.all.filter { it.eligible(stats) && it.id !in earned }.forEach { earned[it.id] = 0 }
+        val unlocked = earned.keys.mapNotNull(RelicCatalog::fromId).toSet()
         val appearance = if (document.defaultConfigured) local.defaultAppearance else incoming.defaultAppearance
         val locallyConfigured = local.bookAppearances.keys + document.inheritedBooks
         val choices = incoming.bookAppearances.filterKeys { it !in locallyConfigured } + local.bookAppearances
         val inherited = document.inheritedBooks + restored.inheritedBooks.filter { it !in locallyConfigured }
         val updated = document.copy(
             collection = RelicCollection(total, earned.toMap(), local.seen + incoming.seen,
-                appearance.permitted(unlocked), choices.mapValues { it.value.permitted(unlocked) }),
+                appearance.permittedRelics(unlocked), choices.mapValues { it.value.permittedRelics(unlocked) }, qualifyingDays, bestStreak),
             readingFloor = floors.toMap(),
             initialized = document.initialized || restored.initialized,
             defaultConfigured = document.defaultConfigured || restored.defaultConfigured,
@@ -214,7 +226,8 @@ internal class RelicStore(private val file: File, private val clock: () -> Long 
         fun validateBackup(json: JSONObject) { decode(json) }
 
         private fun decode(json: JSONObject): Document {
-            require(strictLong(json, "version") == 1L) { "Unknown rewards version" }
+            val version = strictLong(json, "version")
+            require(version in 1L..2L) { "Unknown rewards version" }
             val total = strictLong(json, "totalMillis")
             val revision = strictLong(json, "revision")
             val initialized = strictBoolean(json, "initialized")
@@ -225,7 +238,6 @@ internal class RelicStore(private val file: File, private val clock: () -> Long 
                 require(id.matches(Regex("[a-z][a-z0-9_-]{0,63}"))) { "Invalid relic identifier" }
                 strictLong(earnedJson, id)
             }
-            require(earned.keys.mapNotNull(MoonlitTier::fromId).all { total >= it.thresholdMillis }) { "Earned reward exceeds recorded reading time" }
             val seenJson = json.getJSONArray("seen")
             require(seenJson.length() <= 256) { "Too many seen relics" }
             val seen = (0 until seenJson.length()).map { index ->
@@ -234,15 +246,22 @@ internal class RelicStore(private val file: File, private val clock: () -> Long 
                 value
             }.toSet()
             val readingDays = ReadingDayStore.validateBackup(json.getJSONObject("readingDays"))
-            val floors = readingDays.days.mapValues { it.value.millis }
-            require(total >= saturatedSum(floors.values)) { "Lifetime time is less than its reading history" }
-            val unlocked = earned.keys.mapNotNull(MoonlitTier::fromId).toSet()
-            val appearance = appearanceFromJson(json.getJSONObject("defaultAppearance")).permitted(unlocked)
+            val floors = readingDays.days
+            require(total >= saturatedSum(floors.values.map { it.millis })) { "Lifetime time is less than its reading history" }
+            val datedCount = floors.values.count { it.completed }
+            val datedBest = readingDays.longestStreak()
+            val qualifyingDays = if (version == 1L) datedCount else strictDayCount(json, "qualifyingDays")
+            val bestStreak = if (version == 1L) datedBest else strictDayCount(json, "bestStreak")
+            require(qualifyingDays >= datedCount && bestStreak >= datedBest && bestStreak <= qualifyingDays) { "Reading day statistics contradict dated history" }
+            val stats = RelicReadingStats(total, qualifyingDays, bestStreak)
+            require(earned.keys.mapNotNull(RelicCatalog::fromId).all { it.eligible(stats) }) { "Earned reward exceeds recorded reading activity" }
+            val unlocked = earned.keys.mapNotNull(RelicCatalog::fromId).toSet()
+            val appearance = appearanceFromJson(json.getJSONObject("defaultAppearance"), version).permittedRelics(unlocked)
             val booksJson = json.getJSONObject("bookAppearances")
             require(booksJson.length() <= MAX_BOOK_CHOICES) { "Too many book appearances" }
             val books = booksJson.keys().asSequence().associateWith { id ->
                 validateBookId(id)
-                appearanceFromJson(booksJson.getJSONObject(id)).permitted(unlocked)
+                appearanceFromJson(booksJson.getJSONObject(id), version).permittedRelics(unlocked)
             }
             val inherited = if (json.has("inheritedBooks")) {
                 val values = json.getJSONArray("inheritedBooks")
@@ -256,12 +275,19 @@ internal class RelicStore(private val file: File, private val clock: () -> Long 
             } else emptySet()
             require(books.size + inherited.size <= MAX_BOOK_CHOICES) { "Too many book appearances" }
             require(inherited.none { it in books }) { "A book cannot both inherit and override its appearance" }
-            return Document(RelicCollection(total, earned, seen, appearance, books), floors, initialized, configured, revision, inherited)
+            // A v1 file already has dated flags. Grant newly introduced sets retroactively once,
+            // retaining all existing IDs/dates without manufacturing additional reading activity.
+            val migratedEarned = if (version == 1L) earned.toMutableMap().apply {
+                RelicCatalog.all.filter { it.eligible(stats) && it.id !in this }.forEach { put(it.id, 0) }
+            }.toMap() else earned
+            return Document(RelicCollection(total, migratedEarned, seen, appearance, books, qualifyingDays, bestStreak),
+                floors, initialized, configured, revision, inherited, catalogUpgradePending = version == 1L)
         }
 
         private fun encode(document: Document): JSONObject = JSONObject().apply {
-            put("version", 1); put("revision", document.revision); put("initialized", document.initialized)
+            put("version", 2); put("revision", document.revision); put("initialized", document.initialized)
             put("defaultConfigured", document.defaultConfigured); put("totalMillis", document.collection.totalMillis)
+            put("qualifyingDays", document.collection.qualifyingDays); put("bestStreak", document.collection.bestStreak)
             put("earned", JSONObject().apply { document.collection.earned.toSortedMap().forEach { (id, time) -> put(id, time) } })
             put("seen", JSONArray(document.collection.seen.sorted()))
             put("defaultAppearance", appearanceJson(document.collection.defaultAppearance))
@@ -272,9 +298,9 @@ internal class RelicStore(private val file: File, private val clock: () -> Long 
             put("readingDays", floorJson(document.readingFloor))
         }
 
-        private fun floorJson(floors: Map<LocalDate, Long>): JSONObject = JSONObject().put("version", 1).put("days", JSONObject().apply {
-            floors.toSortedMap().forEach { (date, millis) -> put(date.toString(), JSONObject().put("millis", millis)
-                .put("completed", millis >= com.bookcover.diagnostic.streak.DAILY_GOAL_MILLIS)) }
+        private fun floorJson(floors: Map<LocalDate, ReadingDay>): JSONObject = JSONObject().put("version", 1).put("days", JSONObject().apply {
+            floors.toSortedMap().forEach { (date, day) -> put(date.toString(), JSONObject().put("millis", day.millis)
+                .put("completed", day.completed)) }
         })
 
         private fun appearanceJson(value: RelicAppearance): JSONObject = JSONObject().apply {
@@ -282,9 +308,10 @@ internal class RelicStore(private val file: File, private val clock: () -> Long 
             put("customAccent", value.customAccent); put("edgeTier", value.edgeTier?.id ?: JSONObject.NULL)
             put("bookplate", value.bookplate.name); put("seal", value.seal?.id ?: JSONObject.NULL)
             put("motion", value.motion); put("inscription", value.inscription)
+            put("edgeSet", value.edgeSet.id); put("sealSet", value.sealSet.id)
         }
 
-        private fun appearanceFromJson(json: JSONObject): RelicAppearance {
+        private fun appearanceFromJson(json: JSONObject, version: Long): RelicAppearance {
             fun tier(key: String): MoonlitTier? {
                 if (json.isNull(key)) return null
                 val id = json.get(key)
@@ -295,10 +322,17 @@ internal class RelicStore(private val file: File, private val clock: () -> Long 
             require(accent is Number && accent.toDouble() == accent.toInt().toDouble()) { "Invalid custom accent" }
             val inscription = json.get("inscription")
             require(inscription is String && inscription.length <= 1_000) { "Invalid inscription" }
+            fun set(key: String): RelicSet = if (version == 1L && !json.has(key)) RelicSet.MOONLIT
+                else requireNotNull(RelicSet.fromId(json.getString(key))) { "Unknown relic set" }
             return RelicAppearance(strictBoolean(json, "enabled"), RelicMode.valueOf(json.getString("mode")),
                 RelicColorMode.valueOf(json.getString("colorMode")), accent.toInt(), tier("edgeTier"),
-                RelicBookplate.valueOf(json.getString("bookplate")), tier("seal"), strictBoolean(json, "motion"), inscription)
+                RelicBookplate.valueOf(json.getString("bookplate")), tier("seal"), strictBoolean(json, "motion"), inscription,
+                set("edgeSet"), set("sealSet"))
         }
+
+        private fun strictDayCount(json: JSONObject, key: String): Int = strictLong(json, key).also {
+            require(it <= 100_000) { "Invalid reading day count" }
+        }.toInt()
 
         private fun strictLong(json: JSONObject, key: String): Long {
             val value = json.get(key)

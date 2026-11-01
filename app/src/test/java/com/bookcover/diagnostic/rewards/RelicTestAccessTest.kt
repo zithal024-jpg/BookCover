@@ -15,7 +15,7 @@ class RelicTestAccessTest {
     private var now = 1_793_500_000_000L
     private val bookId = "a".repeat(64)
     private val mythic = RelicAppearance(enabled = true, mode = RelicMode.STANDALONE,
-        edgeTier = MoonlitTier.MYTHIC, seal = MoonlitTier.MYTHIC, bookplate = RelicBookplate.PRESTIGE)
+        edgeTier = MoonlitTier.MYTHIC, seal = MoonlitTier.MYTHIC)
 
     private class MemoryPersistence : RelicTestPersistence {
         var value: String? = null
@@ -159,5 +159,45 @@ class RelicTestAccessTest {
         assertEquals(previous, testing.state.value)
         assertThrows(IllegalStateException::class.java) { testing.end() }
         assertEquals(previous, testing.state.value)
+    }
+
+    @Test fun existingTestingWindowMigratesWithoutExtensionAndNowIncludesAllEighteenRelics() {
+        val persistence = MemoryPersistence()
+        val testing = access(persistence)
+        testing.begin(RelicCollection())
+        testing.saveAppearance(null, mythic)
+        val originalExpiry = testing.state.value.expiresAtMillis
+        val legacy = JSONObject(persistence.value!!).put("version", 1)
+        legacy.getJSONObject("defaultAppearance").apply {
+            remove("edgeSet"); remove("sealSet"); put("bookplate", "PRESTIGE")
+        }
+        persistence.value = legacy.toString()
+        now += 3_600_000
+        val upgraded = access(persistence)
+        assertTrue(upgraded.state.value.isActive(now))
+        assertEquals(originalExpiry, upgraded.state.value.expiresAtMillis)
+        assertEquals(18, upgraded.availableRelics(RelicCollection()).size)
+        upgraded.begin(RelicCollection())
+        assertEquals(originalExpiry, upgraded.state.value.expiresAtMillis)
+        assertEquals(RelicSet.MOONLIT, upgraded.appearanceFor(RelicCollection(), null).edgeSet)
+        assertEquals(RelicBookplate.NONE, upgraded.appearanceFor(RelicCollection(), null).bookplate)
+    }
+
+    @Test fun independentEdgeAndSealFamiliesPersistOnlyInsideTemporaryProfile() {
+        val persistence = MemoryPersistence()
+        val real = RelicCollection(qualifyingDays = 1, bestStreak = 1,
+            earned = mapOf("atlas_ribbon" to now))
+        val testing = access(persistence)
+        testing.begin(real)
+        val mixed = mythic.copy(edgeSet = RelicSet.WAYFARER, sealSet = RelicSet.HEARTHKEEPER)
+        testing.saveAppearance(bookId, mixed)
+        val restored = access(persistence)
+        assertEquals(mixed, restored.appearanceFor(real, bookId))
+        assertEquals(real.earned, restored.editingCollection(real).earned)
+        assertEquals(real.qualifyingDays, restored.editingCollection(real).qualifyingDays)
+        assertEquals(real.bestStreak, restored.editingCollection(real).bestStreak)
+        restored.end()
+        assertEquals(real.appearanceForRelics(bookId), restored.appearanceFor(real, bookId))
+        assertEquals(real.unlockedRelics, restored.availableRelics(real))
     }
 }

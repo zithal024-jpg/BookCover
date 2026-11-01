@@ -100,7 +100,7 @@ Opus's active worktree already has Library QA/screenshot changes; leave them wit
 Streak backup inclusion is an **owner scope choice**, not a defect or assigned
 implementation. An optional owner-assisted continuous outside-cover demonstration
 (auto/manual start, Stop, timer, exit, fold/passage/bookmark) would add evidence;
-prior confirmed physical checks stay complete. Moonlit Archive rewards are now owner-authorized for implementation, as tracked above; the other reward sets remain design only. No dashboard,
+prior confirmed physical checks stay complete. All three reward sets are now owner-authorized for implementation, with Bookplate removal and the Atlas/Hearthkeeper rollout tracked above. No dashboard,
 Settings redesign, duplicate search highlighting or online services. PDF work is now owner-requested and tracked above.
 
 ## Completed work and evidence

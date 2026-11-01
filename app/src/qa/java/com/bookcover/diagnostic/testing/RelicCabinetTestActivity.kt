@@ -22,7 +22,7 @@ import com.bookcover.diagnostic.rewards.RelicAppearance
 import com.bookcover.diagnostic.rewards.RelicCabinet
 import com.bookcover.diagnostic.rewards.RelicCollection
 import com.bookcover.diagnostic.rewards.RelicStore
-import com.bookcover.diagnostic.rewards.MoonlitTier
+import com.bookcover.diagnostic.rewards.RelicCatalog
 import com.bookcover.diagnostic.streak.ReadingDay
 import com.bookcover.diagnostic.streak.ReadingDays
 import java.io.File
@@ -136,7 +136,7 @@ class RelicCabinetTestActivity : FragmentActivity() {
                                 },
                                 onSeen = { lifecycleScope.launch(Dispatchers.IO) { library.relics.markSeen() } },
                                 onDismiss = { if (!busy) { dismissRequests++; showCabinet = false } }, busy = busy,
-                                availableTiers = if (testingActive) MoonlitTier.entries.toSet() else collection.unlocked,
+                                availableRelics = if (testingActive) RelicCatalog.all.toSet() else collection.unlockedRelics,
                                 testingActive = testingActive,
                                 testingExpiryLabel = if (testingActive) "Testing access ends in 24 hours" else null,
                                 onStartTesting = if (testingControlsForTests) ({ testingActive = true }) else null,

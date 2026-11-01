@@ -14,7 +14,10 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.bookcover.diagnostic.library.BookRecord
 import com.bookcover.diagnostic.rewards.MoonlitTier
+import com.bookcover.diagnostic.rewards.RelicCatalog
+import com.bookcover.diagnostic.rewards.RelicDefinition
 import com.bookcover.diagnostic.rewards.RelicMode
+import com.bookcover.diagnostic.rewards.RelicSet
 import java.io.File
 import java.io.FileOutputStream
 import kotlinx.coroutines.runBlocking
@@ -101,11 +104,15 @@ class RelicCabinetTest {
         assertEquals(2f, onHost { it.resources.configuration.fontScale }, .01f)
         assertFalse("The fixture starts without decorations", host.readStoredCollectionForTests().defaultAppearance.enabled)
         assertTouchTarget(revealTag("relic-cabinet-close"))
-        MoonlitTier.entries.forEach { tier ->
-            val tile = revealTag("relic-item-${tier.id}")
-            assertTouchTarget(tile)
-            assertRelicAnnouncement(tier)
+        RelicSet.entries.forEach { set ->
+            chooseRelicSet(set)
+            RelicCatalog.forSet(set).forEach { relic ->
+                val tile = revealTag("relic-item-${relic.id}")
+                assertTouchTarget(tile)
+                assertRelicAnnouncement(relic)
+            }
         }
+        chooseRelicSet(RelicSet.MOONLIT)
         val selectedCommon = revealTag("relic-item-quill", forward = false)
         assertTrue("Common is already showing its details", selectedCommon.stateDescription?.contains("Details shown") == true)
         assertEquals("Relic presets expose a repeatable button action", "android.widget.Button", selectedCommon.className?.toString())
@@ -115,12 +122,18 @@ class RelicCabinetTest {
         click(revealMenuChoice("Standalone title and author cover"))
         assertPreviewFits(revealTag("relic-cover-preview", forward = false))
         screenshot("relic-cabinet-200-common-preview")
+        assertNull("The removed Bookplate control is absent", findTag("relic-bookplate"))
+        assertNull("The removed inscription control is absent", findTag("relic-inscription"))
+        // Absence checks clear UiAutomation's cache; obtain the actionable node afterward.
         val save = revealTag("relic-save")
         assertTrue("Save remains available at 200% text", save.isEnabled)
         assertTouchTarget(save)
         val viewport = Rect().also { save.window?.getBoundsInScreen(it) }
         val bounds = Rect().also(save::getBoundsInScreen)
-        assertTrue("Save fits the visible native window", viewport.isEmpty || viewport.contains(bounds))
+        // Use the same one-pixel WindowInfo rounding allowance and exact scroll-parent clips
+        // as revealTag. A second, stricter window-only check contradicted that contract.
+        assertTrue("Save fits the visible native window: bounds=$bounds,window=$viewport," +
+            "density=${host.uiDensityForTests},node={${describeNode(save)}}", fullyVisible(save))
         screenshot("relic-cabinet-200-save")
         click(save)
         waitFor("large-text standalone appearance persisted") { onHost { it.saveRequests == 1 && !it.busy } }
@@ -176,6 +189,61 @@ class RelicCabinetTest {
         clickTag("relic-cabinet-close", forward = false)
         waitFor("preview disposal delivered on dismissal") { onHost { it.dismissRequests == 1 && it.previewClosedRequests == 1 } }
         assertEquals(setOf(MoonlitTier.COMMON), host.readStoredCollectionForTests().unlocked)
+    }
+
+    @Test fun atlasAndHearthPresetsCanMixEdgeAndSealFamiliesInLiveTemporarySave() {
+        launch(testingControls = true)
+        val before = host.readStoredCollectionForTests()
+        clickTag("relic-testing-start")
+        waitFor("temporary access enables all sets") { onHost { it.testingActive } }
+        chooseRelicSet(RelicSet.WAYFARER)
+        val atlas = RelicCatalog.item(RelicSet.WAYFARER, MoonlitTier.MYTHIC)
+        clickTag("relic-item-${atlas.id}")
+        waitFor("Atlas preset delivered live") { onHost {
+            it.lastPreviewAppearance?.let { a -> a.edgeSet == RelicSet.WAYFARER && a.sealSet == RelicSet.WAYFARER &&
+                a.edgeTier == MoonlitTier.MYTHIC && a.seal == MoonlitTier.MYTHIC } == true
+        } }
+        chooseRelicSet(RelicSet.HEARTHKEEPER)
+        val hearth = RelicCatalog.item(RelicSet.HEARTHKEEPER, MoonlitTier.MYTHIC)
+        clickTag("relic-item-${hearth.id}")
+        waitFor("Hearthkeeper preset delivered live") { onHost {
+            it.lastPreviewAppearance?.let { a -> a.edgeSet == RelicSet.HEARTHKEEPER && a.sealSet == RelicSet.HEARTHKEEPER &&
+                a.edgeTier == MoonlitTier.MYTHIC && a.seal == MoonlitTier.MYTHIC } == true
+        } }
+        val streakRoute = revealTag("relic-progress-route-0")
+        assertTrue(streakRoute.text?.contains("Best-ever streak") == true)
+        val daysRoute = revealTag("relic-progress-route-1")
+        assertTrue(daysRoute.text?.contains("Total qualifying days") == true)
+        clickTag("relic-edge-set")
+        click(revealMenuChoice(RelicSet.WAYFARER.title))
+        val hearthSeal = RelicCatalog.item(RelicSet.HEARTHKEEPER, MoonlitTier.RARE)
+        clickTag("relic-seal")
+        click(revealMenuChoice("${hearthSeal.tier.rarity} · ${hearthSeal.title} · available for testing"))
+        waitFor("independent Atlas edges and Hearthkeeper seal delivered live") { onHost {
+            it.lastPreviewAppearance?.let { a -> a.edgeSet == RelicSet.WAYFARER && a.edgeTier == MoonlitTier.MYTHIC &&
+                a.sealSet == RelicSet.HEARTHKEEPER && a.seal == MoonlitTier.RARE && a.motion } == true
+        } }
+        assertNull("The removed Bookplate control is absent", findTag("relic-bookplate"))
+        assertNull("The removed inscription control is absent", findTag("relic-inscription"))
+        val save = revealTag("relic-save")
+        assertTrue(save.isEnabled)
+        click(save)
+        waitFor("mixed temporary appearance saved") { onHost { it.saveRequests == 1 && !it.busy && !it.showCabinet } }
+        val saved = onHost { it.lastSavedAppearance!! }
+        assertEquals(RelicSet.WAYFARER, saved.edgeSet)
+        assertEquals(MoonlitTier.MYTHIC, saved.edgeTier)
+        assertEquals(RelicSet.HEARTHKEEPER, saved.sealSet)
+        assertEquals(MoonlitTier.RARE, saved.seal)
+        val after = host.readStoredCollectionForTests()
+        assertEquals(before.earned, after.earned)
+        assertEquals(before.defaultAppearance, after.defaultAppearance)
+        assertEquals(before.qualifyingDays, after.qualifyingDays)
+        assertEquals(before.bestStreak, after.bestStreak)
+    }
+
+    private fun chooseRelicSet(set: RelicSet) {
+        clickTag("relic-set", forward = false)
+        click(revealMenuChoice(set.title))
     }
 
     private fun chooseTargetBook() {
@@ -281,24 +349,17 @@ class RelicCabinetTest {
         }
     }
 
-    private fun assertRelicAnnouncement(tier: MoonlitTier) {
-        val tag = "relic-item-${tier.id}"
-        val milestone = when (tier) {
-            MoonlitTier.COMMON -> "5 total reading minutes"
-            MoonlitTier.UNCOMMON -> "1 total reading hour"
-            MoonlitTier.RARE -> "5 total reading hours"
-            MoonlitTier.EPIC -> "15 total reading hours"
-            MoonlitTier.LEGENDARY -> "40 total reading hours"
-            MoonlitTier.MYTHIC -> "100 total reading hours"
-        }
-        waitFor("${tier.id} announces ${tier.title} and $milestone", failureDetails = {
+    private fun assertRelicAnnouncement(relic: RelicDefinition) {
+        val tag = "relic-item-${relic.id}"
+        val milestone = relic.requirementLabel
+        waitFor("${relic.id} announces ${relic.title} and $milestone", failureDetails = {
             val node = findTag(tag)?.apply { refresh() }
-            "expectedTier=${tier.id},expectedTitle=${tier.title},expectedMilestone=$milestone," +
+            "expectedRelic=${relic.id},expectedTitle=${relic.title},expectedMilestone=$milestone," +
                 "actualFullyVisible=${node?.let(::fullyVisible)},${tileSemanticsDiagnostics(node)}"
         }) {
             val fresh = findTag(tag)?.takeIf { it.refresh() }
             val description = fresh?.contentDescription?.toString().orEmpty()
-            fresh != null && fullyVisible(fresh) && description.contains(tier.title) && description.contains(milestone)
+            fresh != null && fullyVisible(fresh) && description.contains(relic.title) && description.contains(milestone)
         }
     }
 

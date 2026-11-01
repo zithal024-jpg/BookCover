@@ -22,6 +22,7 @@ internal data class RelicTestingState(
 
 internal const val RELIC_TEST_DURATION_MILLIS = 24 * 60 * 60_000L
 private val ALL_TEST_TIERS = MoonlitTier.entries.toSet()
+private val ALL_TEST_RELICS = RelicCatalog.all.toSet()
 
 /** Kept separate so the complete expiry/isolation contract can be checked without Android. */
 internal interface RelicTestPersistence {
@@ -59,10 +60,10 @@ internal class RelicTestAccess internal constructor(
         require(now > 0 && now <= Long.MAX_VALUE - RELIC_TEST_DURATION_MILLIS) { "Invalid testing time" }
         require(collection.bookAppearances.size <= MAX_BOOK_CHOICES) { "Too many book appearances" }
         val next = RelicTestingState(now, now + RELIC_TEST_DURATION_MILLIS,
-            collection.defaultAppearance.permitted(ALL_TEST_TIERS),
+            collection.defaultAppearance.permittedRelics(ALL_TEST_RELICS),
             collection.bookAppearances.mapValues { (id, appearance) ->
                 validateBookId(id)
-                appearance.permitted(ALL_TEST_TIERS)
+                appearance.permittedRelics(ALL_TEST_RELICS)
             })
         persist(next)
     }
@@ -87,7 +88,7 @@ internal class RelicTestAccess internal constructor(
     fun saveAppearance(bookId: String?, appearance: RelicAppearance) {
         val current = requireActive()
         bookId?.let(::validateBookId)
-        val permitted = appearance.permitted(ALL_TEST_TIERS)
+        val permitted = appearance.permittedRelics(ALL_TEST_RELICS)
         val next = if (bookId == null) current.copy(defaultAppearance = permitted)
         else current.copy(bookAppearances = current.bookAppearances + (bookId to permitted))
         require(next.bookAppearances.size <= MAX_BOOK_CHOICES) { "Too many book appearances" }
@@ -119,8 +120,14 @@ internal class RelicTestAccess internal constructor(
     }
 
     @Synchronized
+    fun availableRelics(collection: RelicCollection): Set<RelicDefinition> {
+        refresh()
+        return if (supported && mutableState.value.isActive(clock())) ALL_TEST_RELICS else collection.unlockedRelics
+    }
+
+    @Synchronized
     fun appearanceFor(collection: RelicCollection, bookId: String?): RelicAppearance =
-        editingCollection(collection).appearanceFor(bookId, availableTiers(collection))
+        editingCollection(collection).appearanceForRelics(bookId, availableRelics(collection))
 
     private fun requireActive(): RelicTestingState {
         refresh()
@@ -159,7 +166,7 @@ internal class RelicTestAccess internal constructor(
         private const val MAX_DOCUMENT_CHARS = 4 * 1024 * 1024
 
         private fun encode(state: RelicTestingState): JSONObject = JSONObject().apply {
-            put("version", 1)
+            put("version", 2)
             put("startedAtMillis", state.startedAtMillis)
             put("expiresAtMillis", state.expiresAtMillis)
             put("defaultAppearance", appearanceJson(state.defaultAppearance))
@@ -169,16 +176,17 @@ internal class RelicTestAccess internal constructor(
         }
 
         private fun decode(json: JSONObject): RelicTestingState {
-            require(strictLong(json, "version") == 1L) { "Unknown testing version" }
+            val version = strictLong(json, "version")
+            require(version in 1L..2L) { "Unknown testing version" }
             val start = strictLong(json, "startedAtMillis")
             val end = strictLong(json, "expiresAtMillis")
             require(start > 0 && end > start && end - start <= RELIC_TEST_DURATION_MILLIS) { "Invalid testing period" }
             val books = json.getJSONObject("bookAppearances")
             require(books.length() <= MAX_BOOK_CHOICES) { "Too many book appearances" }
-            return RelicTestingState(start, end, appearanceFromJson(json.getJSONObject("defaultAppearance")),
+            return RelicTestingState(start, end, appearanceFromJson(json.getJSONObject("defaultAppearance"), version),
                 books.keys().asSequence().associateWith { id ->
                     validateBookId(id)
-                    appearanceFromJson(books.getJSONObject(id))
+                    appearanceFromJson(books.getJSONObject(id), version)
                 })
         }
 
@@ -187,9 +195,10 @@ internal class RelicTestAccess internal constructor(
             put("customAccent", value.customAccent); put("edgeTier", value.edgeTier?.id ?: JSONObject.NULL)
             put("bookplate", value.bookplate.name); put("seal", value.seal?.id ?: JSONObject.NULL)
             put("motion", value.motion); put("inscription", value.inscription)
+            put("edgeSet", value.edgeSet.id); put("sealSet", value.sealSet.id)
         }
 
-        private fun appearanceFromJson(json: JSONObject): RelicAppearance {
+        private fun appearanceFromJson(json: JSONObject, version: Long): RelicAppearance {
             fun tier(key: String): MoonlitTier? {
                 if (json.isNull(key)) return null
                 val value = json.get(key)
@@ -200,10 +209,13 @@ internal class RelicTestAccess internal constructor(
             require(accent is Number && accent.toDouble() == accent.toInt().toDouble()) { "Invalid custom accent" }
             val inscription = json.get("inscription")
             require(inscription is String && inscription.length <= 1_000) { "Invalid inscription" }
+            fun set(key: String): RelicSet = if (version == 1L && !json.has(key)) RelicSet.MOONLIT
+                else requireNotNull(RelicSet.fromId(json.getString(key))) { "Unknown relic set" }
             return RelicAppearance(strictBoolean(json, "enabled"), RelicMode.valueOf(json.getString("mode")),
                 RelicColorMode.valueOf(json.getString("colorMode")), accent.toInt(), tier("edgeTier"),
-                RelicBookplate.valueOf(json.getString("bookplate")), tier("seal"), strictBoolean(json, "motion"), inscription)
-                .permitted(ALL_TEST_TIERS)
+                RelicBookplate.valueOf(json.getString("bookplate")), tier("seal"), strictBoolean(json, "motion"), inscription,
+                set("edgeSet"), set("sealSet"))
+                .permittedRelics(ALL_TEST_RELICS)
         }
 
         private fun strictLong(json: JSONObject, key: String): Long = json.get(key).let {

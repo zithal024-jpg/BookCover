@@ -33,7 +33,7 @@ import com.bookcover.diagnostic.rewards.RelicCabinet
 import com.bookcover.diagnostic.rewards.RelicAppearance
 import com.bookcover.diagnostic.rewards.RelicMode
 import com.bookcover.diagnostic.rewards.RelicTestAccess
-import com.bookcover.diagnostic.rewards.MoonlitTier
+import com.bookcover.diagnostic.rewards.RelicCatalog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -147,7 +147,7 @@ open class MainActivity : FragmentActivity() {
             val editingCollection = if (testingActive) relicCollection.copy(
                 defaultAppearance = testingState.defaultAppearance, bookAppearances = testingState.bookAppearances,
             ) else relicCollection
-            val availableTiers = if (testingActive) MoonlitTier.entries.toSet() else relicCollection.unlocked
+            val availableRelics = if (testingActive) RelicCatalog.all.toSet() else relicCollection.unlockedRelics
             LaunchedEffect(testingState.expiresAtMillis) {
                 while (relicTesting.state.value.startedAtMillis != 0L) {
                     delay((relicTesting.state.value.expiresAtMillis - System.currentTimeMillis()).coerceIn(1L, 60_000L))
@@ -160,7 +160,7 @@ open class MainActivity : FragmentActivity() {
                     work(ReaderAction.ORGANIZE) {
                         saveRelicChange { relicTesting.begin(library.relics.collection.value) }
                         showRelicCabinet = true
-                        message = "All Moonlit tiers are available for 24-hour testing. Your earned rewards are unchanged."
+                        message = "All relic sets are available for temporary testing. Your earned rewards are unchanged."
                     }
                 }
             }
@@ -182,7 +182,7 @@ open class MainActivity : FragmentActivity() {
                 val current = session
                 val pdf = pdfSession
                 val activeBook = current?.book ?: pdf?.book
-                val activeAppearance = activeBook?.let { editingCollection.appearanceFor(it.id, availableTiers) }
+                val activeAppearance = activeBook?.let { editingCollection.appearanceForRelics(it.id, availableRelics) }
                 LaunchedEffect(activeBook?.id, activeAppearance) {
                     if (activeBook != null && activeAppearance != null)
                         exterior.setAppearance(activeAppearance, activeBook.title, activeBook.author)
@@ -192,7 +192,7 @@ open class MainActivity : FragmentActivity() {
                     books.firstOrNull { it.id == draft.bookId }
                         ?: books.maxByOrNull { maxOf(it.lastReadAt, it.addedAt) }
                 }
-                // Decode once per book/revision. Color/tier/inscription edits reuse the prepared art.
+                // Decode once per book/revision. Color, family and tier edits reuse the prepared art.
                 val previewArtwork by produceState<CoverArtwork?>(null, previewBook?.id, previewBook?.coverRevision) {
                     value = null
                     previewBook?.let { book -> value = withContext(Dispatchers.IO) {
@@ -203,7 +203,7 @@ open class MainActivity : FragmentActivity() {
                     if (previewDraft != null) {
                         val shown = if (previewArtwork == null) previewDraft.appearance.copy(enabled = true, mode = RelicMode.STANDALONE)
                             else previewDraft.appearance
-                        exterior.preview(previewArtwork, shown, previewBook?.title ?: "Moonlit Archive",
+                        exterior.preview(previewArtwork, shown, previewBook?.title ?: "Reading Relics",
                             previewBook?.author ?: "BookCover")
                     } else exterior.endPreview()
                 }
@@ -222,10 +222,10 @@ open class MainActivity : FragmentActivity() {
                     onLibraryTheme = { libraryTheme = it; preferences.edit().putString("libraryTheme", it).apply() },
                     importProgress = importProgress, onStopImport = { importCancellation?.cancel() }, coverColors = coverColors,
                     onOpenRelics = { if (!busy) { relicSaveError = null; showRelicCabinet = true } },
-                    relicSummary = when (relicCollection.unseen.size) {
-                        0 -> "${relicCollection.unlocked.size} of 6 collected"
+                    relicSummary = when (relicCollection.unseenRelics.size) {
+                        0 -> "${relicCollection.unlockedRelics.size} of ${RelicCatalog.all.size} collected"
                         1 -> "1 new relic"
-                        else -> "${relicCollection.unseen.size} new relics"
+                        else -> "${relicCollection.unseenRelics.size} new relics"
                     })
                 else if (pdf != null) PdfReaderScreen(pdf, books.firstOrNull { it.id == pdf.book.id } ?: pdf.book,
                     exterior.active, exterior.busy || exterior.requested, exterior.stopPending, exterior.available && !busy,
@@ -284,7 +284,7 @@ open class MainActivity : FragmentActivity() {
                                 DiagnosticLog.record("Relic acknowledgement failed: ${it.javaClass.simpleName}")
                             }
                         } }, onDismiss = { if (!busy) showRelicCabinet = false }, busy = busy,
-                        availableTiers = availableTiers, testingActive = testingActive,
+                        availableRelics = availableRelics, testingActive = testingActive,
                         testingExpiryLabel = if (testingActive) "Testing ends " + java.text.DateFormat.getDateTimeInstance(
                             java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(java.util.Date(testingState.expiresAtMillis)) else null,
                         onStartTesting = if (relicTesting.supported) ({ if (!busy) work(ReaderAction.ORGANIZE) {
@@ -300,7 +300,7 @@ open class MainActivity : FragmentActivity() {
                             previewDraft?.let { draft ->
                                 val shown = if (previewArtwork == null) draft.appearance.copy(enabled = true, mode = RelicMode.STANDALONE)
                                     else draft.appearance
-                                exterior.preview(previewArtwork, shown, previewBook?.title ?: "Moonlit Archive", previewBook?.author ?: "BookCover")
+                                exterior.preview(previewArtwork, shown, previewBook?.title ?: "Reading Relics", previewBook?.author ?: "BookCover")
                                 exterior.retryPreview()
                             }
                         }) else null,

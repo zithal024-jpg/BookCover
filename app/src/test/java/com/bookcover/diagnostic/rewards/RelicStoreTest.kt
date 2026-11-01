@@ -94,7 +94,7 @@ class RelicStoreTest {
             bookplate = RelicBookplate.PRESTIGE, seal = MoonlitTier.RARE))
         val appearance = relics.collection.value.defaultAppearance
         assertNull(appearance.edgeTier)
-        assertEquals(RelicBookplate.STANDARD, appearance.bookplate)
+        assertEquals(RelicBookplate.NONE, appearance.bookplate)
         assertNull(appearance.seal)
         relics.setAppearance(bookId, RelicAppearance(mode = RelicMode.OVERLAY))
         relics.resetBookAppearance(bookId)

@@ -9,7 +9,8 @@ import com.bookcover.diagnostic.MainActivity
 import com.bookcover.diagnostic.library.BookLibrary
 import com.bookcover.diagnostic.rewards.MoonlitTier
 import com.bookcover.diagnostic.rewards.RelicAppearance
-import com.bookcover.diagnostic.rewards.RelicBookplate
+import com.bookcover.diagnostic.rewards.RelicCatalog
+import com.bookcover.diagnostic.rewards.RelicSet
 import com.bookcover.diagnostic.rewards.RelicTestAccess
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -56,14 +57,17 @@ class MainActivityRelicPreviewTest {
                 !it.busyForTests && it.relicCabinetShownForTests && it.relicPreviewRequestedForTests
             }
         }
-        assertEquals(MoonlitTier.entries.toSet(), access.availableTiers(before))
+        assertEquals(RelicCatalog.all.toSet(), access.availableRelics(before))
         assertEquals("Testing access does not award tiers", before.earned,
             onActivity { it.libraryForTests.relics.collection.value.earned })
 
-        val mythic = RelicAppearance(enabled = true, edgeTier = MoonlitTier.MYTHIC,
-            bookplate = RelicBookplate.PRESTIGE, seal = MoonlitTier.MYTHIC, motion = true)
-        access.saveAppearance(null, mythic)
-        assertEquals("The actual temporary profile permits Mythic", mythic, access.appearanceFor(before, null))
+        val atlas = RelicAppearance(enabled = true, edgeSet = RelicSet.WAYFARER, edgeTier = MoonlitTier.MYTHIC,
+            sealSet = RelicSet.HEARTHKEEPER, seal = MoonlitTier.LEGENDARY, motion = true)
+        access.saveAppearance(null, atlas)
+        assertEquals("The actual temporary profile permits Atlas edges with a Hearthkeeper seal", atlas, access.appearanceFor(before, null))
+        val hearth = atlas.copy(edgeSet = RelicSet.HEARTHKEEPER, sealSet = RelicSet.WAYFARER, seal = MoonlitTier.RARE)
+        access.saveAppearance(null, hearth)
+        assertEquals("The actual temporary profile also permits Mythic Hearthkeeper edges", hearth, access.appearanceFor(before, null))
         onActivity { it.closeRelicCabinetForTests() }
         waitFor("closing the cabinet ends its outside-preview request") { onActivity {
             !it.relicCabinetShownForTests && !it.relicPreviewRequestedForTests
@@ -72,9 +76,11 @@ class MainActivityRelicPreviewTest {
         access.end()
         waitFor("temporary access ends") { !access.state.value.isActive(System.currentTimeMillis()) }
         val after = onActivity { it.libraryForTests.relics.collection.value }
-        assertEquals("Ending testing restores earned-only availability", before.unlocked, access.availableTiers(after))
-        assertEquals("Ending testing restores the genuine appearance", before.appearanceFor(null), access.appearanceFor(after, null))
+        assertEquals("Ending testing restores earned-only availability", before.unlockedRelics, access.availableRelics(after))
+        assertEquals("Ending testing restores the genuine appearance", before.appearanceForRelics(null), access.appearanceFor(after, null))
         assertEquals("Testing never changes permanent reading credit", before.totalMillis, after.totalMillis)
+        assertEquals("Testing never changes qualifying reading days", before.qualifyingDays, after.qualifyingDays)
+        assertEquals("Testing never changes the best streak", before.bestStreak, after.bestStreak)
         assertEquals("Testing never changes permanent awards", before.earned, after.earned)
         assertEquals("Testing never changes the genuine global profile", before.defaultAppearance, after.defaultAppearance)
         assertEquals("Testing never changes genuine book profiles", before.bookAppearances, after.bookAppearances)
