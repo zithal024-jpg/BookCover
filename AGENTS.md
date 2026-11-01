@@ -1,8 +1,10 @@
 # BookCover — instructions for coding agents (Codex and others)
 
-All project instructions live in **[CLAUDE.md](CLAUDE.md)**. Read it in full before doing
-anything and follow it exactly; it applies to every agent, not only Claude Code. This file adds
-no rules of its own, so the two can never disagree.
+Read **[CLAUDE.md](CLAUDE.md)** in full; it applies to every agent, not only Claude Code.
+Also follow the owner-approved **[sync workflow](docs/SYNC-WORKFLOW.md)** for branches,
+private pushes, integration, build identity and installation handoffs. Its specific sync
+rules supersede older conflicting push/integration wording; unrelated instructions and
+all data/device/privacy safeguards remain in force.
 
 The parts that matter most:
 
