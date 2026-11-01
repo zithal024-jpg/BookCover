@@ -8,6 +8,11 @@ class SavedBookmarksTest {
     private fun locator(progression: Double = 0.25, title: String = "Chapter two", href: String = "chapter2.xhtml") =
         """{"href":"$href","type":"application/xhtml+xml","title":"$title","locations":{"progression":$progression,"position":12,"totalProgression":0.4},"custom":{"keep":"yes"}}"""
 
+    private fun pdfLocator(page: Int, offset: String? = null, position: String = page.toString(), progression: Double = 0.25): String {
+        val extra = offset?.let { ",\"${SavedBookmarks.PDF_TEXT_OFFSET}\":$it" }.orEmpty()
+        return """{"href":"book.pdf","type":"application/pdf","locations":{"fragments":["page=$page"],"position":$position,"progression":$progression$extra}}"""
+    }
+
     @Test fun createAndRenameKeepLocatorFieldsChapterTitleAndUnknownExtensions() {
         val raw = locator()
         val created = SavedBookmarks.create(raw, "  My place  ", "Current chapter")
@@ -93,5 +98,54 @@ class SavedBookmarksTest {
         assertEquals(record, restored)
         assertEquals("A named bookmark", SavedBookmarks.name(restored.bookmarks.single()))
         assertEquals("yes", JSONObject(restored.bookmarks.single()).getJSONObject("custom").getString("keep"))
+    }
+
+    @Test fun pdfTextOffsetsDistinguishPlacesOnOnePhysicalPage() {
+        val physical = SavedBookmarks.create(pdfLocator(5), "Whole page")
+        val start = SavedBookmarks.create(pdfLocator(5, "0"), "Start")
+        val later = SavedBookmarks.create(pdfLocator(5, "143"), "Later")
+        val renamedLater = SavedBookmarks.create(pdfLocator(5, "143", progression = 0.3), "Renamed")
+        val otherPage = SavedBookmarks.create(pdfLocator(6, "143"), "Next page")
+
+        assertFalse(SavedBookmarks.sameTarget(physical, start))
+        assertFalse(SavedBookmarks.sameTarget(start, later))
+        assertTrue(SavedBookmarks.sameTarget(later, renamedLater))
+        assertFalse(SavedBookmarks.sameTarget(later, otherPage))
+
+        val saved = listOf(physical, start, later, otherPage).fold(emptyList<String>(), SavedBookmarks::upsert)
+        assertEquals(4, saved.size)
+        val relabeled = SavedBookmarks.upsert(saved, renamedLater)
+        assertEquals(4, relabeled.size)
+        assertEquals("Renamed", SavedBookmarks.name(relabeled[2]))
+        assertEquals("Later", SavedBookmarks.name(SavedBookmarks.merge(saved, listOf(renamedLater))[2]))
+    }
+
+    @Test fun pdfTextOffsetRequiresValidOffsetsAndUnambiguousPageEvidence() {
+        val valid = pdfLocator(5, "42")
+        for (invalid in listOf("-1", "1.5", "2147483648", "\"42\"", "null", "true", "{}")) {
+            val malformed = pdfLocator(5, invalid)
+            assertFalse("invalid offset $invalid", SavedBookmarks.sameTarget(valid, malformed))
+            assertFalse("invalid offset $invalid", SavedBookmarks.sameTarget(malformed, SavedBookmarks.create(malformed, "Name")))
+        }
+        assertFalse(SavedBookmarks.sameTarget(valid, pdfLocator(5, "42", position = "6")))
+        assertFalse(SavedBookmarks.sameTarget(valid, pdfLocator(5, "42", position = "null")))
+        assertFalse(SavedBookmarks.sameTarget(valid, pdfLocator(5, "42", position = "1.5")))
+        assertFalse(SavedBookmarks.sameTarget(valid, """{"href":"book.pdf","type":"application/pdf","locations":{"bookcoverPdfTextOffset":42,"progression":0.25}}"""))
+        assertFalse(SavedBookmarks.sameTarget(valid, """{"href":"book.pdf","type":"application/pdf","locations":{"fragments":["page=5",6],"position":5,"bookcoverPdfTextOffset":42}}"""))
+        val compatibleAliases = """{"href":"book.pdf","type":"application/pdf","locations":{"fragments":["page=5"],"fragment":"page=5","position":5,"bookcoverPdfTextOffset":42}}"""
+        val conflictingAliases = compatibleAliases.replace("\"fragment\":\"page=5\"", "\"fragment\":\"page=6\"")
+        assertTrue(SavedBookmarks.sameTarget(valid, compatibleAliases))
+        assertFalse(SavedBookmarks.sameTarget(valid, conflictingAliases))
+    }
+
+    @Test fun pdfTextBookmarkExtensionsSurviveRenameRecordAndBackupRoundTrip() {
+        val original = SavedBookmarks.create(pdfLocator(5, "123"), "A place")
+        val renamed = SavedBookmarks.rename(original, "Another place")
+        val record = BookRecord("a".repeat(64), "Book", "Author", 1L, bookmarks = listOf(renamed), format = BookFormat.PDF)
+        val restored = LibraryBackup.parse(LibraryBackup.export(listOf(record), 2L)).records.single()
+        val locations = JSONObject(restored.bookmarks.single()).getJSONObject("locations")
+        assertEquals(123, locations.getInt(SavedBookmarks.PDF_TEXT_OFFSET))
+        assertEquals(5, locations.getInt("position"))
+        assertEquals("Another place", SavedBookmarks.name(restored.bookmarks.single()))
     }
 }

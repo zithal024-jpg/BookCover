@@ -6,6 +6,8 @@ import org.json.JSONObject
 /** Bookmark labels extend the existing locator JSON, so old indexes and backups need no migration. */
 internal object SavedBookmarks {
     private const val NAME = "bookcoverBookmarkName"
+    /** Character offset within one physical PDF page in the optional text reader. */
+    const val PDF_TEXT_OFFSET = "bookcoverPdfTextOffset"
     const val MAX_NAME_LENGTH = 120
 
     fun name(value: String): String? = parse(value)?.optJSONObject("locations")?.string(NAME)
@@ -72,6 +74,20 @@ internal object SavedBookmarks {
         if (fragmentsA.isNotEmpty() && fragmentsB.isNotEmpty() && fragmentsA != fragmentsB) return false
         if (textA != null && textB != null && textA != textB) return false
 
+        // Text mode can have several distinct bookmarks on the same physical PDF page.
+        // A normal page bookmark, malformed extension, or uncertain page must never be
+        // merged with a text bookmark merely because their coarse progression matches.
+        val hasTextOffsetA = locationsA?.has(PDF_TEXT_OFFSET) == true
+        val hasTextOffsetB = locationsB?.has(PDF_TEXT_OFFSET) == true
+        if (hasTextOffsetA || hasTextOffsetB) {
+            if (!hasTextOffsetA || !hasTextOffsetB) return false
+            val offsetA = locationsA?.wholeInt(PDF_TEXT_OFFSET, minimum = 0) ?: return false
+            val offsetB = locationsB?.wholeInt(PDF_TEXT_OFFSET, minimum = 0) ?: return false
+            val pageA = pdfPage(locationsA, href) ?: return false
+            val pageB = pdfPage(locationsB, href) ?: return false
+            return offsetA == offsetB && pageA == pageB
+        }
+
         val sameCss = cssA != null && cssA == cssB
         val sameFragments = fragmentsA.isNotEmpty() && fragmentsA == fragmentsB
         // A visible text quote within a known block survives repagination. Repeated prose in
@@ -123,6 +139,42 @@ internal object SavedBookmarks {
     private fun JSONObject.string(key: String): String? = (opt(key) as? String)?.trim()?.takeIf(String::isNotEmpty)
     private fun JSONObject.progression(): Double? = (opt("progression") as? Number)?.toDouble()
         ?.takeIf { it.isFinite() && it in 0.0..1.0 }
+
+    /** Reject fractional, negative, nonnumeric and overflowing values instead of rounding them. */
+    private fun JSONObject.wholeInt(key: String, minimum: Int): Int? {
+        val number = (opt(key) as? Number)?.toDouble() ?: return null
+        if (!number.isFinite() || number < minimum.toDouble() || number > Int.MAX_VALUE.toDouble()) return null
+        val integer = number.toInt()
+        return integer.takeIf { it.toDouble() == number }
+    }
+
+    /** A PDF page must have positive, mutually consistent position/fragment evidence. */
+    private fun pdfPage(locations: JSONObject?, href: String): Int? {
+        if (locations == null) return null
+        val pageFragments = mutableListOf<String>()
+        // Some legacy locators use the singular key. If both are present, inspect both:
+        // silently preferring one could merge records with conflicting page evidence.
+        for (key in listOf("fragments", "fragment")) {
+            if (!locations.has(key)) continue
+            when (val value = locations.opt(key)) {
+                is String -> pageFragments += value
+                is JSONArray -> for (index in 0 until value.length()) {
+                    pageFragments += (value.opt(index) as? String ?: return null)
+                }
+                else -> return null
+            }
+        }
+        val candidates = mutableListOf<Int>()
+        if (locations.has("position")) candidates += locations.wholeInt("position", minimum = 1) ?: return null
+        val hrefFragment = href.substringAfter('#', "")
+        if (hrefFragment.startsWith("page=")) pageFragments += hrefFragment
+        for (fragment in pageFragments.filter { it.startsWith("page=") }) {
+            val page = fragment.removePrefix("page=").takeIf { it.matches(Regex("[0-9]+")) }
+                ?.toIntOrNull()?.takeIf { it > 0 } ?: return null
+            candidates += page
+        }
+        return candidates.firstOrNull()?.takeIf { first -> candidates.all { it == first } }
+    }
 
     private fun fragments(locations: JSONObject?): List<String> {
         val value = locations?.opt("fragments") ?: locations?.opt("fragment")
