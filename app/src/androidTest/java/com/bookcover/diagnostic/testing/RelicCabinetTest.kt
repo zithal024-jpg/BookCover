@@ -159,11 +159,12 @@ class RelicCabinetTest {
         forward: Boolean,
         find: () -> AccessibilityNodeInfo?,
         findScroll: () -> AccessibilityNodeInfo?,
+        failureDetails: () -> String = { "" },
         extraCheck: (AccessibilityNodeInfo) -> Boolean = { true },
     ): AccessibilityNodeInfo {
         var scrollForward = forward
         fun ready(node: AccessibilityNodeInfo?) = node != null && fullyVisible(node) && extraCheck(node)
-        return waitForNode(description) {
+        return waitForNode(description, failureDetails) {
             var node = find()
             if (ready(node)) return@waitForNode node
             node?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
@@ -252,14 +253,15 @@ class RelicCabinetTest {
     }
 
     private fun tileSemanticsDiagnostics(node: AccessibilityNodeInfo?): String {
-        fun describe(value: AccessibilityNodeInfo?): String = if (value == null) "absent" else
-            "tag=${value.viewIdResourceName},description=${value.contentDescription},text=${value.text},state=${value.stateDescription}," +
-                "class=${value.className},role=${value.extras.getCharSequence("AccessibilityNodeInfo.roleDescription")}," +
-                "clickable=${value.isClickable},actions=${value.actionList.map { it.id }}," +
-                "bounds=${Rect().also(value::getBoundsInScreen)},visible=${value.isVisibleToUser}"
-        val children = (0 until minOf(node?.childCount ?: 0, 6)).joinToString("; ") { describe(node?.getChild(it)) }
-        return "tile={${describe(node)}},parent={${describe(node?.parent)}},children=[$children]"
+        val children = (0 until minOf(node?.childCount ?: 0, 6)).joinToString("; ") { describeNode(node?.getChild(it)) }
+        return "tile={${describeNode(node)}},parent={${describeNode(node?.parent)}},children=[$children]"
     }
+
+    private fun describeNode(value: AccessibilityNodeInfo?): String = if (value == null) "absent" else
+        "windowId=${value.windowId},tag=${value.viewIdResourceName},description=${value.contentDescription},text=${value.text},state=${value.stateDescription}," +
+            "class=${value.className},role=${value.extras.getCharSequence("AccessibilityNodeInfo.roleDescription")}," +
+            "clickable=${value.isClickable},actions=${value.actionList.map { it.id }},scrollable=${value.isScrollable}," +
+            "bounds=${Rect().also(value::getBoundsInScreen)},visible=${value.isVisibleToUser}"
 
     private fun previewHasFullAspect(node: AccessibilityNodeInfo): Boolean {
         val bounds = Rect().also(node::getBoundsInScreen)
@@ -284,7 +286,12 @@ class RelicCabinetTest {
             if (bounds.width() / density < 47.5f || bounds.height() / density < 47.5f) return false
         }
         val window = Rect().also { node.window?.getBoundsInScreen(it) }
-        if (!window.isEmpty && !window.contains(bounds)) return false
+        if (!window.isEmpty) {
+            // Popup nodes round transformed coordinates independently of WindowInfo. A visible
+            // 48-dp menu row can extend one pixel past its reported window edge on API 36.
+            window.inset(-1, -1)
+            if (!window.contains(bounds)) return false
+        }
         var parent = node.parent
         while (parent != null) {
             if (parent.isScrollable) {
@@ -300,30 +307,70 @@ class RelicCabinetTest {
 
     private fun findTag(tag: String): AccessibilityNodeInfo? = findNode { it.viewIdResourceName?.substringAfterLast('/') == tag }
 
-    private fun textOwner(text: String): AccessibilityNodeInfo? {
-        var node = findNode { it.text?.toString()?.trim() == text || it.contentDescription?.toString()?.trim() == text } ?: return null
-        while (!node.isClickable) {
-            val parent = node.parent ?: break
-            if (parent.packageName?.toString() != target.packageName) break
+    private fun textOwner(text: String, root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        var node = descend(root) { it.text?.toString()?.trim() == text || it.contentDescription?.toString()?.trim() == text } ?: return null
+        while (true) {
+            if (node.isClickable || node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK }) return node
+            val parent = node.parent ?: return null
+            if (parent.packageName?.toString() != target.packageName || parent.windowId != root.windowId) return null
             node = parent
         }
-        return node
     }
 
-    private fun revealMenuChoice(text: String): AccessibilityNodeInfo = revealNode(
-        text, true, { textOwner(text) }, { findNode { it.isScrollable && it.isVisibleToUser } },
-    )
+    private fun revealMenuChoice(text: String): AccessibilityNodeInfo {
+        // Dropdown scale-in bounds can briefly be smaller than a usable action. Let the
+        // opening settle before considering a scroll; a short, fitting menu needs no gesture.
+        instrumentation.waitForIdleSync()
+        SystemClock.sleep(250)
+        return revealNode(text, true,
+            { activePopupRoot()?.let { textOwner(text, it) } },
+            { activePopupRoot()?.let { root -> descend(root) { it.isScrollable && it.isVisibleToUser } } },
+            failureDetails = { popupDiagnostics(text) },
+        )
+    }
 
-    private fun findNode(predicate: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
+    private fun activePopupRoot(): AccessibilityNodeInfo? {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) automation.clearCache()
-        val roots = (listOfNotNull(automation.rootInActiveWindow) + automation.windows.mapNotNull { it.root })
-            .filter { it.packageName?.toString() == target.packageName }.distinctBy { it.windowId }
-        fun descend(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-            if (predicate(node)) return node
-            for (i in 0 until node.childCount) node.getChild(i)?.let { child -> descend(child)?.let { return it } }
-            return null
+        // WindowInfo is the authoritative focus source. A virtual node's getWindow() can
+        // be absent even while that popup and its exact-label text are in the native tree.
+        val focusedPopup = automation.windows.firstNotNullOfOrNull { window ->
+            if (window.isFocused) window.root?.takeIf(::isQaPopupRoot) else null
         }
-        return roots.firstNotNullOfOrNull(::descend)
+        return focusedPopup ?: automation.rootInActiveWindow?.takeIf(::isQaPopupRoot)
+    }
+
+    private fun isQaPopupRoot(root: AccessibilityNodeInfo): Boolean =
+        root.packageName?.toString() == target.packageName &&
+            descend(root) { it.viewIdResourceName?.substringAfterLast('/') == "relic-cabinet-scroll" } == null
+
+    private fun popupDiagnostics(text: String): String {
+        val root = activePopupRoot()
+        val leaf = root?.let { descend(it) { node -> node.text?.toString()?.trim() == text || node.contentDescription?.toString()?.trim() == text } }
+        val owner = root?.let { textOwner(text, it) }
+        val ancestors = mutableListOf<String>()
+        var ancestor = leaf?.parent
+        while (ancestor != null && ancestors.size < 8) {
+            ancestors += describeNode(ancestor)
+            ancestor = ancestor.parent
+        }
+        val focused = automation.windows.filter { it.isFocused }.joinToString { "id=${it.id},package=${it.root?.packageName},bounds=${Rect().also(it::getBoundsInScreen)}" }
+        return "expectedMenuLabel=$text,focusedWindowInfo=[$focused],selectedPopupRoot={${describeNode(root)}}," +
+            "exactLabelLeaf={${describeNode(leaf)}},actionOwner={${describeNode(owner)}},ownerFullyVisible=${owner?.let(::fullyVisible)},ancestors=$ancestors"
+    }
+
+    private fun qaRoots(): List<AccessibilityNodeInfo> {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) automation.clearCache()
+        return (listOfNotNull(automation.rootInActiveWindow) + automation.windows.mapNotNull { it.root })
+            .filter { it.packageName?.toString() == target.packageName }.distinctBy { it.windowId }
+    }
+
+    private fun findNode(predicate: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? =
+        qaRoots().firstNotNullOfOrNull { descend(it, predicate) }
+
+    private fun descend(node: AccessibilityNodeInfo, predicate: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
+        if (predicate(node)) return node
+        for (i in 0 until node.childCount) node.getChild(i)?.let { child -> descend(child, predicate)?.let { return it } }
+        return null
     }
 
     private fun waitFor(description: String, failureDetails: () -> String = { "" }, condition: () -> Boolean) {
@@ -332,10 +379,13 @@ class RelicCabinetTest {
             if (condition()) return
             SystemClock.sleep(80)
         }
-        throw AssertionError("Timed out waiting for $description in the isolated generated relic fixture; ${failureDetails()}; ${fixtureDiagnostics()}")
+        val image = failureScreenshot()
+        val details = runCatching { "${failureDetails()}; ${fixtureDiagnostics()}" }
+            .getOrElse { "diagnostics unavailable: ${it.javaClass.simpleName}" }
+        throw AssertionError("Timed out waiting for $description in the isolated generated relic fixture; $details; failureScreenshot=$image")
     }
 
-    /** Tags and bounds from this generated-data fixture only; never inspects a personal library. */
+    /** Tags, window labels and bounds from this generated-data fixture only. */
     private fun fixtureDiagnostics(): String {
         val nodes = mutableListOf<String>()
         findNode { node ->
@@ -346,12 +396,32 @@ class RelicCabinetTest {
             false
         }
         val configuration = onHost { "density=${it.uiDensityForTests},fontScale=${it.resources.configuration.fontScale},viewport=${it.resources.configuration.screenWidthDp}x${it.resources.configuration.screenHeightDp}dp" }
-        return "$configuration; ${nodes.joinToString("; ")}"
+        val windows = qaRoots().take(3).joinToString("; ") { root ->
+            val window = root.window
+            val labels = linkedSetOf<String>()
+            descend(root) { node ->
+                val label = listOfNotNull(node.text, node.contentDescription).map { it.toString().trim() }
+                    .filter { it.isNotEmpty() }.distinct().joinToString(" / ").take(180)
+                if (label.isNotEmpty() && labels.size < 16) {
+                    labels += "$label: class=${node.className},bounds=${Rect().also(node::getBoundsInScreen)},click=${node.isClickable}"
+                }
+                false
+            }
+            "window=${root.windowId},focused=${window?.isFocused},active=${window?.isActive},layer=${window?.layer}," +
+                "bounds=${Rect().also { window?.getBoundsInScreen(it) }},labels=$labels"
+        }
+        return "$configuration; ${nodes.joinToString("; ")}; QA windows=[$windows]"
     }
 
-    private fun waitForNode(description: String, node: () -> AccessibilityNodeInfo?): AccessibilityNodeInfo {
+    private fun failureScreenshot(): String = runCatching {
+        val focusedQa = automation.windows.any { it.isFocused && it.root?.packageName?.toString() == target.packageName }
+        if (!focusedQa) "skipped: QA is not focused"
+        else screenshot("relic-cabinet-failure-${SystemClock.uptimeMillis()}") ?: "skipped: no test output directory"
+    }.getOrElse { "not captured: ${it.javaClass.simpleName}" }
+
+    private fun waitForNode(description: String, failureDetails: () -> String = { "" }, node: () -> AccessibilityNodeInfo?): AccessibilityNodeInfo {
         var result: AccessibilityNodeInfo? = null
-        waitFor(description) { result = node(); result != null }
+        waitFor(description, failureDetails) { result = node(); result != null }
         return result!!
     }
 
@@ -361,12 +431,13 @@ class RelicCabinetTest {
         @Suppress("UNCHECKED_CAST") return result as T
     }
 
-    private fun screenshot(name: String) {
-        val folder = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir") ?: return
+    private fun screenshot(name: String): String? {
+        val folder = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir") ?: return null
         instrumentation.waitForIdleSync()
         val image = automation.takeScreenshot() ?: throw AssertionError("Could not capture generated cabinet preview")
         File(folder).mkdirs()
         FileOutputStream(File(folder, "$name.png")).use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
         image.recycle()
+        return File(folder, "$name.png").absolutePath
     }
 }
