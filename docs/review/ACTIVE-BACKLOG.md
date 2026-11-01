@@ -41,7 +41,9 @@ redesign silently disappeared. Before installing anything on the owner's phone:
    reader and outer cover, not only the feature under test.
 4. **Update the record below** in the same change as the install evidence.
 
-**Currently installed on `RFGL710TARJ`:** integration merge `7ce3066` (local `main`
+**Currently installed on `RFGL710TARJ`:** PDF text paging `4713605`, installed in place 2026-10-31; APK SHA-256 `8d139641a473b1bb415a8f1a5619a16639c34d3a1c15bc150c9ff7127cf4c36f` matches the tested and installed APK, and `firstInstallTime` was unchanged. Owner confirmed the text paging fix. Details and verification are in the PDF support row below; a whole-app owner check for this installation is pending. This build contains the earlier integration merge and restored paper page-turn work. The remote documentation update merged afterward changes documentation only.
+
+**Earlier installed build:** integration merge `7ce3066` (local `main`
 `cf2c339` + GitHub `main` `af0695b`, including S2, F1–F4, BC-26, BC-28), APK SHA-256
 `17ea4c8f…19915e400`, installed in place 2026-10-27 16:29 (UTC−4) by Opus at the
 owner's request. Read back from the phone: installed `base.apk` hash matches,
