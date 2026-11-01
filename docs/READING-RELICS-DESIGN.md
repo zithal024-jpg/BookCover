@@ -1,5 +1,7 @@
 # Reading Relics — catalog and cover styles
 
+**Status:** all three sets are implemented and installed in place on the owner's phone. Bookplates are removed. New-set physical appearance and animation remain for the owner to confirm.
+
 **Current scope:** the owner approved the narrow-screen edge appearance and requested removal of Bookplates plus rollout of Wayfarer's Atlas and Hearthkeeper's Collection on 2026-11-01. The catalog contains three sets of six relics. Bookplates, ownership inscriptions and their reserved cover space are removed. Original Moonlit IDs, reading credit, existing awards, adaptive colors, live outside previews and optional Mythic motion remain supported. The rollout's build/device/install evidence belongs in the active backlog and the validation record below; older concept and Moonlit-only evidence is historical.
 
 ## Product intent and earning
@@ -94,6 +96,13 @@ Restore merges dated records by maximum time and retained completion, unions per
 ## Owner observations and validation
 
 The owner reported that the current edges look good on 2026-11-01 and requested this expansion. That is appearance approval; it does not independently confirm every new set, animation, whole-app path or battery effect. The latest rollout verification and installed build are recorded in [the active backlog](review/ACTIVE-BACKLOG.md).
+
+Implementation `af126a4` passed the guarded build, debug/QA lint, **400/400 unit checks** and **26/26 isolated Android checks**, with zero skipped. Tests cover all 18 rendered glyphs, all three families/modes, actual Mythic motion with static-cache reuse and teardown, source-pixel preservation, legacy Bookplate neutrality, mixed-family saves, both Hearth earning routes, version 1 migration, cross-family backup/restore and 200% controls. The glyph sheet and Atlas/Hearth standalone renders were visually inspected using generated fixtures only.
+
+Source snapshot: `2599c08e3aa95e46e5021cfd187f9421b0d1a71ecba604edbb7fe4499eb351f8`. Combined evidence under task `moonlit-f44b4cc347ee7e18`:
+`2599c08e3aa95e46e5021cfd187f9421b0d1a71ecba604edbb7fe4499eb351f8-6a0cded0447a49488693e68155e0a2b2.json`.
+
+Installed in place on 2026-11-01 at 15:15 (America/New_York). Installed code SHA-256 matches `0d50cafc9ac205e5a556c06ebe602b934ede4f5ab2fe2837634108e1496ab6e7`; signing identity and the original installation date were preserved. Existing testing start/expiry remained unchanged, through **2026-11-02 14:50:59 America/New_York**, now covering all 18 relics. The cabinet reopened for testing. No main-app instrumentation, data clear or personal-book screenshot/file inspection was used. The new exterior styles, animation and whole-app appearance still need owner observation.
 
 ## Historical design verification
 
