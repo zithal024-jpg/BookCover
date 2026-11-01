@@ -4,10 +4,13 @@ import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
+import android.view.InputDevice
+import android.view.MotionEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -16,7 +19,6 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.bookcover.diagnostic.MainActivity
 import com.bookcover.diagnostic.library.BookRecord
 import com.bookcover.diagnostic.library.SavedBookmarks
-import com.bookcover.diagnostic.reader.PdfSession
 import com.bookcover.diagnostic.reader.PdfTextViewState
 import java.io.File
 import java.util.UUID
@@ -59,7 +61,7 @@ class PdfTextModeIntegrationTest {
         automation.serviceInfo = automation.serviceInfo.apply { flags = priorAccessibilityFlags }
     }
 
-    @Test fun textViewRecoversClippedLinesAndRestoresPageScrollAndBookmark() {
+    @Test fun textViewFlowsAcrossPdfPagesAndRestoresScreenfulAndBookmark() {
         val book = importFixture()
         onActivity { it.openBookForTests(book) }
         waitForReader(book)
@@ -67,17 +69,25 @@ class PdfTextModeIntegrationTest {
         openControls()
         clickTag("pdf-text-toggle")
         awaitTextPage(1)
-        assertTrue("the full first-page generated line is extracted", readyText().contains(SEAM_TEXT))
-        assertNotNull("extracted text is presented to the user", waitForNode("pdf-text-content"))
+        waitFor("short PDF pages flow into the same screenful") {
+            visibleText().let { "Generated page 1 line 2" in it && SEAM_TEXT in it && "Generated page 2 line 0" in it }
+        }
+        val first = textAnchor()
+        assertEquals("the first screen starts on the first physical page", 1, first.first)
 
+        // Up/down drags must not reveal a small amount of hidden vertical content.
+        dragText(0.5f, 0.5f, 0.75f, 0.25f)
+        assertEquals("a vertical drag does not shift the passage", first, textAnchor())
+
+        dragText(0.8f, 0.2f, 0.6f, 0.6f)
+        waitFor("a left swipe advances a screenful") { textAnchor() != first }
+        val second = textAnchor()
+        assertEquals("the screenful advances onto the next physical page", 2, second.first)
+        dragText(0.2f, 0.8f, 0.6f, 0.6f)
+        waitFor("a right swipe returns across the physical page boundary") { textAnchor() == first }
         openControls()
         clickTag("pdf-next")
-        awaitTextPage(2)
-        assertTrue("the full second-page generated line is extracted", readyText().contains(SEAM_TEXT))
-        val scroll = waitForNode("pdf-text-scroll")
-        assertTrue("the extracted page is scrollable", scroll.isScrollable)
-        assertTrue("scrolling the extracted page succeeds", scroll.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD))
-        waitFor("text position advances") { onActivity { (it.pdfSessionForTests?.textOffset ?: 0) > 0 } }
+        waitFor("the Next button advances to the same screenful as a swipe") { textAnchor() == second }
 
         openControls()
         clickLabel("Bookmarks")
@@ -88,16 +98,14 @@ class PdfTextModeIntegrationTest {
         }
         val bookmark = onActivity { it.libraryForTests.book(book.id)!!.bookmarks.single() }
         val bookmarkOffset = JSONObject(bookmark).getJSONObject("locations").getInt(SavedBookmarks.PDF_TEXT_OFFSET)
-        assertTrue("the text bookmark stores the scrolled character offset", bookmarkOffset > 0)
+        assertEquals("the text bookmark stores the screenful's character offset", second.second, bookmarkOffset)
 
-        // Move farther down the same page, then return to the bookmark without a page change.
+        // Move farther down the same PDF page, then return without a physical page change.
         // That jump must persist even if the user does nothing else before the app is stopped.
         clickLabel("Back to controls")
         clickLabel("Read")
-        assertTrue("a second scroll succeeds", waitForNode("pdf-text-scroll").performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD))
-        waitFor("the same page scrolls past the bookmark") {
-            onActivity { (it.pdfSessionForTests?.textOffset ?: 0) > bookmarkOffset }
-        }
+        dragText(0.8f, 0.2f, 0.6f, 0.6f)
+        waitFor("the next screenful advances past the bookmark") { textAnchor().let { it.first == 2 && it.second > bookmarkOffset } }
         openControls()
         clickLabel("Bookmarks")
         clickLabel("Bookmark")
@@ -121,32 +129,20 @@ class PdfTextModeIntegrationTest {
         }
         openControls()
         clickTag("pdf-previous")
-        awaitTextPage(1)
+        waitFor("Previous returns to the first screenful") { textAnchor() == first }
         openControls()
         clickLabel("Bookmarks")
         clickLabel("Bookmark")
-        awaitTextPage(2)
-        waitFor("the saved passage also restores from another page") {
-            onActivity { (it.pdfSessionForTests?.textOffset ?: 0).let { offset -> offset > 0 && abs(offset - bookmarkOffset) <= 80 } }
+        waitFor("the bookmark restores from another physical page") {
+            textAnchor().let { it.first == second.first && abs(it.second - bookmarkOffset) <= 80 }
         }
 
-        // Exercise an interrupted cross-page bookmark jump in one main-thread turn.
-        // An explicit subsequent page turn must discard the pending text offset,
-        // including if its target later becomes visible.
+        val previousScale = onActivity { it.pdfSessionForTests!!.textScale }
         openControls()
-        clickTag("pdf-previous")
-        awaitTextPage(1)
-        onActivity { activity ->
-            val session = activity.pdfSessionForTests!!
-            session.goToBookmark(bookmark)
-            session.previous()
-        }
-        instrumentation.waitForIdleSync()
-        SystemClock.sleep(500) // Let the navigator deliver any already-queued page notification.
-        if (onActivity { it.pdfSessionForTests?.textPage == 1 }) onActivity { it.pdfSessionForTests!!.next() }
-        awaitTextPage(2)
-        waitFor("an interrupted bookmark does not move the later page to its old offset") {
-            onActivity { it.pdfSessionForTests?.textOffset == 0 }
+        clickTag("pdf-text-size-increase")
+        waitFor("resizing retains the bookmarked passage") {
+            onActivity { it.pdfSessionForTests!!.textScale > previousScale } &&
+                textAnchor().let { it.first == second.first && abs(it.second - bookmarkOffset) <= 120 }
         }
 
         openControls()
@@ -155,24 +151,83 @@ class PdfTextModeIntegrationTest {
         waitFor("the text surface is removed") { findTag("pdf-text-content") == null }
     }
 
-    private fun importFixture(): BookRecord {
+    @Test fun imageOnlyPageStopsTextFlowAndOffersOriginalPages() {
+        val book = importFixture(imageBoundary = true)
+        onActivity { it.openBookForTests(book) }
+        waitForReader(book)
+        openControls()
+        clickTag("pdf-text-toggle")
+        awaitTextPage(1)
+        waitFor("the first short PDF page") { "Generated page 1 line 2" in visibleText() }
+        val first = textAnchor()
+        val firstText = visibleText()
+        assertFalse("the page after the image-only page is not silently included", "Generated page 3 line 0" in visibleText())
+        openControls()
+        clickTag("pdf-next")
+        waitFor("the image-only page offers original pages") {
+            onActivity { it.pdfSessionForTests?.textPage == 2 } &&
+                findNode { it.text?.toString() == "Original pages" } != null
+        }
+        assertFalse("the later text page was not skipped to", "Generated page 3 line 0" in visibleText())
+        openControls()
+        clickTag("pdf-previous")
+        awaitTextPage(1)
+        waitFor("Previous returns to the same screenful before the image-only page") {
+            textAnchor() == first && visibleText() == firstText
+        }
+        openControls()
+        clickTag("pdf-next")
+        waitFor("Next returns to the image-only page") {
+            onActivity { it.pdfSessionForTests?.textPage == 2 } &&
+                findNode { it.text?.toString() == "Original pages" } != null
+        }
+    }
+
+    @Test fun everyGeneratedLineIsReachedBySwipingThroughScreenfuls() {
+        val book = importFixture()
+        onActivity { it.openBookForTests(book) }
+        waitForReader(book)
+        openControls()
+        clickTag("pdf-text-toggle")
+        awaitTextPage(1)
+        waitFor("the first generated line") { "P1L00" in visibleText() }
+        val seen = mutableSetOf<String>()
+        val marker = Regex("(?:P[12]L|Z[12]E)[0-9]{2}")
+        repeat(40) {
+            val before = visibleText()
+            seen += marker.findAll(before).map { it.value }.toList()
+            if (seen.contains("Z2E55")) return@repeat
+            val anchor = textAnchor()
+            dragText(0.8f, 0.2f, 0.6f, 0.6f)
+            waitFor("the next visible screenful") { textAnchor() != anchor && visibleText() != before }
+        }
+        val expected = (0..2).flatMap { listOf("P1L%02d".format(it), "Z1E%02d".format(it)) } +
+            (0..55).flatMap { listOf("P2L%02d".format(it), "Z2E%02d".format(it)) }
+        assertTrue("every generated line and its end are reached", seen.containsAll(expected))
+    }
+
+    private fun importFixture(imageBoundary: Boolean = false): BookRecord {
         scenario = ActivityScenario.launch(MainActivity::class.java)
         waitFor("library loading") { !onActivity { it.busyForTests } }
         val file = File(fixtures, "generated-boundary.pdf")
         val document = PdfDocument()
         try {
-            // Dense but legible generated lines fit inside the physical PDF page. In the
-            // larger text view they wrap to several screens even on an unfolded Fold,
-            // so two independent accessibility scrolls can exercise bookmark restoration.
+            // A short first page and long second page exercise a single screenful that
+            // crosses the physical PDF boundary, then several turns on the second page.
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK; textSize = 7f }
-            for (pageNumber in 1..2) {
+            for (pageNumber in 1..if (imageBoundary) 3 else 2) {
                 val page = document.startPage(PdfDocument.PageInfo.Builder(612, 792, pageNumber).create())
                 page.canvas.drawColor(Color.WHITE)
+                if (imageBoundary && pageNumber == 2) {
+                    page.canvas.drawRect(100f, 100f, 400f, 400f, paint)
+                    document.finishPage(page)
+                    continue
+                }
                 page.canvas.save()
                 page.canvas.clipRect(72f, 72f, 540f, 720f)
-                for (line in 0 until 56) {
+                for (line in 0 until if (pageNumber == 1) 3 else 56) {
                     page.canvas.drawText(
-                        "Generated page $pageNumber line $line: a calm sample passage with distinct words, punctuation and reading context.",
+                        "P${pageNumber}L${line.toString().padStart(2, '0')} Generated page $pageNumber line $line: a calm sample passage with distinct words, punctuation and reading context. Z${pageNumber}E${line.toString().padStart(2, '0')}",
                         88f, 105f + line * 10f, paint,
                     )
                 }
@@ -201,8 +256,28 @@ class PdfTextModeIntegrationTest {
         }
     }
 
-    private fun readyText(): String = onActivity {
-        (it.pdfSessionForTests!!.textViewState as PdfTextViewState.Ready).text
+    private fun textAnchor(): Pair<Int?, Int> = onActivity {
+        val session = it.pdfSessionForTests!!
+        session.textPage to session.textOffset
+    }
+
+    private fun visibleText(): String = findTag("pdf-text-content")?.text?.toString().orEmpty()
+
+    /** Send real gestures over the text surface; never touch the owner's main app. */
+    private fun dragText(fromX: Float, toX: Float, fromY: Float, toY: Float) {
+        val bounds = Rect().also { waitForNode("pdf-text-content").getBoundsInScreen(it) }
+        fun send(down: Long, action: Int, fraction: Float) {
+            val x = bounds.left + bounds.width() * (fromX + (toX - fromX) * fraction)
+            val y = bounds.top + bounds.height() * (fromY + (toY - fromY) * fraction)
+            MotionEvent.obtain(down, SystemClock.uptimeMillis(), action, x, y, 0).apply {
+                source = InputDevice.SOURCE_TOUCHSCREEN
+            }.also { event -> try { instrumentation.sendPointerSync(event) } finally { event.recycle() } }
+        }
+        val down = SystemClock.uptimeMillis()
+        send(down, MotionEvent.ACTION_DOWN, 0f)
+        for (step in 1..12) { SystemClock.sleep(20); send(down, MotionEvent.ACTION_MOVE, step / 12f) }
+        send(down, MotionEvent.ACTION_UP, 1f)
+        instrumentation.waitForIdleSync()
     }
 
     private fun openControls() {

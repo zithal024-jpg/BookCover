@@ -51,8 +51,10 @@ internal sealed interface PdfTextViewState {
     data object Unavailable : PdfTextViewState
     data object Empty : PdfTextViewState
     data object Failed : PdfTextViewState
-    data class Ready(val page: Int, val text: String) : PdfTextViewState
+    data class Ready(val page: Int, val pages: List<PdfTextWindowPage>, val pageCount: Int) : PdfTextViewState
 }
+
+internal data class PdfTextWindowPage(val page: Int, val text: String)
 
 /** Readium resolves the PDF page fragment before the position when both are present. */
 private fun pdfPage(locator: Locator?): Int? {
@@ -103,6 +105,9 @@ internal class PdfSession(
     private var textSource: PdfTextPageSource? = null
     private var textJob: Job? = null
     private var textRequest = 0
+    private val textPages = LinkedHashMap<Int, String>()
+    private val textTurnHistory = ArrayDeque<Pair<Int, Int>>()
+    var textTurnHandler: ((Boolean) -> Unit)? = null
     private var textRequestedPage: Int? = null
     val textPage: Int? get() = pdfPage(currentLocator)
     val textRightToLeft: Boolean get() = fragment.isAdded &&
@@ -200,8 +205,77 @@ internal class PdfSession(
         }
     }
 
-    fun next() { pendingTextAnchor = null; readerActive(); if (fragment.isAdded) fragment.goForward(animated = false); controlsVisible = false }
-    fun previous() { pendingTextAnchor = null; readerActive(); if (fragment.isAdded) fragment.goBackward(animated = false); controlsVisible = false }
+    fun next() {
+        readerActive()
+        val handler = textTurnHandler
+        when {
+            !textMode -> turnOriginalPage(true)
+            textViewState is PdfTextViewState.Ready -> handler?.invoke(true)
+            textViewState is PdfTextViewState.Empty || textViewState is PdfTextViewState.Failed -> turnTextFallback(true)
+            // While extraction is in flight, a physical-page turn would skip text.
+            else -> Unit
+        }
+        controlsVisible = false
+    }
+    fun previous() {
+        readerActive()
+        val handler = textTurnHandler
+        when {
+            !textMode -> turnOriginalPage(false)
+            textViewState is PdfTextViewState.Ready -> handler?.invoke(false)
+            textViewState is PdfTextViewState.Empty || textViewState is PdfTextViewState.Failed -> turnTextFallback(false)
+            else -> Unit
+        }
+        controlsVisible = false
+    }
+    private fun turnOriginalPage(forward: Boolean) {
+        pendingTextAnchor = null
+        textTurnHistory.clear()
+        if (fragment.isAdded) {
+            if (forward) fragment.goForward(animated = false) else fragment.goBackward(animated = false)
+        }
+    }
+
+    private fun turnTextFallback(forward: Boolean) {
+        val page = textPage ?: return
+        val count = textSource?.pageCount ?: return
+        val target = page + if (forward) 1 else -1
+        if (target !in 1..count) return
+        moveTextAnchor(target, if (forward) 0 else Int.MAX_VALUE, forward)
+    }
+
+    /** Move to an extracted-text character, keeping the PDF navigator at its source page. */
+    fun moveTextAnchor(page: Int, offset: Int, forward: Boolean) {
+        if (!textMode || !fragment.isAdded || pendingTextAnchor != null) return
+        val currentPage = textPage ?: return
+        val current = currentPage to textOffset
+        val fromHistory = !forward && textTurnHistory.isNotEmpty()
+        val target = if (fromHistory) textTurnHistory.removeLast() else page to offset
+        if (target == current) return
+        if (forward) {
+            textTurnHistory.addLast(current)
+            if (textTurnHistory.size > 200) textTurnHistory.removeFirst()
+        }
+        readerActive()
+        if (target.first == currentPage) {
+            textAnchorPage = currentPage
+            textOffset = target.second
+            hasTextAnchor = true
+            textAnchorRevision++
+            restorationLocator?.let(positions::submit)
+        } else {
+            val locator = currentLocator ?: return
+            pendingTextAnchor = target
+            val accepted = fragment.go(locator.copy(locations = locator.locations.copy(
+                fragments = listOf("page=${target.first}"), position = target.first)), animated = false)
+            if (!accepted) {
+                pendingTextAnchor = null
+                if (forward && textTurnHistory.lastOrNull() == current) textTurnHistory.removeLast()
+                if (fromHistory) textTurnHistory.addLast(target)
+            }
+        }
+    }
+
     private fun goToPage(page: Int) {
         val locator = currentLocator ?: return
         if (page >= 0 && fragment.isAdded) {
@@ -213,6 +287,7 @@ internal class PdfSession(
     }
     fun goToBookmark(value: String) {
         val locator = runCatching { Locator.fromJSON(JSONObject(value)) }.getOrNull() ?: return
+        textTurnHistory.clear()
         readerActive()
         if (!fragment.isAdded) return
         val target = pdfPage(locator)
@@ -245,6 +320,7 @@ internal class PdfSession(
 
     fun changeTextMode(enabled: Boolean) {
         if (closed || textMode == enabled) return
+        textTurnHistory.clear()
         textMode = enabled
         readerPreferences.edit().putBoolean(textModeKey, enabled).apply()
         controlsVisible = false
@@ -265,6 +341,7 @@ internal class PdfSession(
     fun changeTextScale(value: Double) {
         val scale = ReadingTextSize.scale(ReadingTextSize.percent(value))
         if (scale == textScale) return
+        textTurnHistory.clear()
         textAnchorRevision++ // Remap the same character after text reflows.
         textScale = scale
         readerPreferences.edit().putFloat("fontScale", scale.toFloat()).apply()
@@ -279,6 +356,24 @@ internal class PdfSession(
         if (textOffset != offset) {
             textOffset = offset
             restorationLocator?.let(positions::submit)
+        }
+    }
+
+    fun clearTextTurnHistory() = textTurnHistory.clear()
+
+    /** Resolve the end-of-window sentinel without adding a turn to the history. */
+    fun normalizeTextAnchor(page: Int, offset: Int) {
+        if (page == textPage) {
+            textAnchorPage = page
+            textOffset = offset
+            hasTextAnchor = true
+            textAnchorRevision++
+            restorationLocator?.let(positions::submit)
+        } else {
+            val locator = currentLocator ?: return
+            pendingTextAnchor = page to offset
+            if (!fragment.go(locator.copy(locations = locator.locations.copy(
+                    fragments = listOf("page=$page"), position = page)), animated = false)) pendingTextAnchor = null
         }
     }
 
@@ -302,10 +397,44 @@ internal class PdfSession(
                 if (closed || request != textRequest || !textMode) return@launch
                 if (source == null) { textViewState = PdfTextViewState.Unavailable; return@launch }
                 if (page > source.pageCount) { textViewState = PdfTextViewState.Failed; return@launch }
-                val content = source.readPage(page - 1)
+                suspend fun readText(number: Int): String {
+                    textPages[number]?.let { return it }
+                    val value = source.readPage(number - 1).blocks.joinToString("") { it.text }
+                    textPages[number] = value
+                    return value
+                }
+                val text = readText(page)
                 if (closed || request != textRequest || !textMode || textPage != page) return@launch
-                val text = content.blocks.joinToString("") { it.text }
-                textViewState = if (text.isBlank()) PdfTextViewState.Empty else PdfTextViewState.Ready(page, text)
+                if (text.isBlank()) { textViewState = PdfTextViewState.Empty; return@launch }
+
+                // Load a bounded contiguous neighborhood, stopping at pages which
+                // have no extractable text or fail extraction. Such pages remain
+                // accessible through their original-page fallback.
+                val pages = mutableListOf(PdfTextWindowPage(page, text))
+                suspend fun addSide(direction: Int) {
+                    var number = page + direction
+                    var chars = 0
+                    var count = 0
+                    while (number in 1..source.pageCount && count < 24 && chars < 24_000) {
+                        val value = try { readText(number) }
+                            catch (cancelled: CancellationException) { throw cancelled }
+                            catch (_: Exception) { break }
+                        if (value.isBlank()) break
+                        // Avoid retaining a large number of unusually long pages.
+                        if (chars + value.length > 300_000 && count > 0) break
+                        val item = PdfTextWindowPage(number, value)
+                        if (direction < 0) pages.add(0, item) else pages.add(item)
+                        chars += value.length
+                        count++
+                        number += direction
+                    }
+                }
+                addSide(-1)
+                addSide(1)
+                if (closed || request != textRequest || !textMode || textPage != page) return@launch
+                val retained = pages.mapTo(mutableSetOf()) { it.page }
+                textPages.keys.retainAll(retained)
+                textViewState = PdfTextViewState.Ready(page, pages, source.pageCount)
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) {
                 if (!closed && request == textRequest && textMode) textViewState = PdfTextViewState.Failed
@@ -343,7 +472,7 @@ internal class PdfSession(
         record(readingTime.pause(SystemClock.elapsedRealtime()))
         closed = true
         readingTimeJob?.cancel(); locationJob?.cancel()
-        textRequest++; textJob?.cancel(); textSource?.close(); textSource = null
+        textRequest++; textJob?.cancel(); textSource?.close(); textSource = null; textPages.clear(); textTurnHandler = null
         activity.lifecycle.removeObserver(readingLifecycle)
         flushPosition()
         if (!activity.supportFragmentManager.isDestroyed && fragment.isAdded) {

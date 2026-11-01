@@ -9,8 +9,6 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,11 +17,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
-import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -37,7 +39,6 @@ import com.bookcover.diagnostic.library.readerControlsColorScheme
 import org.json.JSONObject
 import org.readium.r2.shared.publication.Locator
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 /** PDF pages retain their original layout and can be zoomed using the native pinch gesture. */
 @Composable
@@ -109,7 +110,7 @@ internal fun PdfReaderScreen(
                     Column(Modifier.padding(8.dp)) {
                         Text(if (session.textMode) "Text view may omit pictures and formatting; some lines can repeat."
                             else "PDF pages keep their original layout. Pinch to zoom.", style = MaterialTheme.typography.bodySmall)
-                        if (session.textMode) Text("Scroll up or down to read this page. Swipe sideways or use Next to change pages.",
+                        if (session.textMode) Text("Swipe sideways or use Previous and Next to read.",
                             style = MaterialTheme.typography.bodySmall)
                         message.substringBefore('\n').trim().takeIf { it.isNotEmpty() }?.let {
                             Text(it, style = MaterialTheme.typography.bodySmall)
@@ -192,6 +193,21 @@ internal fun PdfReaderScreen(
     }
 }
 
+internal data class PdfTextWindow(val text: String, val starts: List<Int>)
+
+/** Join pages without creating extra blank lines, keeping each source offset reversible. */
+internal fun pdfTextWindow(pages: List<PdfTextWindowPage>): PdfTextWindow {
+    val starts = ArrayList<Int>(pages.size)
+    val text = buildString {
+        pages.forEachIndexed { index, page ->
+            if (index > 0 && !endsWith("\n") && !page.text.startsWith("\n")) append('\n')
+            starts.add(length)
+            append(page.text)
+        }
+    }
+    return PdfTextWindow(text, starts)
+}
+
 /** Keep the PDF navigator attached underneath so text and original pages share one page locator. */
 @Composable
 private fun PdfTextReadingSurface(session: PdfSession, modifier: Modifier = Modifier) {
@@ -220,7 +236,14 @@ private fun PdfTextReadingSurface(session: PdfSession, modifier: Modifier = Modi
                 onDragCancel = { distance = 0f },
             )
         }
+        .semantics {
+            customActions = listOf(
+                CustomAccessibilityAction("Next text page") { session.next(); true },
+                CustomAccessibilityAction("Previous text page") { session.previous(); true },
+            )
+        }
     BoxWithConstraints(modifier.background(background).then(gestureModifier)) {
+        LaunchedEffect(maxWidth, maxHeight, session.textScale) { session.clearTextTurnHistory() }
         when (val state = session.textViewState) {
             PdfTextViewState.Loading -> Text("Loading text…", Modifier.align(Alignment.Center))
             PdfTextViewState.Unavailable -> PdfTextUnavailable(
@@ -232,40 +255,85 @@ private fun PdfTextReadingSurface(session: PdfSession, modifier: Modifier = Modi
                 "Text on this page could not be displayed. Open the original page to keep reading.",
                 session, Modifier.align(Alignment.Center))
             is PdfTextViewState.Ready -> {
-                // Reflow can change after folding, rotation or a font-size adjustment. Save a
-                // character index, then map it back to a line in the new layout rather than a pixel offset.
-                val viewportWidth = maxWidth
-                key(state.page) {
-                    val scroll = rememberScrollState()
-                    val revision = session.textAnchorRevision
-                    val scale = session.textScale
-                    var layout by remember(state.page, revision, scale, viewportWidth) { mutableStateOf<TextLayoutResult?>(null) }
-                    var restored by remember(state.page, revision, scale, viewportWidth) { mutableStateOf(false) }
-                    val topPadding = with(density) { 24.dp.toPx() }
-                    LaunchedEffect(layout, scroll.viewportSize, scroll.maxValue, restored) {
-                        val measured = layout ?: return@LaunchedEffect
-                        if (!restored && scroll.viewportSize > 0 && scroll.maxValue != Int.MAX_VALUE) {
-                            val index = session.textOffset.coerceIn(0, (state.text.length - 1).coerceAtLeast(0))
-                            val line = measured.getLineForOffset(index)
-                            scroll.scrollTo((topPadding + measured.getLineTop(line)).roundToInt())
-                            restored = true
-                        }
-                    }
-                    LaunchedEffect(restored, layout, state.page) {
-                        val measured = layout ?: return@LaunchedEffect
-                        if (!restored) return@LaunchedEffect
-                        snapshotFlow { scroll.value }.collect { offset ->
-                            val line = measured.getLineForVerticalPosition((offset - topPadding).coerceAtLeast(0f))
-                            session.updateTextOffset(state.page, measured.getLineStart(line))
-                        }
-                    }
-                    Column(Modifier.fillMaxSize().testTag("pdf-text-scroll").verticalScroll(scroll).padding(horizontal = 24.dp, vertical = 24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(state.text, modifier = Modifier.widthIn(max = 800.dp).fillMaxWidth().testTag("pdf-text-content"),
-                            fontFamily = FontFamily.Serif, fontSize = 20.sp * scale.toFloat(),
-                            lineHeight = 30.sp * scale.toFloat(), onTextLayout = { layout = it })
+                val availableWidth = (maxWidth - 48.dp).coerceAtLeast(1.dp).coerceAtMost(800.dp)
+                val availableHeight = (maxHeight - 48.dp).coerceAtLeast(1.dp)
+                val widthPx = with(density) { availableWidth.roundToPx().coerceAtLeast(1) }
+                val heightPx = with(density) { availableHeight.toPx().coerceAtLeast(1f) }
+                val scale = session.textScale
+                val style = LocalTextStyle.current.merge(TextStyle(
+                    fontFamily = FontFamily.Serif, fontSize = 20.sp * scale.toFloat(),
+                    lineHeight = 30.sp * scale.toFloat(), color = MaterialTheme.colorScheme.onBackground))
+                val measurer = rememberTextMeasurer()
+                val window = remember(state.pages) { pdfTextWindow(state.pages) }
+                val text = window.text
+                val starts = window.starts
+                val measured = remember(measurer, text, widthPx, style) {
+                    measurer.measure(text = text, style = style,
+                        constraints = Constraints(maxWidth = widthPx))
+                }
+
+                // Every window has page boundaries on explicit line breaks, so
+                // prepending or dropping neighboring pages cannot change wrapping.
+                fun anchorAt(index: Int): Pair<Int, Int> {
+                    val selected = starts.indexOfLast { it <= index }.coerceAtLeast(0)
+                    val source = state.pages[selected]
+                    return source.page to (index - starts[selected]).coerceIn(0, source.text.length)
+                }
+                val sourceIndex = state.pages.indexOfFirst { it.page == state.page }.coerceAtLeast(0)
+                val source = state.pages[sourceIndex]
+                var sourceOffset = if (session.textOffset == Int.MAX_VALUE)
+                    (source.text.length - 1).coerceAtLeast(0)
+                else session.textOffset.coerceIn(0, (source.text.length - 1).coerceAtLeast(0))
+                // A leading newline can be the separator ending the preceding page's
+                // final line. Start at its first following character in that case.
+                if (sourceIndex > 0 && sourceOffset == 0 && source.text.startsWith("\n") &&
+                    !state.pages[sourceIndex - 1].text.endsWith("\n")) sourceOffset = 1
+                val absolute = (starts[sourceIndex] + sourceOffset)
+                    .coerceIn(0, (text.length - 1).coerceAtLeast(0))
+                var firstLine = measured.getLineForOffset(absolute)
+
+                // A previous turn through the beginning of the bounded window
+                // enters the preceding page at its final full screenful.
+                if (session.textOffset == Int.MAX_VALUE) {
+                    val finalLine = firstLine
+                    while (firstLine > 0 &&
+                        measured.getLineBottom(finalLine) - measured.getLineTop(firstLine - 1) <= heightPx) firstLine--
+                    val normalized = anchorAt(measured.getLineStart(firstLine))
+                    LaunchedEffect(state.page, normalized) {
+                        session.normalizeTextAnchor(normalized.first, normalized.second)
                     }
                 }
+                var lastLine = firstLine
+                while (lastLine + 1 < measured.lineCount &&
+                    measured.getLineBottom(lastLine + 1) - measured.getLineTop(firstLine) <= heightPx) lastLine++
+                val start = measured.getLineStart(firstLine)
+                val end = measured.getLineEnd(lastLine, visibleEnd = false).coerceIn(start, text.length)
+                val visible = text.substring(start, end)
+                val previous = if (firstLine > 0) {
+                    var candidate = firstLine - 1
+                    while (candidate > 0 &&
+                        measured.getLineBottom(firstLine - 1) - measured.getLineTop(candidate - 1) <= heightPx) candidate--
+                    anchorAt(measured.getLineStart(candidate))
+                } else null
+                val next = if (lastLine + 1 < measured.lineCount &&
+                    measured.getLineStart(lastLine + 1) < text.length)
+                    anchorAt(measured.getLineStart(lastLine + 1)) else null
+
+                DisposableEffect(session, state, previous, next) {
+                    session.textTurnHandler = { forward ->
+                        val target = if (forward) next else previous
+                        if (target != null) session.moveTextAnchor(target.first, target.second, forward)
+                        else {
+                            val boundary = if (forward) state.pages.last().page + 1 else state.pages.first().page - 1
+                            if (boundary in 1..state.pageCount)
+                                session.moveTextAnchor(boundary, if (forward) 0 else Int.MAX_VALUE, forward)
+                        }
+                    }
+                    onDispose { session.textTurnHandler = null }
+                }
+                Text(visible, modifier = Modifier.align(Alignment.TopCenter)
+                    .padding(top = 24.dp).width(availableWidth).testTag("pdf-text-content"),
+                    style = style)
             }
         }
     }
