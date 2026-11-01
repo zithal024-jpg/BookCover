@@ -3,6 +3,7 @@
 **Current version on `main`: 0.4.0-prototype (`versionCode` 6, `com.bookcover.diagnostic`).** BookCover is an offline, local DRM-free EPUB 2/3 reader for Samsung Galaxy Z Fold devices that displays the current book's cover on the exterior screen via Jetpack WindowManager `WindowAreaController` while you read on the inner display.
 
 - **Single active work queue:** [docs/review/ACTIVE-BACKLOG.md](docs/review/ACTIVE-BACKLOG.md)
+- **Shared branches, tested private pushes and release/install handoffs:** [docs/SYNC-WORKFLOW.md](docs/SYNC-WORKFLOW.md)
 - **Detailed BC-01–BC-29 & RS-1 evidence history:** [docs/review/EXPERT-PANEL-REVIEW.md](docs/review/EXPERT-PANEL-REVIEW.md)
 - **Quick start & developer guides:** [START-HERE.md](START-HERE.md), [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), and [docs/BC-25-TASK-RESOURCES.md](docs/BC-25-TASK-RESOURCES.md)
 - **Historical 2026-10-26 review package docs:** [OVERVIEW.md](docs/review/OVERVIEW.md), [BUILD-AND-INSTALL.md](docs/review/BUILD-AND-INSTALL.md), [KNOWN-LIMITATIONS.md](docs/review/KNOWN-LIMITATIONS.md), and [RESULTS.md](docs/review/RESULTS.md)
