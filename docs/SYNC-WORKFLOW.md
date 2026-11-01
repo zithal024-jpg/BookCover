@@ -142,6 +142,14 @@ disposition. Keep failed attempts and unrun cases; never rerun until green and
 discard the failures or combine different snapshots into one claimed suite pass.
 Deferred features are not added or used as gates by this workflow.
 
+Keep QA fixtures isolated too. Global QA book resets use
+[the fixture helper](../app/src/androidTest/java/com/bookcover/diagnostic/testing/QaBookFixtures.kt)
+and preserve the shared history/relic stores; use `BookLibrary.forApp` for the
+global application library. Corrupt-storage checks use private fixture contexts.
+Retain combined-process checks across reader and relic flows. Separate-process
+passes are separate evidence, not a full-suite pass. Record unsupported Fold
+checks as blocked; do not replace them with an emulator success claim.
+
 ## 5. Freeze identity, test and package matching bytes
 
 Fetch/check again before integration and packaging. Pre-integration QA can run on
@@ -247,8 +255,11 @@ actual Library/reading/reopen/cover/fold observations, never an API-success clai
 Release only the frozen, clean, tested integration source and its matching APK.
 Keep the previous exact APK, package/version/signer, source, checksum and evidence
 in a private, clearly labelled rollback location outside Git. Preserve original
-EPUB/PDF files and the supported metadata backup; that backup excludes book files,
-artwork, preferences and Streak. Do not call it a full device/library backup.
+EPUB/PDF files and the supported backup. Current backups include book metadata,
+reading history, relic progress and saved relic appearances; they exclude book
+files, artwork, general reader/Library/outside-cover preferences and temporary
+testing access/appearances. Older backups lacking the newer fields restore book
+metadata only. Do not call it a full device/library backup.
 
 Retaining an APK does not authorize a rollback: version, signature and data-schema
 compatibility still need checking and owner permission. A verified forward fix may

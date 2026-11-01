@@ -1,29 +1,30 @@
 # BookCover private tester handoff draft
 
-**Draft only. No candidate acceptance, installation or distribution is authorized by this document.** Display name and application ID are decided in the table below. The sender must still complete every other identity row, and the pending gates, before inviting a tester to install. Source review baseline: `e6bfe3a4983bc13c55470b5d778c28fc05e6a9fc`, 2026-10-29; this is not an accepted APK identity.
+**Draft only. No candidate acceptance, installation or distribution is authorized by this document.** Combined reader, rewards and Cover Edges source `f32a762c6a7fae1e8b28322c1a9514121e7e83d1` passed build/lint, 431 unit checks and one 114-case supported emulator run. Three Fold-only checks and physical acceptance remain pending. This is a candidate source identity, not an accepted APK. Complete the verification rows and the pending gates before inviting a tester to install.
 
 For private testers, this handoff supersedes historical APK/install/evaluation examples in [BUILD-AND-INSTALL.md](BUILD-AND-INSTALL.md) and [RESULTS.md](RESULTS.md). [CLAUDE.md](../../CLAUDE.md) and the [owner-phone install policy](ACTIVE-BACKLOG.md#owner-phone-installs) still govern the owner's phone. The [active backlog](ACTIVE-BACKLOG.md) remains the only live work queue.
 
 ## Sender before sharing
 
-Display name and application ID are already decided. Complete every other field from the accepted artifact and matching evidence, never an older build. SHA-256 is a file fingerprint; the signing certificate identifies the signing key. The accepted APK's package must be `com.frankrodriguez.bookcover` and its launcher name must be BookCover. If either differs, stop and do not share that APK.
+This candidate preserves the existing owner-update package `com.bookcover.diagnostic` and launcher name BookCover. The recorded future tester application ID `com.frankrodriguez.bookcover` is a separate track, not this candidate's package; adopting it creates another installation and does not migrate the existing library. Complete the remaining fields from the exact artifact and matching evidence, never an older build. SHA-256 is a file fingerprint; the signing certificate identifies the signing key. Stop on an unexpected package, launcher name or signing identity.
 
 | Required field | Fill before use |
 | --- | --- |
-| Accepted source commit | PENDING |
-| Matching build source snapshot | PENDING |
-| Exact APK filename and sender's absolute file path | PENDING |
-| APK SHA-256 | PENDING |
+| Candidate source commit; acceptance is separate | `f32a762c6a7fae1e8b28322c1a9514121e7e83d1` — engineering QA passed; physical acceptance pending |
+| Matching build source snapshot | `e93c02b12b69ab53b3c7e73256af749fa64a56378ee00ffdfb2a2393c0120a71` |
+| Exact APK filename and sender's absolute file path | `C:\Users\Frank\Documents\Codex\2026-10-28\task\BookCover-0.4.0-prototype-f32a762.apk` |
+| APK SHA-256 | `62b102bee26c2d64a89143e0951ee1086ec06128c2a2b7a7d258ba1750be4469` (71,383,202 bytes) |
 | Display name | BookCover |
-| Application ID | com.frankrodriguez.bookcover |
-| Version name and numeric version code | PENDING |
-| Signer certificate SHA-256 and signing-track owner | PENDING |
-| Acceptance owner/date and preserved verification record | PENDING |
+| Application ID of this candidate | com.bookcover.diagnostic |
+| Recorded future tester application ID | com.frankrodriguez.bookcover — separate track, not this APK |
+| Version name and numeric version code | `0.4.0-prototype` / `6` |
+| Signer certificate SHA-256 and signing-track owner | Existing development/debug signer: `c4014c59942495ab82332093df8eae893655182ac31e7fe5bba84293205f3929`. Public-release signing decision/ownership remains PENDING. |
+| Acceptance owner/date and preserved verification record | Owner/distribution acceptance PENDING. Codex engineering checks on 2026-11-01: 431 units and one 114-case emulator run, zero failures/skips; see the consolidation row in the active backlog and the supplied TESTS-MANIFEST.json. |
 | Approved devices/Android versions and known limitations | PENDING |
 | Approved delivery route and private feedback destination | PENDING |
 
-1. Obtain Opus's acceptance of the integrated build and the owner's distribution approval. Confirm the final signing/package update track and a data-preserving upgrade rehearsal. For the owner's phone, also meet the linked ancestry/integration/availability policy; this guide grants no exception.
-2. Inspect the exact APK. These PowerShell examples are templates: replace every `REPLACE` path with an existing file/tool. Use the installed Android SDK build-tools version, not a guessed version. Record the SHA-256, signer and version outputs in the open rows above. The package line must be `com.frankrodriguez.bookcover`. Stop on any tool failure or mismatch.
+1. Obtain the current designated integration owner's acceptance of the combined build and the owner's distribution approval. Confirm the signing/package update track and a data-preserving upgrade rehearsal. For the owner's phone, also meet the linked ancestry/integration/availability policy; this guide grants no exception.
+2. Inspect the exact APK. These PowerShell examples are templates: replace every `REPLACE` path with an existing file/tool. Use the installed Android SDK build-tools version, not a guessed version. Record the SHA-256, signer and version outputs in the open rows above. This candidate's package line must be `com.bookcover.diagnostic`. Stop on any tool failure or mismatch.
 
    ```powershell
    $testerApk = 'C:\REPLACE\accepted-bookcover.apk'
@@ -39,7 +40,7 @@ Display name and application ID are already decided. Complete every other field 
 1. Wait for the completed identity record and explicit invitation. Use your own test device and generated/nonpersonal books. Android 11/API 30 is the declared minimum; that is not evidence that every Android 11+ device was tested. Outside-cover support additionally requires available rear-display capability.
 2. If updating, first follow the backup precautions below and note your current books, passage, bookmarks, collection, settings and Streak. Keep the existing app installed. A matching display name or About label does not identify an APK; the current About text is hardcoded.
 3. Compare the delivered APK's SHA-256 with the sender's record. On Windows, use `Get-FileHash -LiteralPath 'C:\REPLACE\accepted-bookcover.apk' -Algorithm SHA256`; otherwise ask the sender for help verifying it.
-4. Open the supplied APK in Android Files/My Files and follow the installer. For an existing installation, use **Update**. A sender-approved ADB alternative, with USB debugging authorized by the device owner, is:
+4. Open the supplied APK in Android Files/My Files and follow the installer. For an existing installation of the same application ID with a compatible signer and version, use **Update**. A sender-approved ADB alternative, with USB debugging authorized by the device owner, is:
 
    ```powershell
    & 'C:\REPLACE\Android-SDK\platform-tools\adb.exe' -s 'REPLACE_DEVICE_SERIAL' install -r 'C:\REPLACE\accepted-bookcover.apk'
@@ -54,16 +55,19 @@ These are manual checks. Do not run connected/instrumented tests against the ord
 
 In Library, open **Settings → Backup → Save backup**. Choose a new filename outside the app's private storage; retain another known-good copy. Confirm a successful result. A provider write failure after opening the destination can leave a partial file, so do not overwrite your only backup.
 
-Restore matches books by the SHA-256 of their EPUB bytes. It **replaces matching books' collections and merges bookmarks**. It replaces a reading position **only when the backup's last-read timestamp is newer**. Missing books are reported; unrelated local books remain. This does not replace the whole library or rewind newer positions.
+Restore matches books by the SHA-256 of their original EPUB or PDF bytes. It **replaces matching books' collections and merges bookmarks**. It replaces a reading position **only when the backup's last-read timestamp is newer**. Missing books are reported; unrelated local books remain. This does not replace the whole library or rewind newer positions.
+
+New backups also include dated reading history and completed goals, earned relic progress, and saved default/per-book relic appearances. History merges using the greater reading time per date instead of adding duplicate minutes; existing completed goals and earned rewards are retained. Explicit local appearance choices take precedence over restored choices. History and relic data can restore even when the books are absent. Older backups lacking these fields restore book metadata only; they cannot recover history or rewards they never contained.
 
 **It is not a full backup.** Keep these independently:
 
-- The identical original EPUB files. BookCover keeps private copies and has no EPUB export in this workflow; editing/repacking an EPUB changes its identity.
-- Original custom-cover image files; choose them again after recovery. Embedded artwork can be extracted again when its EPUB is imported.
-- A private note of reader/library/outside-cover settings, which must be set again.
-- Any Streak information you wish to remember. Streak history has no supported export/import here; notes or screenshots do not restore it.
+- The identical original EPUB and PDF files. BookCover keeps private copies and has no book-file export in this workflow; changing the original bytes changes the book's identity.
+- Original custom-cover image files; choose them again after recovery. Embedded artwork, when available, can be extracted again on import.
+- A private note of general reader/Library/outside-cover preferences, which must be set again. Saved relic appearances are the exception included above.
 
-Android cloud backup and device transfer are disabled by the app's configuration. If recovering into an empty installation, import the identical originals, then **Restore backup before opening the books** and check the matched/missing result; opening marks a book read more recently. Custom covers, preferences and Streak are not restored. A damaged/unreadable library can refuse changes to protect data: report it rather than reset the app. Keep metadata backups private.
+Temporary testing access and test appearances are not backed up; earned settings return when testing ends.
+
+Android cloud backup and device transfer are disabled by the app's configuration. If recovering into an empty installation, import the identical originals, then **Restore backup before opening the books** and check the matched/missing result; opening marks a book read more recently. Book/cover files and general preferences still need independent recovery. Malformed backup payloads are checked before changes, but a disk failure during restore can leave some files merged and others pending; keep the backup and report the error rather than assuming an all-or-nothing restore. A damaged/unreadable library or relic collection can refuse changes to protect data: report it rather than reset the app. Keep backups private: they can contain reading dates and personal relic inscriptions as well as book metadata.
 
 ## Reading walkthrough in 20 to 30 minutes
 
@@ -98,10 +102,14 @@ Otherwise report `unknown`; Chrome's version is not a substitute. Optional diagn
 
 ## Known limits and gates before use
 
-Local DRM-free EPUB reading is supported; PDF, DRM, cloud sync and online catalogues are outside scope. The app has no Internet permission and rejects remote book resources; sending feedback is a separate human action. Partial backup coverage and device-dependent outside presentation remain limitations.
+Local DRM-free EPUB and PDF reading is supported. PDF original pages retain their layout; optional Text view requires Android 15 or newer and selectable text, and may omit pictures/formatting or repeat lines. DRM, cloud sync and online catalogues are outside scope. The app has no Internet permission and rejects remote book resources; sending feedback is a separate human action. Partial backup coverage and device-dependent outside presentation remain limitations.
 
-At the review baseline, [R2/RT](ACTIVE-BACKLOG.md#active-queue) records reopen passage loss on the real Fold despite passing swipe/fold checks. Emulator swipe failures remain unexplained; R1's lifetime fix is integrated. Recheck the live backlog before filling this handoff.
+The combined `f32a762` candidate passed the guarded build/lint and 431 unit checks, plus **114/114 selected Android checks in one instrumentation process**, with no failures or skips. R1 lifetime, visible/saved search passage, later navigation, Library, PDF, backup/history and relic flows were included. Original failed attempts remain preserved; partitioned passes were not combined into this result. The original 117-case selection is not claimed passed: three Fold-state checks were blocked on this generic emulator. Physical Fold/reopen, outside-cover Start/Stop/timer/sleep and whole-app owner observations remain pending for this exact APK. Recheck the [active backlog](ACTIVE-BACKLOG.md#active-queue) before inviting testers.
 
-Still required: Opus's integrated-candidate acceptance with preserved matching artifacts and resolved/dispositioned reader/Library findings; selected signing/package/version and demonstrated upgrade preservation; owner-observed final cover/Stop/timer/sleep behavior; current accessibility/large-text and supported-device limitations; and owner approval of delivery/feedback routes. Historical passes do not satisfy these gates.
+Still required: the current integration owner's combined-candidate acceptance with preserved matching artifacts and resolved/dispositioned findings; verified signing/package/version and demonstrated upgrade preservation; owner-observed final cover/Stop/timer/sleep behavior; current accessibility/large-text and supported-device limitations; and owner approval of delivery/feedback routes. Historical passes do not satisfy these gates.
 
-**Packaging inconsistency to resolve before sharing:** README/known-limitations prose claims a root `NOTICE`, but none exists at the review baseline. `LICENSE`, bundled licence assets and the in-app **About → Licences** viewer do exist. Correct or resolve that claim during packaging; this guide makes no legal-compliance claim.
+Public-release signing and third-party notice review remain separate gates. The
+current source still has no root `NOTICE`, despite historical documentation claims;
+the separate dependency audit must resolve that inconsistency. `LICENSE`, bundled
+licence assets and the in-app licence viewer do exist. This handoff does not
+establish legal compliance or public-release approval.
