@@ -3,22 +3,31 @@ package com.bookcover.diagnostic.library
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
+import com.bookcover.diagnostic.rewards.RelicStore
+import com.bookcover.diagnostic.streak.ReadingDayStore
 
 internal class LibraryBackupException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 /**
- * A user-saved copy of reading positions, bookmarks and collections. Book files are not included:
- * restoring applies to books already in the library, matched by their SHA-256 identifier.
+ * A user-saved copy of reading metadata, history, relics and appearance choices. Book files are not
+ * included. Book positions match existing SHA-256 identifiers; history/rewards can restore without books.
  */
 internal object LibraryBackup {
     private const val FORMAT = "bookcover-library-backup"
 
-    data class Parsed(val records: List<BookRecord>, val skipped: Int)
-    data class MergeResult(val records: List<BookRecord>, val restored: Int, val missing: Int)
+    data class Parsed(val records: List<BookRecord>, val skipped: Int,
+                      val relics: JSONObject? = null, val readingDays: JSONObject? = null)
+    data class MergeResult(val records: List<BookRecord>, val restored: Int, val missing: Int,
+                           val readingRewardsRestored: Boolean = false)
 
-    fun export(records: List<BookRecord>, exportedAt: Long): String =
-        JSONObject().put("format", FORMAT).put("version", 1).put("exportedAt", exportedAt)
-            .put("books", JSONArray().apply { records.forEach { put(it.toJson()) } }).toString(2)
+    fun export(records: List<BookRecord>, exportedAt: Long, relics: JSONObject? = null, readingDays: JSONObject? = null): String {
+        relics?.let(RelicStore::validateBackup)
+        readingDays?.let(ReadingDayStore::validateBackup)
+        return JSONObject().put("format", FORMAT).put("version", if (relics != null || readingDays != null) 2 else 1)
+            .put("exportedAt", exportedAt)
+            .put("books", JSONArray().apply { records.forEach { put(it.toJson()) } })
+            .apply { relics?.let { put("relics", it) }; readingDays?.let { put("readingDays", it) } }.toString(2)
+    }
 
     /** Accepts a backup made by [export] or a plain `books.json` index. */
     fun parse(text: String): Parsed {
@@ -26,8 +35,23 @@ internal object LibraryBackup {
         val format = json.optString("format", FORMAT)
         val array = json.optJSONArray("books")
         if (format != FORMAT || array == null) throw notABackup(null)
+        // Validate the entire optional payload before any library/history/reward file is changed.
+        val version = if (!json.has("version")) 1L else json.get("version").let {
+            if (it !is Int && it !is Long) throw notABackup(null)
+            (it as Number).toLong()
+        }
+        if (version > 2) throw LibraryBackupException("This backup needs a newer version of BookCover.")
+        if (version < 1) throw notABackup(null)
+        val relics = if (json.has("relics")) json.optJSONObject("relics")
+            ?: throw notABackup(null) else null
+        val readingDays = if (json.has("readingDays")) json.optJSONObject("readingDays")
+            ?: throw notABackup(null) else null
+        try {
+            relics?.let(RelicStore::validateBackup)
+            readingDays?.let(ReadingDayStore::validateBackup)
+        } catch (error: Exception) { throw LibraryBackupException("This backup has damaged reading rewards or history.", error) }
         val (records, skipped) = readBookRecords(array)
-        return Parsed(records, skipped)
+        return Parsed(records, skipped, relics, readingDays)
     }
 
     /**

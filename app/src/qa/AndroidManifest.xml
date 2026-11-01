@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
+        <activity android:name=".testing.RelicRenderTestActivity" android:exported="false"
+            android:resizeableActivity="true" android:theme="@style/Theme.BookCover" />
         <!-- F2: a real import can be SIGKILLed while the default-process test driver survives. -->
         <activity android:name=".library.ImportProcessDeathActivity" android:exported="false"
             android:process=":import_recovery" android:taskAffinity="${applicationId}.import_recovery"
@@ -14,6 +16,8 @@
         <activity android:name=".testing.ReaderTestActivity" android:exported="false"
             android:resizeableActivity="true" android:theme="@style/Theme.BookCover" />
         <activity android:name=".testing.LibraryAccessibilityActivity" android:exported="false"
+            android:resizeableActivity="true" android:theme="@style/Theme.BookCover" />
+        <activity android:name=".testing.RelicCabinetTestActivity" android:exported="false"
             android:resizeableActivity="true" android:theme="@style/Theme.BookCover" />
     </application>
 </manifest>

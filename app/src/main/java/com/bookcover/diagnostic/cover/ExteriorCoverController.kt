@@ -1,7 +1,6 @@
 package com.bookcover.diagnostic.cover
 
 import android.app.Activity
-import android.app.Presentation
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -13,7 +12,6 @@ import android.os.Looper
 import android.os.SystemClock
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.widget.ImageView
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -29,6 +27,9 @@ import androidx.window.area.WindowAreaPresentationSessionCallback
 import androidx.window.area.WindowAreaSessionPresenter
 import androidx.window.core.ExperimentalWindowApi
 import com.bookcover.diagnostic.DiagnosticLog
+import com.bookcover.diagnostic.rewards.RelicAppearance
+import com.bookcover.diagnostic.rewards.RelicCoverView
+import com.bookcover.diagnostic.rewards.RelicMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -61,9 +62,20 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
     private var request = 0
     private var timeout: Runnable? = null
     private val continuation = CoverSessionContinuation()
+    private var renderedView: RelicCoverView? = null
+    private var appearance = RelicAppearance()
+    private var coverTitle = ""
+    private var coverAuthor = ""
+    private var containerVisible = true
+    private var viewportInProgress = false
+    private var hostVisible = activity.lifecycleIsStarted()
     val requested get() = continuation.requested
     val deadline get() = continuation.deadline
     var artwork: CoverArtwork? = null
+        set(value) {
+            field = value
+            renderedView?.bind(value, appearance, coverTitle, coverAuthor)
+        }
     var active by mutableStateOf(false); private set
     var busy by mutableStateOf(false); private set
     var stopPending by mutableStateOf(false); private set
@@ -98,7 +110,7 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
     }
 
     fun start(timerMinutes: Int) {
-        if (busy || destroyed || artwork == null) return
+        if (busy || destroyed || !hasContent()) return
         continuation.start(timerMinutes, SystemClock.elapsedRealtime())
         openSession()
     }
@@ -108,12 +120,38 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
         resumeCover()
     }
 
-    fun viewportChanging() = continuation.displayChanging(suspended = !busy)
+    /** Appearance changes update the active view without renewing its session or countdown. */
+    fun setAppearance(appearance: RelicAppearance, title: String, author: String) {
+        this.appearance = appearance
+        coverTitle = title
+        coverAuthor = author
+        renderedView?.bind(artwork, appearance, title, author)
+    }
+
+    private fun hasContent() = artwork != null || (appearance.enabled && appearance.mode == RelicMode.STANDALONE)
+    private fun presentationIsVisible() = hostVisible && containerVisible && !viewportInProgress
+
+    fun viewportChanging() {
+        viewportInProgress = true
+        renderedView?.setPresentationVisible(false)
+        continuation.displayChanging(suspended = !busy)
+    }
     fun viewportSettled() {
+        viewportInProgress = false
+        renderedView?.setPresentationVisible(presentationIsVisible())
         continuation.displaySettled()
         if (continuation.resumePending) resumeCover()
     }
-    fun hostResumed() { if (continuation.resumePending) resumeCover() }
+    /** Pausing the animation does not end the display session or renew its original deadline. */
+    fun hostStopped() {
+        hostVisible = false
+        renderedView?.setPresentationVisible(false)
+    }
+    fun hostResumed() {
+        hostVisible = true
+        renderedView?.setPresentationVisible(presentationIsVisible())
+        if (continuation.resumePending) resumeCover()
+    }
 
     private fun resumeCover() {
         if (!continuation.requested || destroyed) return
@@ -122,9 +160,10 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
     }
 
     private fun openSession() {
-        if (busy || destroyed || !continuation.requested || artwork == null || !activity.lifecycleIsStarted()) return
+        if (busy || destroyed || !hostVisible || !continuation.requested || !hasContent() || !activity.lifecycleIsStarted()) return
         val area = area() ?: run { status = "The outside screen isn't available right now. Keep the phone unfolded and try again."; return }
         val token = ++request
+        containerVisible = true
         continuation.presenting()
         busy = true; active = false; stopPending = false
         status = "Opening the outside cover. Accept Android's display dialog if offered."
@@ -140,17 +179,18 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
                     session = presenter
                     if (stopPending) { presenter.close(); return }
                     try {
-                        val art = artwork ?: error("No cover artwork")
-                        presenter.setContentView(ImageView(presenter.context).apply {
+                        releaseRenderedView()
+                        val view = RelicCoverView(presenter.context).apply {
                             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                            scaleType = ImageView.ScaleType.FIT_CENTER
-                            setImageBitmap(art.bitmap); setBackgroundColor(art.background)
-                            contentDescription = "Current book cover"
+                            bind(artwork, appearance, coverTitle, coverAuthor)
+                            setPresentationVisible(presentationIsVisible())
                             addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
                                 if (r - l > 0 && b - t > 0 && (r - l != or - ol || b - t != ob - ot))
                                     DiagnosticLog.record("Exterior cover view=${r - l}x${b - t}; matching background; normal brightness")
                             }
-                        })
+                        }
+                        renderedView = view
+                        presenter.setContentView(view)
                         presenter.window?.let { window ->
                             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                             WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -167,6 +207,7 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
                 override fun onSessionEnded(t: Throwable?) {
                     DiagnosticLog.record("Exterior onSessionEnded request=$token: ${t?.javaClass?.simpleName ?: "no detailed system reason"}")
                     if (token == request) {
+                        releaseRenderedView()
                         session = null
                         busy = false; active = false; stopPending = false
                         status = "Outside cover is off. Reading can continue; restart it from controls if needed."
@@ -176,9 +217,16 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
                             status = "Outside cover paused. It will resume after the display changes; you can stop it from controls."
                     }
                 }
-                override fun onContainerVisibilityChanged(isVisible: Boolean) { DiagnosticLog.record("Exterior visible=$isVisible") }
+                override fun onContainerVisibilityChanged(isVisible: Boolean) {
+                    DiagnosticLog.record("Exterior visible=$isVisible")
+                    if (token == request) {
+                        containerVisible = isVisible
+                        renderedView?.setPresentationVisible(presentationIsVisible())
+                    }
+                }
             })
         } catch (error: Exception) {
+            releaseRenderedView()
             timeout?.let(handler::removeCallbacks); timeout = null
             continuation.stop()
             busy = false; active = false; stopPending = false
@@ -190,11 +238,17 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
     fun stop(reason: String) {
         continuation.stop()
         timeout?.let(handler::removeCallbacks); timeout = null
+        releaseRenderedView()
         if (!busy || stopPending) return
         stopPending = true; active = false
         status = "Stopping outside cover…"
         DiagnosticLog.record("Exterior app stop requested: $reason")
         runCatching { session?.close() }.onFailure { DiagnosticLog.record("Exterior close failed: ${it.javaClass.simpleName}") }
+    }
+
+    private fun releaseRenderedView() {
+        renderedView?.release()
+        renderedView = null
     }
 
     fun diagnostics(): String = buildString {

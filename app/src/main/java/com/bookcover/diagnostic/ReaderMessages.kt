@@ -4,6 +4,7 @@ import com.bookcover.diagnostic.library.LibraryBackupException
 import com.bookcover.diagnostic.library.LibraryIndexException
 import com.bookcover.diagnostic.library.LibraryNotReadyException
 import com.bookcover.diagnostic.library.MissingCoverBookException
+import com.bookcover.diagnostic.rewards.RelicStoreException
 import java.io.EOFException
 import java.io.FileNotFoundException
 import java.io.IOException
@@ -14,7 +15,8 @@ internal enum class ReaderAction { LOAD_LIBRARY, IMPORT, OPEN, SAVE_BACKUP, REST
 
 internal enum class FailureReason {
     LIBRARY_PROTECTED, NOT_EPUB, PROTECTED_BOOK, TOO_LARGE, NO_CHAPTERS, UNREADABLE_FILE,
-    BACKUP_NOT_WRITTEN, IMPORT_NOT_SAVED, NOT_A_BACKUP, REMOTE_BLOCKED, UNKNOWN,
+    BACKUP_NOT_WRITTEN, IMPORT_NOT_SAVED, NOT_A_BACKUP, BACKUP_NEWER, BACKUP_DAMAGED,
+    REWARDS_UNAVAILABLE, REMOTE_BLOCKED, UNKNOWN,
 }
 
 /**
@@ -25,6 +27,10 @@ internal fun failureReason(error: Throwable): FailureReason {
     val text = error.message.orEmpty()
     return when {
         error is LibraryIndexException || "library list could not be read" in text -> FailureReason.LIBRARY_PROTECTED
+        error is RelicStoreException || "saved relic collection" in text ||
+            "reading history could not be read" in text -> FailureReason.REWARDS_UNAVAILABLE
+        "backup needs a newer version" in text -> FailureReason.BACKUP_NEWER
+        "backup has damaged reading rewards or history" in text -> FailureReason.BACKUP_DAMAGED
         error is LibraryBackupException || "library backup" in text -> FailureReason.NOT_A_BACKUP
         "DRM-free" in text || "is protected" in text -> FailureReason.PROTECTED_BOOK
         "up to 200 MB" in text || "exceeds the prototype's import limit" in text -> FailureReason.TOO_LARGE
@@ -54,6 +60,9 @@ private fun messageForFailure(action: ReaderAction, reason: FailureReason): Stri
     FailureReason.LIBRARY_PROTECTED -> "BookCover couldn't read its list of your books, so it is leaving it untouched; " +
         "nothing was deleted. Restart BookCover to try again."
     FailureReason.NOT_A_BACKUP -> "That file isn't a BookCover backup. Choose a file made with Save backup. Your library is unchanged."
+    FailureReason.BACKUP_NEWER -> "This backup needs a newer BookCover version. Update BookCover before restoring it. Your library is unchanged."
+    FailureReason.BACKUP_DAMAGED -> "This backup's reading history or relic data is damaged. Choose another backup. Your library is unchanged."
+    FailureReason.REWARDS_UNAVAILABLE -> "BookCover couldn't read or save your relic collection or reading history. Its saved files have been kept. Restart BookCover before trying again."
     FailureReason.PROTECTED_BOOK -> "This book is copy-protected (DRM), so BookCover can't open it. " +
         "Look for a DRM-free EPUB or PDF copy of it. Your library is unchanged."
     FailureReason.TOO_LARGE -> "This book is too big to import: BookCover handles books up to 200 MB. Your library is unchanged."
@@ -84,7 +93,7 @@ private fun messageForFailure(action: ReaderAction, reason: FailureReason): Stri
         ReaderAction.OPEN -> "BookCover couldn't open this book. Your reading position is saved. Try again; if it keeps failing, " +
             "remove the book and import it again."
         ReaderAction.SAVE_BACKUP -> "The backup couldn't be saved. Try again, or choose another folder."
-        ReaderAction.RESTORE_BACKUP -> "The backup couldn't be restored. Your library is unchanged. Try again."
+        ReaderAction.RESTORE_BACKUP -> "The restore didn't finish. Some reading data may have been restored. Try the same backup again."
         ReaderAction.REPLACE_COVER -> "That picture couldn't be used as a cover. Try another picture."
         ReaderAction.ORGANIZE -> "That change couldn't be saved. Try again."
         ReaderAction.BOOKMARK -> "The bookmark couldn't be saved. Try again."
@@ -95,6 +104,9 @@ private fun messageForFailure(action: ReaderAction, reason: FailureReason): Stri
 internal fun shortFailureReason(reason: FailureReason): String = when (reason) {
     FailureReason.LIBRARY_PROTECTED -> "library list unreadable"
     FailureReason.NOT_A_BACKUP, FailureReason.NOT_EPUB -> "not a readable EPUB or PDF"
+    FailureReason.BACKUP_NEWER -> "needs a newer BookCover"
+    FailureReason.BACKUP_DAMAGED -> "damaged backup"
+    FailureReason.REWARDS_UNAVAILABLE -> "reading rewards unavailable"
     FailureReason.PROTECTED_BOOK -> "copy-protected"
     FailureReason.TOO_LARGE -> "over 200 MB"
     FailureReason.NO_CHAPTERS -> "no chapters to show"

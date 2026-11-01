@@ -45,6 +45,7 @@ internal fun LibrarySettingsDialog(
     onExportBackup: () -> Unit, onRestoreBackup: () -> Unit, onDiagnostics: () -> Unit,
     developerOptions: Boolean, onDeveloperOptions: () -> Unit, onDismiss: () -> Unit,
     coverColors: List<BookCoverColor> = emptyList(),
+    onOpenRelics: () -> Unit = {},
 ) {
     var page by remember { mutableStateOf(LibrarySettingsPage.ROOT) }
     var versionTaps by remember { mutableIntStateOf(0) }
@@ -73,7 +74,7 @@ internal fun LibrarySettingsDialog(
                             SettingsCategory("Appearance", libraryThemeLabel(libraryTheme), "appearance") { page = LibrarySettingsPage.APPEARANCE }
                             SettingsCategory("Outside cover", (if (autoCover) "Starts with a book" else "Start manually") +
                                 " · " + (if (timer == 0) "Manual timer" else "$timer min"), "cover") { page = LibrarySettingsPage.COVER }
-                            SettingsCategory("Backup", "Save or restore positions, bookmarks and collections", "backup") { page = LibrarySettingsPage.BACKUP }
+                            SettingsCategory("Backup", "Reading data, relics and cover appearances", "backup") { page = LibrarySettingsPage.BACKUP }
                             SettingsCategory("About", "BookCover 0.4.0 prototype · Licences", "about") { page = LibrarySettingsPage.ABOUT }
                         }
                         LibrarySettingsPage.APPEARANCE -> {
@@ -96,6 +97,8 @@ internal fun LibrarySettingsDialog(
                             }
                         }
                         LibrarySettingsPage.COVER -> {
+                            TextButton(onClick = { onDismiss(); onOpenRelics() }, modifier = Modifier.heightIn(min = 48.dp)
+                                .testTag("library-settings-relic-cabinet")) { Text("Relic cabinet") }
                             SettingsSwitchRow("Start outside cover when opening a book", autoCover, onAutoCover)
                             Text("Outside cover timer", style = MaterialTheme.typography.labelLarge)
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -107,8 +110,9 @@ internal fun LibrarySettingsDialog(
                                 style = MaterialTheme.typography.bodySmall)
                         }
                         LibrarySettingsPage.BACKUP -> {
-                            Text("Saves reading positions, bookmarks and collections to a file you choose. " +
-                                "Book files are not included; keep your EPUBs and PDFs. To restore after reinstalling, import your books first.",
+                            Text("Saves positions, bookmarks, collections, reading history, relics and outside appearance choices to a file you choose. " +
+                                "Book files are not included; keep your EPUBs and PDFs. Import those books to restore their positions. " +
+                                "Your current appearance choices take priority when restoring.",
                                 style = MaterialTheme.typography.bodySmall)
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 TextButton(onClick = { onDismiss(); onExportBackup() }, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp)) { Text("Save backup") }

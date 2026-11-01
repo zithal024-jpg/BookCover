@@ -17,6 +17,9 @@ import android.util.AtomicFile
 import android.util.LruCache
 import android.util.Size
 import com.bookcover.diagnostic.streak.ReadingDayStore
+import com.bookcover.diagnostic.streak.ReadingDays
+import com.bookcover.diagnostic.rewards.RelicStore
+import com.bookcover.diagnostic.DiagnosticLog
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
@@ -27,6 +30,7 @@ import java.nio.channels.FileChannel
 import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -61,6 +65,12 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
     private val coverColors = CoverColorCache(File(directory, "cover-colors.json"))
     /** Reading-streak days (dated totals only); shared by the reader and the Library card. */
     val readingDays = ReadingDayStore(File(directory, "reading-days.json"))
+    val relics = RelicStore(File(directory, "reading-relics.json"))
+    private val mutableRelicError = MutableStateFlow<String?>(null)
+    val relicError = mutableRelicError.asStateFlow()
+    private val mutableRelicsLoaded = MutableStateFlow(false)
+    val relicsLoaded = mutableRelicsLoaded.asStateFlow()
+    @Volatile private var relicsReady = false
     private var loaded = false
     private val lock = Mutex()
     private val access = LibraryAccess(lock)
@@ -77,7 +87,7 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
     ) { override fun sizeOf(key: String, value: Bitmap) = value.byteCount }
 
     suspend fun load(): LibraryIndex.LoadResult = withContext(Dispatchers.IO) {
-        access.load {
+        val result = access.load {
             loaded = false
             val removed = runCatching { cleanAbandonedImports() }.getOrDefault(0)
             index.load().also {
@@ -89,6 +99,33 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
                 loaded = true
                 mutableBooks.value = it.records
             }.copy(abandonedImportsRemoved = removed)
+        }
+        // Rewards are optional: a damaged reward file must not hide a healthy book library.
+        try {
+            relics.load()
+            readingDays.mergeBackup(relics.readingHistoryFloorJson())
+            relics.reconcile(readingDays.load())
+            relicsReady = true
+            mutableRelicError.value = null
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            relicsReady = false
+            mutableRelicError.value = "Your relic collection could not be read. Its saved files have been kept; your books are still available."
+            DiagnosticLog.record("Relic collection unavailable: ${error.javaClass.simpleName}")
+        } finally {
+            mutableRelicsLoaded.value = true
+        }
+        result
+    }
+
+    /** Called on an IO dispatcher when credited EPUB/PDF time changes. */
+    fun reconcileRelics(days: ReadingDays) {
+        if (!relicsReady) return
+        try { relics.reconcile(days); mutableRelicError.value = null }
+        catch (error: Exception) {
+            if (error is CancellationException) throw error
+            mutableRelicError.value = "Your latest relic progress could not be saved. Your reading history has been kept; try reopening the library."
+            DiagnosticLog.record("Relic progress save failed: ${error.javaClass.simpleName}")
         }
     }
 
@@ -266,7 +303,10 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
     suspend fun exportBackup(uri: Uri): Int = withContext(Dispatchers.IO) {
         access.export(prepare = {
             val records = mutableBooks.value
-            PreparedBackup(records.size, LibraryBackup.export(records, System.currentTimeMillis()).toByteArray(Charsets.UTF_8))
+            val history = readingDays.exportJson()
+            relics.reconcile(readingDays.load())
+            PreparedBackup(records.size, LibraryBackup.export(records, System.currentTimeMillis(),
+                relics.exportJson(), history).toByteArray(Charsets.UTF_8))
         }, openDestination = {
             context.contentResolver.openOutputStream(uri, "wt") ?: throw IOException("Could not write the backup file")
         })
@@ -289,9 +329,19 @@ internal class BookLibrary(private val context: Context, val engine: ReadiumEngi
         }
         val backup = LibraryBackup.parse(text)
         access.withReadyLibrary {
+            if ((backup.relics != null || backup.readingDays != null) && !relicsReady)
+                throw IOException("The saved relic collection must be readable before restoring reading rewards.")
             val result = LibraryBackup.merge(mutableBooks.value, backup.records)
+            // Each file merges monotonically and atomically. A failed provider/disk write can be retried;
+            // malformed payloads were rejected above before any of these operations.
+            backup.readingDays?.let(readingDays::mergeBackup)
+            backup.relics?.let(relics::mergeBackup)
+            if (backup.relics != null || backup.readingDays != null) {
+                readingDays.mergeBackup(relics.readingHistoryFloorJson())
+                relics.reconcile(readingDays.load())
+            }
             if (result.records != mutableBooks.value) persist(result.records)
-            result
+            result.copy(readingRewardsRestored = backup.relics != null || backup.readingDays != null)
         }
     }
 

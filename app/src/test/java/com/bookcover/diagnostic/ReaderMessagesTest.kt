@@ -82,7 +82,7 @@ class ReaderMessagesTest {
         assertTrue(readerMessage(ReaderAction.RESTORE_BACKUP, IllegalArgumentException("This file is too large to be a BookCover library backup."))
             .contains("isn't a BookCover backup"))
         assertTrue(readerMessage(ReaderAction.SAVE_BACKUP, IOException("Could not write the backup file")).contains("another folder"))
-        assertTrue(readerMessage(ReaderAction.RESTORE_BACKUP, NullPointerException()).contains("library is unchanged"))
+        assertTrue(readerMessage(ReaderAction.RESTORE_BACKUP, NullPointerException()).contains("Some reading data may have been restored"))
     }
 
     @Test fun protectedLibraryTellsTheReaderTheirBooksAreSafe() {

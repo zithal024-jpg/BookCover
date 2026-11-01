@@ -85,6 +85,8 @@ internal fun LibraryScreen(
     libraryTheme: String, onLibraryTheme: (String) -> Unit,
     importProgress: ImportProgress? = null, onStopImport: () -> Unit = {},
     coverColors: List<BookCoverColor> = emptyList(),
+    onOpenRelics: () -> Unit = {},
+    relicSummary: String = "",
 ) {
     var query by remember { mutableStateOf("") }
     var collection by remember { mutableStateOf("All") }
@@ -143,8 +145,17 @@ internal fun LibraryScreen(
                         // An empty library leads with how to add books; the streak follows.
                         if (books.isEmpty() && !busy) EmptyLibrary(onImport)
                         // Hidden while searching: the books stay the main thing here.
-                        if (!searching) ReadingStreakCard(readingDays,
-                            onCelebrated = { date -> streakScope.launch(Dispatchers.IO) { runCatching { library.readingDays.markCelebrated(date) } } })
+                        if (!searching) Column(horizontalAlignment = Alignment.End) {
+                            ReadingStreakCard(readingDays,
+                                onCelebrated = { date -> streakScope.launch(Dispatchers.IO) { runCatching { library.readingDays.markCelebrated(date) } } })
+                            TextButton(onClick = onOpenRelics, enabled = !busy,
+                                modifier = Modifier.heightIn(min = 48.dp).testTag("library-relic-cabinet")) {
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text("Relic cabinet")
+                                    if (relicSummary.isNotBlank()) Text(relicSummary, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
                         if (books.isNotEmpty()) CollectionToolbar(visible.size, books.size, sort, { sort = it }, collections, collection) { collection = it }
                         if (books.isNotEmpty() && visible.isEmpty()) NoMatches(searching) { query = ""; collection = "All" }
                     }
@@ -170,7 +181,7 @@ internal fun LibraryScreen(
         onTimer = onTimer, libraryTheme = libraryTheme, onLibraryTheme = onLibraryTheme,
         onExportBackup = onExportBackup, onRestoreBackup = onRestoreBackup, onDiagnostics = onDiagnostics,
         developerOptions = developerOptions, onDeveloperOptions = { developerOptions = true }, onDismiss = { settings = false },
-        coverColors = coverColors)
+        coverColors = coverColors, onOpenRelics = onOpenRelics)
 }
 
 /** Wordmark and the two app-level actions; on the unfolded screen search joins this row. */

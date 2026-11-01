@@ -28,6 +28,7 @@ import com.bookcover.diagnostic.reader.PdfSession
 import com.bookcover.diagnostic.reader.PdfReaderScreen
 import com.bookcover.diagnostic.reader.readerBackground
 import com.bookcover.diagnostic.reader.installReadingKeyHandler
+import com.bookcover.diagnostic.rewards.RelicCabinet
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -49,6 +50,8 @@ open class MainActivity : FragmentActivity() {
         get() = operations.message
         set(value) { operations.message = value }
     private var showDiagnostics by mutableStateOf(false)
+    private var showRelicCabinet by mutableStateOf(false)
+    private var relicSaveError by mutableStateOf<String?>(null)
     private var autoCover by mutableStateOf(true)
     private var timer by mutableIntStateOf(30)
     private var libraryTheme by mutableStateOf("automatic")
@@ -79,18 +82,21 @@ open class MainActivity : FragmentActivity() {
     private val exportLibrary = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) work(ReaderAction.SAVE_BACKUP) {
             val count = library.exportBackup(uri)
-            message = "Saved reading positions, bookmarks and collections for $count books. The books themselves are not in the backup."
+            message = "Saved positions, bookmarks and collections for $count books, plus reading history, relics and appearance choices. The books themselves are not in the backup."
         }
     }
     private val restoreLibrary = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) work(ReaderAction.RESTORE_BACKUP) {
             val result = library.restoreBackup(uri)
-            message = when {
+            val booksMessage = when {
+                result.restored == 0 && result.missing == 0 && result.readingRewardsRestored -> "Restored reading history, relics and appearance choices."
                 result.restored == 0 && result.missing == 0 -> "That backup has no books in it."
                 result.missing == 0 -> "Restored ${result.restored} books from the backup."
                 else -> "Restored ${result.restored} books. ${result.missing} books in the backup are not in your library: " +
                     "import those books, then restore again."
             }
+            message = booksMessage + if (result.readingRewardsRestored && (result.restored > 0 || result.missing > 0))
+                " Reading history, relics and appearance choices were also restored." else ""
         }
     }
 
@@ -100,6 +106,7 @@ open class MainActivity : FragmentActivity() {
         super.onCreate(null)
         // Keep picker routing/pending results even though navigator fragments cannot be restored.
         coverBookId = savedInstanceState?.getString("pendingCoverBook")
+        showRelicCabinet = savedInstanceState?.getBoolean("relicCabinet", false) ?: false
         savedInstanceState?.getBundle("documentPickerResults")?.let(activityResultRegistry::onRestoreInstanceState)
         installReadingKeyHandler(pdfReader = { pdfSession }) { session }
         DiagnosticLog.init(this)
@@ -118,6 +125,9 @@ open class MainActivity : FragmentActivity() {
         if (reopeningBookId != null) setReadingWindow(true)
         setContent {
             val books by library.books.collectAsState()
+            val relicCollection by library.relics.collection.collectAsState()
+            val relicError by library.relicError.collectAsState()
+            val relicsLoaded by library.relicsLoaded.collectAsState()
             val recent = books.filter { it.lastReadAt > 0 }.maxByOrNull { it.lastReadAt }
             val coverColors by produceState<List<BookCoverColor>>(emptyList(), books.map { it.id to it.coverRevision }) {
                 value = library.bookCoverColors()
@@ -135,6 +145,12 @@ open class MainActivity : FragmentActivity() {
             MaterialTheme(colorScheme = libraryColorScheme(libraryTheme, seed, systemDark)) {
                 val current = session
                 val pdf = pdfSession
+                val activeBook = current?.book ?: pdf?.book
+                val activeAppearance = activeBook?.let { relicCollection.appearanceFor(it.id) }
+                LaunchedEffect(activeBook?.id, activeAppearance) {
+                    if (activeBook != null && activeAppearance != null)
+                        exterior.setAppearance(activeAppearance, activeBook.title, activeBook.author)
+                }
                 if (current == null && pdf == null && reopeningBookId != null)
                     Box(Modifier.fillMaxSize().background(readerBackground(preferences.getString("theme", "Paper"))))
                 else if (current == null && pdf == null) LibraryScreen(books, library, busy, message, autoCover, timer,
@@ -148,7 +164,13 @@ open class MainActivity : FragmentActivity() {
                     onRestoreBackup = { restoreLibrary.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
                     onDiagnostics = { showDiagnostics = true }, libraryTheme = libraryTheme,
                     onLibraryTheme = { libraryTheme = it; preferences.edit().putString("libraryTheme", it).apply() },
-                    importProgress = importProgress, onStopImport = { importCancellation?.cancel() }, coverColors = coverColors)
+                    importProgress = importProgress, onStopImport = { importCancellation?.cancel() }, coverColors = coverColors,
+                    onOpenRelics = { if (!busy) { relicSaveError = null; showRelicCabinet = true } },
+                    relicSummary = when (relicCollection.unseen.size) {
+                        0 -> "${relicCollection.unlocked.size} of 6 collected"
+                        1 -> "1 new relic"
+                        else -> "${relicCollection.unseen.size} new relics"
+                    })
                 else if (pdf != null) PdfReaderScreen(pdf, books.firstOrNull { it.id == pdf.book.id } ?: pdf.book,
                     exterior.active, exterior.busy || exterior.requested, exterior.stopPending, exterior.available && !busy,
                     message + "\n" + exterior.status,
@@ -179,6 +201,29 @@ open class MainActivity : FragmentActivity() {
                     }, onRemoveBookmark = { value -> work(ReaderAction.BOOKMARK) { library.removeBookmark(current.book.id, value) } },
                     libraryTheme = libraryTheme, coverSeed = seed)
                 importSummary?.let { ImportSummaryDialog(it, onDismiss = { importSummary = null }) }
+                if (showRelicCabinet && relicsLoaded) {
+                    if (relicError != null) AlertDialog(onDismissRequest = { showRelicCabinet = false },
+                        title = { Text("Relic cabinet unavailable") }, text = { Text(relicError!!) },
+                        confirmButton = { TextButton(onClick = { showRelicCabinet = false }) { Text("Close") } })
+                    else RelicCabinet(relicCollection, books, library,
+                        onSave = { id, appearance -> if (!busy) work(ReaderAction.ORGANIZE) {
+                            saveRelicChange { library.relics.setAppearance(id, appearance) }
+                            showRelicCabinet = false
+                            message = "Outside appearance saved${if (id == null) " as your default" else " for this book"}."
+                        } },
+                        onReset = { id -> if (!busy) work(ReaderAction.ORGANIZE) {
+                            saveRelicChange { library.relics.resetBookAppearance(id) }
+                            showRelicCabinet = false; message = "This book now uses your default outside appearance."
+                        } },
+                        onSeen = { lifecycleScope.launch(Dispatchers.IO) {
+                            runCatching { library.relics.markSeen() }.onFailure {
+                                DiagnosticLog.record("Relic acknowledgement failed: ${it.javaClass.simpleName}")
+                            }
+                        } }, onDismiss = { if (!busy) showRelicCabinet = false }, busy = busy)
+                }
+                relicSaveError?.let { error -> AlertDialog(onDismissRequest = { relicSaveError = null },
+                    title = { Text("Appearance not saved") }, text = { Text(error) },
+                    confirmButton = { TextButton(onClick = { relicSaveError = null }) { Text("Close") } }) }
                 if (showDiagnostics) AlertDialog(onDismissRequest = { showDiagnostics = false }, title = { Text("Device diagnostics") },
                     text = { Text(exterior.diagnostics() + "\n" + DiagnosticLog.report(), modifier = Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), style = MaterialTheme.typography.bodySmall) },
                     confirmButton = { TextButton(onClick = { showDiagnostics = false }) { Text("Close") } })
@@ -209,6 +254,10 @@ open class MainActivity : FragmentActivity() {
                 restoredReaderLocator = null
                 if (session == null && pdfSession == null) setReadingWindow(false)
             }
+        }
+        // Both reader formats update this existing dated clock; awards never depend on page flips.
+        lifecycleScope.launch(Dispatchers.IO) {
+            library.readingDays.days.collect { library.reconcileRelics(it) }
         }
     }
 
@@ -273,6 +322,7 @@ open class MainActivity : FragmentActivity() {
                 // Take ownership first so a later failure here leaves the session owned and closable.
                 session = current
                 exterior.artwork = artwork
+                exterior.setAppearance(library.relics.collection.value.appearanceFor(book.id), book.title, book.author)
                 setReadingWindow(true)
                 if (reopeningBookId != null) operations.publishInitialMessage("Swipe left/right to turn pages. Tap the middle for controls.")
                 else message = "Swipe left/right to turn pages. Tap the middle for controls."
@@ -302,6 +352,7 @@ open class MainActivity : FragmentActivity() {
             commit = { current, artwork ->
                 pdfSession = current
                 exterior.artwork = artwork
+                exterior.setAppearance(library.relics.collection.value.appearanceFor(book.id), book.title, book.author)
                 setReadingWindow(true)
                 message = "Swipe to turn PDF pages."
                 val previousCover = restoredCover
@@ -329,6 +380,16 @@ open class MainActivity : FragmentActivity() {
         }
     }
 
+    private suspend fun saveRelicChange(change: () -> Unit) {
+        relicSaveError = null
+        try { withContext(Dispatchers.IO) { change() } }
+        catch (error: CancellationException) { throw error }
+        catch (error: Exception) {
+            relicSaveError = readerMessage(ReaderAction.ORGANIZE, error)
+            throw error
+        }
+    }
+
     /** Runs [block]; a failure shows a plain message for [action] and logs only technical types (BC-26). */
     private fun work(action: ReaderAction, block: suspend () -> Unit) {
         // Enter synchronously, before a second picker result can observe an idle library.
@@ -345,6 +406,7 @@ open class MainActivity : FragmentActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("relicCabinet", showRelicCabinet)
         outState.putString("pendingCoverBook", coverBookId)
         outState.putBundle("documentPickerResults", Bundle().also(activityResultRegistry::onSaveInstanceState))
         outState.putString("openBook", session?.book?.id ?: pdfSession?.book?.id ?: reopeningBookId)
@@ -371,6 +433,7 @@ open class MainActivity : FragmentActivity() {
     }
 
     override fun onStop() {
+        exterior.hostStopped()
         // Android may end the process while the app is in the background; save the position first.
         session?.flushPosition()
         pdfSession?.flushPosition()
