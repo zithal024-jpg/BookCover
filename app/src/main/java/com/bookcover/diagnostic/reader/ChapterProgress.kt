@@ -33,6 +33,11 @@ internal class ChapterProgressMap(
 
     private data class Boundary(val anchor: ChapterAnchor, val point: Double)
 
+    private companion object {
+        /** Fraction of a resource: far below any real page, far above sub-pixel scroll rounding. */
+        const val PAGE_START_SLACK = 1e-4
+    }
+
     fun resolve(
         resourceIndex: Int,
         progression: Double,
@@ -67,7 +72,11 @@ internal class ChapterProgressMap(
                 Boundary(anchor, start + local * (end - start))
             }
         }
-        val defaultActive = boundaries.filter { it.anchor.resourceIndex <= resourceIndex && it.point <= point + 1e-9 }
+        // A measured page start and Readium's scroll-derived progression can differ by a few device
+        // pixels when the column width is fractional in CSS pixels (1768 px at 2.625 dpr). That
+        // sliver is still the boundary's own page, not the previous one.
+        val pageStartSlack = PAGE_START_SLACK * (resourceEnd - resourceStart) + 1e-9
+        val defaultActive = boundaries.filter { it.anchor.resourceIndex <= resourceIndex && it.point <= point + pageStartSlack }
             .maxWithOrNull(compareBy<Boundary> { it.point }.thenBy { it.anchor.depth }.thenBy { it.anchor.tocIndex })
             ?: return fallback()
         // Several subsection headings can share a rendered page. Preserve an explicit Contents

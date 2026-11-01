@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Rect
 import android.os.SystemClock
-import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -201,17 +200,18 @@ class NativeReaderTest {
         assertEquals("Forward edge advances exactly one page", pageWidth, (afterForwardTap - afterSwipe) * sign, 2.0)
         tapViewport(backwardEdge, 0.60f)
         waitFor("opposite edge returns in book direction") { (afterForwardTap - pageOffset()) * sign > 50 }
-        assertEquals("Backward edge returns exactly one page", afterSwipe, settledPageOffset(), 2.0)
+        val afterBackwardTap = settledPageOffset()
+        assertEquals("Backward edge returns exactly one page", afterSwipe, afterBackwardTap, 2.0)
 
         main { reader.controlsVisible = true }
         tapViewport(forwardEdge, 0.60f)
         SystemClock.sleep(400)
-        assertEquals("Visible controls still suppress edge turns", afterSwipe, pageOffset(), 1.0)
+        assertEquals("Visible controls still suppress edge turns", afterBackwardTap, settledPageOffset(), 1.0)
         main { reader.controlsVisible = false }
         assertEquals("true", js("(function(){var r=document.createRange();r.selectNodeContents(document.getElementById('paragraph-0'));var s=window.getSelection();s.removeAllRanges();s.addRange(r);return !s.isCollapsed;})()"))
         tapViewport(forwardEdge, 0.60f)
         SystemClock.sleep(400)
-        assertEquals("Dismissing a selection must not turn an RTL or LTR page", afterSwipe, pageOffset(), 1.0)
+        assertEquals("Dismissing a selection must not turn an RTL or LTR page", afterBackwardTap, settledPageOffset(), 1.0)
 
         // Check spine transitions as well as scrolling within the long resource.
         js("window.getSelection().removeAllRanges(); readium.scrollToEnd(); true")
@@ -536,20 +536,13 @@ class NativeReaderTest {
      */
     private fun swipeViewport(start: Float, end: Float, y: Float) {
         val frame = webViewFrame()
-        val down = SystemClock.uptimeMillis()
         val height = frame.top + frame.height() * y
-        send(down, down, MotionEvent.ACTION_DOWN, frame.left + frame.width() * start, height)
-        for (step in 1..12) {
-            SystemClock.sleep(20)
-            send(down, SystemClock.uptimeMillis(), MotionEvent.ACTION_MOVE,
-                frame.left + frame.width() * (start + (end - start) * step / 12), height)
-        }
-        send(down, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, frame.left + frame.width() * end, height)
-        instrumentation.waitForIdleSync()
+        instrumentation.injectCalibratedNativeFling(frame.left + frame.width() * start,
+            frame.left + frame.width() * end, height)
     }
 
     private fun send(down: Long, time: Long, action: Int, x: Float, y: Float) {
-        MotionEvent.obtain(down, time, action, x, y, 0).apply { source = InputDevice.SOURCE_TOUCHSCREEN }
+        qaFingerEvent(down, time, action, x, y)
             .also { instrumentation.sendPointerSync(it); it.recycle() }
     }
 }

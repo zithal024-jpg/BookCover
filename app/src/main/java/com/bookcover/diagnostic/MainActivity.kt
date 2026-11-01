@@ -2,6 +2,9 @@ package com.bookcover.diagnostic
 
 import android.os.Bundle
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.content.res.Configuration
 import android.view.WindowManager
 import androidx.activity.compose.setContent
@@ -25,6 +28,10 @@ import com.bookcover.diagnostic.cover.ExteriorCoverController
 import com.bookcover.diagnostic.library.*
 import com.bookcover.diagnostic.reader.EpubReaderScreen
 import com.bookcover.diagnostic.reader.EpubSession
+import com.bookcover.diagnostic.reader.InnerScreenAwake
+import com.bookcover.diagnostic.reader.InnerScreenIdle
+import com.bookcover.diagnostic.reader.INNER_SCREEN_IDLE_KEY
+import com.bookcover.diagnostic.reader.innerScreenIdle
 import com.bookcover.diagnostic.reader.PdfSession
 import com.bookcover.diagnostic.reader.PdfReaderScreen
 import com.bookcover.diagnostic.reader.readerBackground
@@ -70,6 +77,10 @@ open class MainActivity : FragmentActivity() {
     private val preferences by lazy { getSharedPreferences("reader", 0) }
     private var restoredCover: Pair<Boolean, Long>? = null
     private var restoredReaderLocator: String? = null
+    private var screenIdle by mutableStateOf(InnerScreenIdle.DEFAULT)
+    private val screenAwake by lazy { InnerScreenAwake(screenIdle) }
+    private val awakeHandler = Handler(Looper.getMainLooper())
+    private var awakeCheck: Runnable? = null
 
     // BC-27: one or many books; progress, Stop and the final summary while they import one at a time.
     private var importProgress by mutableStateOf<ImportProgress?>(null)
@@ -119,7 +130,7 @@ open class MainActivity : FragmentActivity() {
         coverBookId = savedInstanceState?.getString("pendingCoverBook")
         showRelicCabinet = savedInstanceState?.getBoolean("relicCabinet", false) ?: false
         savedInstanceState?.getBundle("documentPickerResults")?.let(activityResultRegistry::onRestoreInstanceState)
-        installReadingKeyHandler(pdfReader = { pdfSession }) { session }
+        installReadingKeyHandler(pdfReader = { pdfSession }, onInput = ::readerInput) { session }
         DiagnosticLog.init(this)
         library = BookLibrary.forApp(this)
         relicTesting = RelicTestAccess(this)
@@ -133,10 +144,14 @@ open class MainActivity : FragmentActivity() {
         autoCover = preferences.getBoolean("autoCover", true)
         timer = preferences.getInt("coverTimer", 30).takeIf { it in listOf(0, 30, 60) } ?: 30
         libraryTheme = savedLibraryTheme(preferences.getString("libraryTheme", null))
+        screenIdle = preferences.innerScreenIdle()
         WindowCompat.setDecorFitsSystemWindows(window, false)
         reopeningBookId = savedInstanceState?.getString("openBook")
         restoredReaderLocator = savedInstanceState?.getString("openLocator").takeIf { reopeningBookId != null }
-        if (reopeningBookId != null) setReadingWindow(true)
+        if (reopeningBookId != null) {
+            setReadingWindow(true)
+            applyAwake(screenAwake.restored(savedInstanceState?.getLong("screenLastInput", -1L)?.takeIf { it >= 0 }, SystemClock.elapsedRealtime()))
+        }
         setContent {
             val books by library.books.collectAsState()
             val relicCollection by library.relics.collection.collectAsState()
@@ -255,7 +270,7 @@ open class MainActivity : FragmentActivity() {
                         message = "Bookmark saved. Open Contents to return to it."
                     }
                     }, onRemoveBookmark = { value -> work(ReaderAction.BOOKMARK) { library.removeBookmark(current.book.id, value) } },
-                    libraryTheme = libraryTheme, coverSeed = seed)
+                    libraryTheme = libraryTheme, coverSeed = seed, screenIdle = screenIdle, onScreenIdle = ::chooseScreenIdle)
                 importSummary?.let { ImportSummaryDialog(it, onDismiss = { importSummary = null }) }
                 if (showRelicCabinet && relicsLoaded) {
                     if (relicError != null) AlertDialog(onDismissRequest = { showRelicCabinet = false },
@@ -415,6 +430,7 @@ open class MainActivity : FragmentActivity() {
                 exterior.artwork = artwork
                 exterior.setAppearance(relicTesting.appearanceFor(library.relics.collection.value, book.id), book.title, book.author)
                 setReadingWindow(true)
+                if (reopeningBookId == null) applyAwake(screenAwake.opened(SystemClock.elapsedRealtime()))
                 if (reopeningBookId != null) operations.publishInitialMessage("Swipe left/right to turn pages. Tap the middle for controls.")
                 else message = "Swipe left/right to turn pages. Tap the middle for controls."
                 DiagnosticLog.record("Opened local EPUB in host activity; metadata omitted")
@@ -445,6 +461,7 @@ open class MainActivity : FragmentActivity() {
                 exterior.artwork = artwork
                 exterior.setAppearance(relicTesting.appearanceFor(library.relics.collection.value, book.id), book.title, book.author)
                 setReadingWindow(true)
+                if (reopeningBookId == null) applyAwake(screenAwake.opened(SystemClock.elapsedRealtime()))
                 message = "Swipe to turn PDF pages."
                 val previousCover = restoredCover
                 restoredCover = null
@@ -462,9 +479,42 @@ open class MainActivity : FragmentActivity() {
         message = "Your reading position is saved."
     }
 
+    private fun chooseScreenIdle(choice: InnerScreenIdle) {
+        screenIdle = choice
+        preferences.edit().putString(INNER_SCREEN_IDLE_KEY, choice.id).apply()
+        applyAwake(screenAwake.choose(choice, SystemClock.elapsedRealtime()))
+    }
+
+    /**
+     * Holds or releases only this window's screen-on request. It never locks the phone or changes the
+     * system timeout, and replaces any earlier scheduled check so a stale one cannot extend the deadline.
+     */
+    private fun applyAwake(decision: InnerScreenAwake.Decision?) {
+        decision ?: return
+        awakeCheck?.let(awakeHandler::removeCallbacks); awakeCheck = null
+        val flag = WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        // Unchanged flags are skipped: each change relayouts the window, and touches arrive often.
+        if ((window.attributes.flags and flag != 0) != decision.keepScreenOn) {
+            if (decision.keepScreenOn) window.addFlags(flag) else window.clearFlags(flag)
+        }
+        decision.checkAfterMillis?.let { delay ->
+            awakeCheck = Runnable { applyAwake(screenAwake.check(decision.token, SystemClock.elapsedRealtime())) }
+                .also { awakeHandler.postDelayed(it, delay) }
+        }
+    }
+
+    /** Touch-downs and keys dispatched to this window, including consumed page keys; never consumes them. */
+    private fun readerInput() = applyAwake(screenAwake.input(SystemClock.elapsedRealtime()))
+
+    // Hooks for the BC-22 lifecycle tests in the QA app.
+    internal val screenAwakeForTests: InnerScreenAwake get() = screenAwake
+    internal val keepsScreenOnForTests: Boolean
+        get() = window.attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0
+    internal fun checkScreenAwakeForTests(now: Long) = applyAwake(screenAwake.check(screenAwake.token, now))
+    internal fun chooseScreenIdleForTests(choice: InnerScreenIdle) = chooseScreenIdle(choice)
+
     private fun setReadingWindow(reading: Boolean) {
-        if (reading) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        if (!reading) applyAwake(screenAwake.closed(SystemClock.elapsedRealtime()))
         WindowInsetsControllerCompat(window, window.decorView).apply {
             if (reading) hide(WindowInsetsCompat.Type.systemBars()) else show(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -505,6 +555,7 @@ open class MainActivity : FragmentActivity() {
         outState.putString("openLocator", session?.restorationLocator?.toJSON()?.toString() ?: pdfSession?.restorationLocator?.toJSON()?.toString() ?: restoredReaderLocator)
         outState.putBoolean("coverRequested", exterior.requested)
         outState.putLong("coverDeadline", exterior.deadline)
+        outState.putLong("screenLastInput", screenAwake.lastInput ?: -1L)
         session?.flushPosition()
         pdfSession?.flushPosition()
         super.onSaveInstanceState(outState)
@@ -524,6 +575,7 @@ open class MainActivity : FragmentActivity() {
         exterior.hostResumed()
         previewResumeVersion++
         lifecycleScope.launch(Dispatchers.IO) { relicTesting.refresh() }
+        applyAwake(screenAwake.resumed(SystemClock.elapsedRealtime()))
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -540,6 +592,11 @@ open class MainActivity : FragmentActivity() {
         }
     }
 
+    override fun onPause() {
+        applyAwake(screenAwake.paused(SystemClock.elapsedRealtime()))
+        super.onPause()
+    }
+
     override fun onStop() {
         exterior.hostStopped()
         // Android may end the process while the app is in the background; save the position first.
@@ -549,6 +606,7 @@ open class MainActivity : FragmentActivity() {
     }
 
     override fun onDestroy() {
+        awakeCheck?.let(awakeHandler::removeCallbacks); awakeCheck = null
         exterior.close()
         session?.close()
         pdfSession?.close()

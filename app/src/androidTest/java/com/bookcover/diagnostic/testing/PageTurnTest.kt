@@ -8,8 +8,9 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.SystemClock
 import android.util.Log
-import android.view.InputDevice
 import android.view.MotionEvent
+import android.view.VelocityTracker
+import android.view.Window
 import android.view.View
 import android.view.ViewGroup
 import android.view.accessibility.AccessibilityNodeInfo
@@ -91,25 +92,43 @@ class PageTurnTest {
         val width = pageWidth()
         val start = settledOffset()
         val mark = turnLines().lastOrNull()
-        var overlaySeen = false
-        val watch = { if (main { reader.pageTurns.overlayVisible }) overlaySeen = true }
-        drag(0.80f, 0.20f, watch = watch)
+        val overlaySeen = java.util.concurrent.atomic.AtomicBoolean(false)
+        val observer = object : Runnable {
+            override fun run() {
+                if (reader.pageTurns.overlayVisible) overlaySeen.set(true)
+                reader.fragment.view?.postOnAnimation(this)
+            }
+        }
+        // Observe each frame without blocking every injected MOVE on a round-trip to the UI thread.
+        // Native Readium requires release velocity; a stalled test gesture is not a finger fling.
+        main { reader.fragment.requireView().postOnAnimation(observer) }
+        try {
+        observeNativeGesture(requireFling = false) { drag(0.80f, 0.20f, hold = true) }
+        assertEquals("A stopped native drag is not a fling", start, settledOffset(), 1.0)
+        observeNativeGesture {
+            val frame = webViewFrame()
+            instrumentation.injectCalibratedNativeFling(frame.left + frame.width() * 0.80f,
+                frame.left + frame.width() * 0.20f, frame.top + frame.height() * 0.60f)
+        }
         val afterSwipe = settledOffset()
         assertEquals("A standard swipe turns exactly one page", width, afterSwipe - start, 2.0)
         main { reader.changeEdgeTaps(true) }
         tapViewport(0.98f, 0.60f)
-        repeat(20) { watch(); SystemClock.sleep(16) }
+        repeat(20) { SystemClock.sleep(16) }
         assertEquals("A standard edge tap turns exactly one page", width, settledOffset() - afterSwipe, 2.0)
         main { reader.changeEdgeTaps(false) }
         click("reader-show-controls")
         click("reader-more")
         scrollTo("reader-previous-page")
         click("reader-previous-page")
-        repeat(20) { watch(); SystemClock.sleep(16) }
+        repeat(20) { SystemClock.sleep(16) }
         assertEquals("Previous page returns exactly one page", afterSwipe, settledOffset(), 2.0)
-        assertFalse("The standard turn never shows the paper overlay", overlaySeen)
+        assertFalse("The standard turn never shows the paper overlay", overlaySeen.get())
         assertTrue("The standard turn never goes through the paper engine: ${linesSince(mark)}", linesSince(mark).isEmpty())
         assertTrue("No reader error was reported during the turns: ${host.reports}", host.reports.isEmpty())
+        } finally {
+            main { reader.fragment.view?.removeCallbacks(observer) }
+        }
     }
 
     @Test fun paperSwipesTurnExactlyOnePageAndShortSwipesCancel() {
@@ -492,33 +511,90 @@ class PageTurnTest {
      * [hold] it takes 240 ms (a fling). With [hold] it moves at a walking pace and then rests for
      * 200 ms before lifting, so the release velocity is about zero and only the distance decides.
      */
-    private fun drag(start: Float, end: Float, hold: Boolean = false, sampler: RevealSamples? = null, watch: (() -> Unit)? = null) {
+    private fun drag(start: Float, end: Float, hold: Boolean = false, sampler: RevealSamples? = null) {
         val frame = webViewFrame()
         val y = frame.top + frame.height() * 0.60f
         fun x(fraction: Float) = frame.left + frame.width() * fraction
         val steps = if (hold) 24 else 12
-        val stepMillis = if (hold) 25L else 20L
+        val stepMillis = if (hold) 25L else 0L
         val down = SystemClock.uptimeMillis()
+        val moveTimes = mutableListOf(down)
         send(down, down, MotionEvent.ACTION_DOWN, x(start), y)
+        // Synchronous delivery already paces these events. Extra sleeps exceeded Android's 40ms
+        // velocity-history window on the emulator. Seed movement below paging slop before a fling.
+        if (!hold) for (fraction in listOf(0.005f, 0.015f, 0.03f)) {
+            send(down, SystemClock.uptimeMillis(), MotionEvent.ACTION_MOVE, x(start + (end - start) * fraction), y)
+        }
         for (step in 1..steps) {
-            SystemClock.sleep(stepMillis)
-            send(down, SystemClock.uptimeMillis(), MotionEvent.ACTION_MOVE, x(start + (end - start) * step / steps), y)
+            if (stepMillis > 0) SystemClock.sleep(stepMillis)
+            val at = SystemClock.uptimeMillis()
+            moveTimes += at
+            send(down, at, MotionEvent.ACTION_MOVE, x(start + (end - start) * step / steps), y)
             sampler?.sample()
-            watch?.invoke()
         }
         if (hold) repeat(5) {
             SystemClock.sleep(40)
             send(down, SystemClock.uptimeMillis(), MotionEvent.ACTION_MOVE, x(end), y)
             sampler?.sample()
         }
-        send(down, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, x(end), y)
+        val up = SystemClock.uptimeMillis()
+        send(down, up, MotionEvent.ACTION_UP, x(end), y)
+        Log.i(TAG, "QA gesture hold=$hold; duration=${up - down}ms; maxMoveGap=${moveTimes.zipWithNext { a, b -> b - a }.maxOrNull()}ms; releaseGap=${up - moveTimes.last()}ms; distance=${abs(x(end) - x(start))}px")
         instrumentation.waitForIdleSync()
-        if (watch != null) repeat(30) { watch(); SystemClock.sleep(16) }
     }
 
     private fun send(down: Long, time: Long, action: Int, x: Float, y: Float) {
-        MotionEvent.obtain(down, time, action, x, y, 0).apply { source = InputDevice.SOURCE_TOUCHSCREEN }
+        qaFingerEvent(down, time, action, x, y)
             .also { instrumentation.sendPointerSync(it); it.recycle() }
+    }
+
+    /** QA only: observe delivered events and Readium state without delaying each injected MOVE. */
+    private fun observeNativeGesture(requireFling: Boolean = true, block: () -> Unit) {
+        val tracker = VelocityTracker.obtain()
+        val original = main { host.window.callback }
+        var events = 0
+        val points = mutableListOf<String>()
+        var detail = "No UP delivered to the reader window"
+        var releaseVelocity = 0f
+        var initialVelocity = 0
+        var threshold = 0f
+        main {
+            host.window.callback = object : Window.Callback by original {
+                override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+                    if (event.actionMasked == MotionEvent.ACTION_DOWN) tracker.clear()
+                    tracker.addMovement(event)
+                    events++
+                    points += "${event.actionMasked}@${event.eventTime}:x=${event.x},history=${event.historySize},pointer=${event.getPointerId(0)},tool=${event.getToolType(0)},source=${event.source}"
+                    if (event.actionMasked == MotionEvent.ACTION_UP) {
+                        tracker.computeCurrentVelocity(1000)
+                        val view = visibleWebView()
+                        fun field(name: String): Any? {
+                            var type: Class<*>? = view.javaClass
+                            while (type != null) {
+                                try { return type.getDeclaredField(name).apply { isAccessible = true }.get(view) }
+                                catch (_: NoSuchFieldException) { type = type.superclass }
+                            }
+                            return "absent"
+                        }
+                        releaseVelocity = tracker.getXVelocity(0)
+                        initialVelocity = (field("mInitialVelocity") as? Number)?.toInt() ?: 0
+                        threshold = 400 * view.resources.displayMetrics.density
+                        detail = "events=$events; deliveredReleaseVx=$releaseVelocity; threshold=$threshold; initial=$initialVelocity; dragging=${field("mIsBeingDragged")}; selecting=${field("isSelecting")}; activePointer=${field("mActivePointerId")}; item=${field("mCurItem")}; focused=${view.hasWindowFocus()}; class=${view.javaClass.name}; points=$points"
+                        val handled = original.dispatchTouchEvent(event)
+                        detail += "; UP handled=$handled; afterUPDragging=${field("mIsBeingDragged")}; targetPage=${field("mCurItem")}"
+                        return handled
+                    }
+                    return original.dispatchTouchEvent(event)
+                }
+            }
+        }
+        try { block() } finally {
+            main { host.window.callback = original }
+            tracker.recycle()
+            Log.i(TAG, "QA native gesture: $detail")
+        }
+        if (requireFling) assertTrue("The delivered QA fling meets Readium's real velocity/sign rule: $detail",
+            abs(releaseVelocity) > threshold && initialVelocity * releaseVelocity > 0)
     }
 
     // ---- Accessibility access to the controls (same approach as ReadingKeysAccessibilityTest) ---

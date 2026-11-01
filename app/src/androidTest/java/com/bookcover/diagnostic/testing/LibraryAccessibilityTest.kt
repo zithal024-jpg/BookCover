@@ -309,7 +309,7 @@ class LibraryAccessibilityTest {
         click("Settings")
         click("About", dialog = true)
         waitFor("About publishes the retained Readium and OpenDyslexic notices") {
-            find("EPUB engine: Readium 3.4.0 · BSD 3-Clause\nOpenDyslexic font by Abelardo Gonzalez · CC BY 3.0, based on Bitstream Vera") != null
+            find("Reading engine: Readium 3.4.0 · BSD 3-Clause\nOpenDyslexic font by Abelardo Gonzalez · CC BY 3.0, based on Bitstream Vera") != null
         }
         assertNull("Diagnostics start hidden", find("Device diagnostics"))
         click("Licences", dialog = true)
@@ -392,7 +392,7 @@ class LibraryAccessibilityTest {
             "Outside cover" -> waitFor("the Outside cover controls render") { find("Outside cover timer") != null }
             "Backup" -> waitFor("the Backup actions render") { find("Save backup") != null }
             "About", "Back to About" -> waitFor("the About controls render") {
-                find("EPUB engine: Readium 3.4.0 · BSD 3-Clause\nOpenDyslexic font by Abelardo Gonzalez · CC BY 3.0, based on Bitstream Vera") != null &&
+                find("Reading engine: Readium 3.4.0 · BSD 3-Clause\nOpenDyslexic font by Abelardo Gonzalez · CC BY 3.0, based on Bitstream Vera") != null &&
                     find("Back to About") == null
             }
             "Licences" -> waitFor("the Licences window receives focus") {

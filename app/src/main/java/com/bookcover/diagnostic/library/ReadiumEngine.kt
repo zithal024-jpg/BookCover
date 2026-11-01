@@ -49,6 +49,7 @@ internal class ReadiumEngine(context: Context) {
         // per-open one twice, so the markup filter is passed here and guarded to be installed once.
         var filtered = false
         val publication = opener.open(asset, allowUserInteraction = false, onCreatePublication = {
+            if (container !is PublicationResources) container = PublicationResources(container)
             if (!isPdf && !filtered) {
                 filtered = true
                 val searchContainer = container
