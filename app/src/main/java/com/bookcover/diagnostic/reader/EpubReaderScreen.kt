@@ -68,6 +68,8 @@ internal fun EpubReaderScreen(
     onRemoveBookmark: (String) -> Unit,
     libraryTheme: String = "automatic",
     coverSeed: Int = DEFAULT_COVER_SEED,
+    screenIdle: InnerScreenIdle = InnerScreenIdle.DEFAULT,
+    onScreenIdle: (InnerScreenIdle) -> Unit = {},
 ) {
     var contentsVisible by remember(session) { mutableStateOf(false) }
     var sheet by remember(session) { mutableStateOf(ReaderSheet.NONE) }
@@ -193,7 +195,7 @@ internal fun EpubReaderScreen(
                                         ReaderSheet.TEXT -> TextSheet(session)
                                         ReaderSheet.COVER -> CoverSheet(coverActive, coverBusy, stopPending, canStartCover,
                                             message.substringAfter('\n', "").trim(), onStartCover, onStopCover, onChooseCover)
-                                        ReaderSheet.MORE -> MoreSheet(session)
+                                        ReaderSheet.MORE -> MoreSheet(session, screenIdle, onScreenIdle)
                                         ReaderSheet.NONE -> Unit
                                     }
                                 }
@@ -385,7 +387,7 @@ private fun CoverSheet(
 /** Page turning options, plus page buttons for anyone who cannot swipe or tap the edges. */
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
-private fun MoreSheet(session: EpubSession) {
+private fun MoreSheet(session: EpubSession, screenIdle: InnerScreenIdle, onScreenIdle: (InnerScreenIdle) -> Unit) {
     SettingsSection("Page turning") {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -414,6 +416,15 @@ private fun MoreSheet(session: EpubSession) {
                 modifier = Modifier.testTag("reader-previous-page").heightIn(min = 48.dp)) { Text("Previous page") }
             TextButton(onClick = { session.next() }, enabled = !session.typographyUpdating,
                 modifier = Modifier.testTag("reader-next-page").heightIn(min = 48.dp)) { Text("Next page") }
+        }
+    }
+    SettingsSection("Screen while reading", showDivider = true,
+        summary = "Stays on this long after your last touch or page turn, then your phone's own timeout applies.") {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            InnerScreenIdle.entries.forEach { choice -> FilterChip(screenIdle == choice, { onScreenIdle(choice) },
+                label = { Text(choice.label) }, modifier = Modifier.heightIn(min = 48.dp).testTag("screen-idle-${choice.id}")
+                    .semantics { contentDescription = if (choice.minutes == null) "Screen while reading: always on"
+                        else "Screen while reading: ${choice.minutes} minutes" }) }
         }
     }
 }

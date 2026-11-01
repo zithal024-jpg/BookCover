@@ -32,7 +32,7 @@ class ImportProcessDeathActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        check(packageName == "com.bookcover.diagnostic.qa")
+        check(packageName == "com.frankrodriguez.bookcover.qa")
         check(Application.getProcessName() == "$packageName:import_recovery")
         val nonce = requireNotNull(intent.getStringExtra(EXTRA_NONCE)).also {
             require(it.matches(Regex("[a-f0-9-]{36}")))

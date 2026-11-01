@@ -28,7 +28,7 @@ class ReaderProcessDeathTest {
     private val manager get() = target.getSystemService(ActivityManager::class.java)
 
     @Test fun backgroundReaderRecoversItsRetainedTaskAfterTwoActualProcessKills() {
-        check(target.packageName == "com.bookcover.diagnostic.qa")
+        check(target.packageName == "com.frankrodriguez.bookcover.qa")
         val nonce = UUID.randomUUID().toString()
         val root = File(target.noBackupFilesDir, "process-recovery-$nonce").apply { mkdirs() }
         val component = ComponentName(target, ProcessRecoveryActivity::class.java)

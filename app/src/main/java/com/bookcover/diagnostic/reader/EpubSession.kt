@@ -131,6 +131,8 @@ internal class EpubSession(
     private val viewportContinuity = ReadingViewportContinuity<Locator>()
     private var viewportJob: Job? = null
     private var restoringViewport = false
+    private val openedLocator = currentLocator
+    private var holdsOpenedPassage = openedLocator != null
     private var viewportSettled: (() -> Unit)? = null
     private val readingLifecycle = object : DefaultLifecycleObserver {
         override fun onPause(owner: LifecycleOwner) { readingPace.hold(SystemClock.elapsedRealtime()); record(readingTime.pause(SystemClock.elapsedRealtime())) }
@@ -147,6 +149,9 @@ internal class EpubSession(
             readingPace.pause()
             chapters.invalidateLayout()
             currentLocator?.let(::refreshChapter)
+            // Hold the reopened semantic passage while late system-bar resizes repaginate it.
+            if (holdsOpenedPassage && !typographyUpdating && oldRight - oldLeft > 0 && oldBottom - oldTop > 0)
+                viewportContinuity.begin(openedLocator)
             if (viewportContinuity.pending != null) restoreViewportWhenSettled()
         }
     }
@@ -181,7 +186,7 @@ internal class EpubSession(
             },
             listener = object : EpubNavigatorFragment.Listener {
                 override fun onJumpToLocator(locator: Locator) {
-                    if (!restoringViewport) {
+                    if (!restoringViewport && !reportIsOpenedPassage(holdsOpenedPassage, locator, openedLocator) { DiagnosticLog.record(it) }) {
                         invalidateViewportAnchor()
                         viewportContinuity.remember(locator, viewportContinuity.generation)
                     }
@@ -273,13 +278,18 @@ internal class EpubSession(
                     val generation = viewportContinuity.generation
                     // Keep the last precise passage during this asynchronous query (including
                     // resume notifications for an unchanged page). Explicit navigation clears it.
-                    val visible = withTimeoutOrNull(1_000) { fragment.visibleReadingAnchor() }
-                        ?: viewportContinuity.anchor ?: locator
-                    val semantic = visible.copy(locations = visible.locations.copy(
-                        totalProgression = locator.locations.totalProgression, position = locator.locations.position))
+                    // The initial locator echo precedes DOM placement; describing that DOM saves the chapter start.
+                    val keepOpened = reportIsOpenedPassage(holdsOpenedPassage, locator, openedLocator)
+                    val screen = if (keepOpened) null else withTimeoutOrNull(1_000) { fragment.visibleReadingAnchor() }
+                    val semantic = passageReportedWhileHolding(
+                        holdsOpenedPassage, locator, openedLocator, screen, viewportContinuity.anchor,
+                    ) { DiagnosticLog.record(it) }
                     viewportContinuity.remember(semantic, generation)
-                    if (generation == viewportContinuity.generation && viewportContinuity.pending == null)
+                    if (generation == viewportContinuity.generation && viewportContinuity.pending == null) {
+                        if (semantic.href != openedLocator?.href || semantic.text.highlight != openedLocator?.text?.highlight)
+                            holdsOpenedPassage = false
                         positions.submit(semantic)
+                    }
                 }
                 refreshChapter(locator)
                 DiagnosticLog.record("EPUB position=${(progress * 100).toInt()}%; same host activity")
@@ -376,6 +386,7 @@ internal class EpubSession(
     }
 
     private fun invalidateViewportAnchor() {
+        holdsOpenedPassage = false
         viewportJob?.cancel()
         viewportContinuity.navigated()
         viewportSettled?.invoke(); viewportSettled = null
@@ -410,7 +421,14 @@ internal class EpubSession(
                 restoringViewport = true
                 val restored = try { fragment.go(anchor, animated = false) } finally { restoringViewport = false }
                 delay(200)
-                viewportContinuity.complete(generation)?.let { positions.submit(it) }
+                viewportContinuity.complete(generation)?.let { held ->
+                    val settled = viewportContinuity.generation
+                    val described = !(held.locations["cssSelector"] as? String).isNullOrBlank() && held.text.highlight != null && held.text.before != null
+                    val refined = if (described) null else withTimeoutOrNull(1_000) { fragment.visibleReadingAnchor() }
+                        ?.let { it.copy(locations = it.locations.copy(totalProgression = held.locations.totalProgression, position = held.locations.position)) }
+                    refined?.let { viewportContinuity.remember(it, settled) }
+                    if (settled == viewportContinuity.generation && viewportContinuity.pending == null) positions.submit(refined ?: held)
+                }
                 currentLocator?.let(::refreshChapter)
                 DiagnosticLog.record("EPUB viewport resized in place; semantic passage restored=$restored")
             } catch (cancelled: CancellationException) { throw cancelled }

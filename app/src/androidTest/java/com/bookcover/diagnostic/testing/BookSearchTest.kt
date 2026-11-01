@@ -17,6 +17,7 @@ import com.bookcover.diagnostic.reader.BookSearchController
 import com.bookcover.diagnostic.reader.BookSearchResult
 import com.bookcover.diagnostic.reader.BookSearchStatus
 import com.bookcover.diagnostic.reader.EpubSession
+import com.bookcover.diagnostic.reader.visibleReadingAnchor
 import java.util.zip.ZipFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -140,8 +141,8 @@ class BookSearchTest {
                 main { (reader.fragment.currentLocator.value.locations.progression ?: 0.0) > 0.0 }
         }
         val (location, offset) = settledReadingLocation()
-        val savedPassage = main { reader.restorationLocator!!.toJSON() }
-        val selector = savedPassage.getJSONObject("locations").getString("cssSelector")
+        val visibleBefore = main { reader.fragment.visibleReadingAnchor() } ?: error("No visible passage before search")
+        val selector = visibleBefore.locations["cssSelector"] as? String ?: error("No visible block before search")
         main { reader.flushPosition(); reader.openSearch() }
         timedQuery(SearchEpubFixture.LATE_PHRASE)
         val discarded = results().single()
@@ -158,17 +159,20 @@ class BookSearchTest {
         val original = JSONObject(location)
         val dismissed = JSONObject(dismissedLocation.first)
         assertEquals("Closing search stays in the same resource", original.getString("href"), dismissed.getString("href"))
-        // WebView can round the same page's fractional progression when the IME changes height.
-        assertEquals("Closing search keeps the same reading point", original.getJSONObject("locations").getDouble("progression"),
-            dismissed.getJSONObject("locations").getDouble("progression"), 0.0001)
+        // Readium's raw fraction can retain the IME's column count. Verify the actual visible
+        // page and unique quote, then require that exact quote in saved state instead.
         assertEquals("Closing search with the keyboard open leaves the visible page unchanged", offset, dismissedLocation.second, 1.0)
+        val visibleAfter = main { reader.fragment.visibleReadingAnchor() } ?: error("No visible passage after search")
+        assertEquals("Closing search keeps the visible block", visibleBefore.locations["cssSelector"], visibleAfter.locations["cssSelector"])
+        assertEquals("Closing search keeps the visible quote", visibleBefore.text.highlight, visibleAfter.text.highlight)
+        Log.i("BookSearchTest", "BC29 keyboard dismissal: raw progression=${original.getJSONObject("locations").getDouble("progression")}/${dismissed.getJSONObject("locations").getDouble("progression")}; exact offset=$offset/${dismissedLocation.second}; visible selector and quote match")
         assertFalse("A discarded result cannot navigate after dismissal", main { reader.goToSearchResult(discarded) })
         waitFor("the original position saves normally") {
             main { host.library.book(reader.book.id)?.locator }?.let { value ->
                 val saved = JSONObject(value)
                 saved.getString("href") == original.getString("href") &&
                     saved.getJSONObject("locations").optString("cssSelector") == selector &&
-                    saved.getJSONObject("text").optString("highlight").isNotBlank()
+                    saved.getJSONObject("text").optString("highlight") == visibleBefore.text.highlight
             } == true
         }
         main { reader.openSearch() }

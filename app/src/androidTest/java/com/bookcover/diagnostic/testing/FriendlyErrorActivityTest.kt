@@ -44,7 +44,7 @@ class FriendlyErrorActivityTest {
     private var scenario: ActivityScenario<MainActivity>? = null
 
     @Before fun prepareGeneratedQaLibrary() = runBlocking {
-        check(target.packageName == "com.bookcover.diagnostic.qa") { "Only disposable isolated QA data may be changed." }
+        check(target.packageName == "com.frankrodriguez.bookcover.qa") { "Only disposable isolated QA data may be changed." }
         folder.listFiles()?.forEach { it.deleteRecursively() }
         target.getSharedPreferences("reader", Context.MODE_PRIVATE).edit().clear()
             .putBoolean("samplesInstalled", true).putBoolean("autoCover", false).commit()

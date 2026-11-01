@@ -30,7 +30,7 @@ class BookLibraryBackupSafetyTest {
         locator = "{\"href\":\"chapter-2.xhtml\"}", bookmarks = listOf("{\"href\":\"chapter-1.xhtml#saved\"}"))
 
     @Before fun setUp() {
-        check(target.packageName == "com.bookcover.diagnostic.qa") { "Backup safety tests require the isolated QA app." }
+        check(target.packageName == "com.frankrodriguez.bookcover.qa") { "Backup safety tests require the isolated QA app." }
         directory = File(target.noBackupFilesDir, "backup-safety-${UUID.randomUUID()}").apply { mkdirs() }
         context = object : ContextWrapper(target) { override fun getFilesDir(): File = directory }
     }

@@ -32,7 +32,7 @@ class BackupPickerRecreationTest {
     private lateinit var image: File
 
     @Before fun prepareQaOnly() {
-        check(target.packageName == "com.bookcover.diagnostic.qa")
+        check(target.packageName == "com.frankrodriguez.bookcover.qa")
         val folder = File(target.filesDir, "library").apply { mkdirs() }
         folder.listFiles()?.forEach { it.deleteRecursively() }
         LibraryIndex(folder).apply { load(); save(listOf(first, second)) }

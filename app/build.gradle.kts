@@ -7,7 +7,7 @@ android {
     namespace = "com.bookcover.diagnostic"
     compileSdk = 37
     defaultConfig {
-        applicationId = "com.bookcover.diagnostic"
+        applicationId = "com.frankrodriguez.bookcover"
         minSdk = 30
         targetSdk = 35
         versionCode = 6

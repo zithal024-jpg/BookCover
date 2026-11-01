@@ -46,7 +46,7 @@ class ProcessRecoveryActivity : MainActivity() {
         super.getSharedPreferences(if (name == "reader") "reader-process-recovery-$nonce" else name, mode)
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        check(packageName == "com.bookcover.diagnostic.qa")
+        check(packageName == "com.frankrodriguez.bookcover.qa")
         check(android.app.Application.getProcessName() == "$packageName:process_recovery")
         if (!webDataConfigured) {
             WebView.setDataDirectorySuffix("process-recovery")

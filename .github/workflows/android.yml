@@ -67,7 +67,7 @@ jobs:
           import sys
           import xml.etree.ElementTree as ET
           manifest = ET.parse(sys.argv[1]).getroot()
-          expected_target = 'com.bookcover.diagnostic.qa'
+          expected_target = 'com.frankrodriguez.bookcover.qa'
           if manifest.get('package') != expected_target + '.test':
               raise SystemExit('The test APK has an unexpected application ID.')
           instrumentation = manifest.findall('instrumentation')

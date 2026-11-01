@@ -3,14 +3,21 @@ package com.bookcover.diagnostic.reader
 import android.app.Activity
 import android.view.ActionMode
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.Window
 
 /** Observe hardware keys before focused WebViews, while preserving the window's normal dispatch. */
-internal fun Activity.installReadingKeyHandler(pdfReader: () -> PdfSession? = { null }, reader: () -> EpubSession?) {
+internal fun Activity.installReadingKeyHandler(pdfReader: () -> PdfSession? = { null }, onInput: () -> Unit = {}, reader: () -> EpubSession?) {
     val original = window.callback
     window.callback = object : Window.Callback by original {
-        override fun dispatchKeyEvent(event: KeyEvent): Boolean =
-            reader()?.dispatchKeyEvent(event) == true || pdfReader()?.dispatchKeyEvent(event) == true || original.dispatchKeyEvent(event)
+        override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+            onInput()
+            return reader()?.dispatchKeyEvent(event) == true || pdfReader()?.dispatchKeyEvent(event) == true || original.dispatchKeyEvent(event)
+        }
+        override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) onInput()
+            return original.dispatchTouchEvent(event)
+        }
         // PT-1: swipes during text selection stay with Chromium's selection handles.
         override fun onActionModeStarted(mode: ActionMode) {
             reader()?.actionModeChanged(true)

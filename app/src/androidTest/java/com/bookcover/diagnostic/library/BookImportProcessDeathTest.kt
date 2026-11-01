@@ -37,7 +37,7 @@ class BookImportProcessDeathTest {
     private val component get() = ComponentName(target, ImportProcessDeathActivity::class.java)
 
     @Test fun killedRealImportRecoversWithoutChangingExistingBooksAndLaterCommittedImportSurvivesDeath() = runBlocking<Unit> {
-        check(target.packageName == "com.bookcover.diagnostic.qa")
+        check(target.packageName == "com.frankrodriguez.bookcover.qa")
         val nonce = UUID.randomUUID().toString()
         val root = File(target.noBackupFilesDir, "import-process-death-$nonce").apply { check(mkdir()) }
         val folder = File(root, "library")
