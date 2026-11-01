@@ -52,6 +52,42 @@ class RelicCoverGeometryTest {
         }
     }
 
+    @Test fun narrowOutsideDisplayFramesTheBookWithVisibleRailsInsteadOfTheScreenExtremes() {
+        for ((w, h) in listOf(1080 to 2520, 360 to 880, 720 to 1680)) {
+            for (tier in MoonlitTier.entries.filter { it.ordinal >= MoonlitTier.RARE.ordinal }) {
+                for (plate in RelicBookplate.entries) {
+                    val result = relicCoverLayout(w, h, 600, 900, RelicAppearance(enabled = true,
+                        mode = RelicMode.MARGIN, edgeTier = tier, bookplate = plate, seal = tier))
+                    contained(result.frame, result.viewport)
+                    contained(result.image, result.frame)
+                    contained(result.seal, result.frame)
+                    assertEquals(2f / 3f, result.image.width / result.image.height, .001f)
+                    assertTrue("Left rail needs visible space beside the original art", result.image.left - result.frame.left >= w * .05f)
+                    assertTrue("Right rail needs visible space beside the original art", result.frame.right - result.image.right >= w * .05f)
+                    assertTrue("Corners belong near the book, not at the tall screen's top", result.image.top - result.frame.top <= w * .10f)
+                    assertTrue("The frame remains a book-shaped composition", result.frame.height < result.frame.width * 1.9f)
+                    assertTrue("Top decorations stay inside the safe viewport", result.frame.top > w * .045f)
+                    assertTrue("Bottom decorations stay inside the safe viewport", result.frame.bottom < h - w * .045f)
+                }
+            }
+        }
+    }
+
+    @Test fun unusualArtAspectDoesNotCollapseTheMarginFrameOrBookplate() {
+        for ((iw, ih) in listOf(1 to 100_000, 100_000 to 1, 900 to 600)) {
+            val result = relicCoverLayout(360, 880, iw, ih, RelicAppearance(enabled = true,
+                mode = RelicMode.MARGIN, edgeTier = MoonlitTier.MYTHIC,
+                bookplate = RelicBookplate.PRESTIGE, seal = MoonlitTier.MYTHIC))
+            contained(result.frame, result.viewport)
+            contained(result.image, result.frame)
+            assertTrue("Extreme artwork must not shrink the ornaments to a hairline", result.frame.width > 360 * .7f)
+            assertTrue(result.frame.height > 360 * .7f)
+            assertTrue(result.plate!!.height > 360 * .1f)
+            assertTrue(result.seal.width > 360 * .03f)
+            assertTrue(result.seal.right < result.image.left)
+        }
+    }
+
     @Test fun motionNeedsEverySessionAndAccessibilityGate() {
         val mythic = RelicAppearance(enabled = true, edgeTier = MoonlitTier.MYTHIC, motion = true)
         fun allowed(a: RelicAppearance = mythic, attached: Boolean = true, visible: Boolean = true,

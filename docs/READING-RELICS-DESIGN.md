@@ -190,7 +190,14 @@ Moonlit Archive uses the six names and thresholds above, Bookplate at 1 hour, Ra
 
 1. Open **Relic cabinet** below Reading Streak in the library, or from Settings → Outside cover.
 2. Preview a tier, then choose global default or a book. Choose layout, color treatment, edges, Bookplate, seal and optional Mythic motion.
-3. Tap **Save appearance**. Locked pieces can be previewed but cannot be saved. A per-book appearance can be reset to the global default.
+3. Changes preview live on the outside screen while the cabinet is open. Keep the phone unfolded and accept Android's display prompt if offered. If the display is unavailable, the cabinet shows its status and **Start outside preview** lets you retry.
+4. Tap **Save appearance** to retain a choice, or **Done** to discard the draft. Locked pieces can be previewed but cannot normally be saved. A per-book appearance can be reset to the global default. Closing the cabinet ends its temporary outside preview, restoring an existing reader cover with its original deadline when applicable.
+
+### Temporary owner testing
+
+The debug/QA cabinet offers **Unlock all tiers for 24 hours**, including animated Mythic edges on the actual outside display. Testing uses a separate local appearance profile: reading time, genuine collected rewards, permanent appearance choices and library backups stay unchanged. **Save appearance** during testing saves to that temporary profile. **End testing**, or expiry after 24 hours, restores the genuine profile. Reopening the cabinet does not extend the window. The owner-requested install can explicitly enable this mode and open the cabinet.
+
+The inner preview follows the outside display's proportions, with a narrow portrait fallback when no exterior metrics exist. Margin and standalone layouts fit a centered book-shaped composition, keeping the side rails and corners close to the book instead of the tall screen's extremes. The original cover remains fully fitted in margin mode. The outer view respects display cutouts and system-bar insets, and Mythic's moving trace has a thin contrasting keyline to remain visible over mixed cover colors.
 
 Remaining design work covers the other two sets. Physical exterior appearance, performance and battery use need owner observation of this new implementation; earlier owner confirmation of PDF outside-cover display remains separate.
 
@@ -226,4 +233,4 @@ Native motion evidence recorded system animations enabled, phase advancing from 
 Task: `moonlit-f44b4cc347ee7e18`. Source snapshot: `bb597ebb8162185d74e816e93f508e4eb68b73bb20e1a1432f434bbbefeab821`. Combined source-bound evidence under `%LOCALAPPDATA%\BookCoverBuild\tasks\moonlit-f44b4cc347ee7e18\evidence\`:
 `bb597ebb8162185d74e816e93f508e4eb68b73bb20e1a1432f434bbbefeab821-a82e9cf14f8348d2900c4c9c039bf4f9.json`.
 
-APK: `BookCover-moonlit-f44b4cc347ee7e18.apk`; SHA-256 `47ab645728f82c229b9b0c68d33e2f0cdb1f5602bab9385490849c49259b47dd`. The generated APK, receipts and screenshots remain outside Git. No owner-phone installation or physical confirmation of this new treatment is established. Exterior appearance, performance and battery use still require owner observation; previous PDF outside-display confirmation remains recorded separately.
+Initial APK: `BookCover-moonlit-f44b4cc347ee7e18.apk`; SHA-256 `47ab645728f82c229b9b0c68d33e2f0cdb1f5602bab9385490849c49259b47dd`. Installed in place on the owner's phone on 2026-11-01 at their request; installed APK readback matched and the original installation time was unchanged. The generated APK, receipts and screenshots remain outside Git. Exterior appearance, performance and battery use still require owner observation; previous PDF outside-display confirmation remains recorded separately. The testing/live-preview follow-up has its separate validation record in the active backlog.

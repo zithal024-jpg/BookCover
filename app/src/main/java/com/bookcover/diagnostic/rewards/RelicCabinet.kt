@@ -70,9 +70,20 @@ internal fun RelicCabinet(
     onSeen: () -> Unit,
     onDismiss: () -> Unit,
     busy: Boolean = false,
+    availableTiers: Set<MoonlitTier> = collection.unlocked,
+    testingActive: Boolean = false,
+    testingExpiryLabel: String? = null,
+    onStartTesting: (() -> Unit)? = null,
+    onEndTesting: (() -> Unit)? = null,
+    outsidePreviewStatus: String? = null,
+    onRetryOutsidePreview: (() -> Unit)? = null,
+    outsideAspectRatio: Float = .41f,
+    onPreview: (String?, RelicAppearance) -> Unit = { _, _ -> },
+    onPreviewClosed: () -> Unit = {},
 ) {
     var targetId by remember { mutableStateOf<String?>(null) }
-    var draft by remember(targetId) { mutableStateOf(collection.appearanceFor(targetId)) }
+    var draft by remember(targetId, testingActive) { mutableStateOf(
+        (targetId?.let(collection.bookAppearances::get) ?: collection.defaultAppearance).permitted(availableTiers)) }
     var selectedTier by remember { mutableStateOf(collection.unlocked.maxByOrNull { it.ordinal } ?: MoonlitTier.COMMON) }
     var customHex by remember(targetId, draft.customAccent) {
         mutableStateOf(String.format(Locale.ROOT, "#%06X", draft.customAccent and 0xFFFFFF))
@@ -91,20 +102,25 @@ internal fun RelicCabinet(
             }
         }
     }
-    val lockedChoices = remember(draft, collection.unlocked) { appearanceHasLockedChoices(draft, collection.unlocked) }
+    val lockedChoices = remember(draft, availableTiers) { appearanceHasLockedChoices(draft, availableTiers) }
     val validCustom = draft.colorMode != RelicColorMode.CUSTOM || customHex.matches(Regex("#[0-9a-fA-F]{6}"))
     val canSave = !busy && !missingTarget && !lockedChoices && validCustom
     val previewAppearance = if (artwork == null) draft.copy(mode = RelicMode.STANDALONE) else draft
     val previewTitle = previewBook?.title ?: "The Lantern Keeper"
     val previewAuthor = previewBook?.author ?: "BookCover sample"
     val scheme = MaterialTheme.colorScheme
+    val previewAspectRatio = outsideAspectRatio.takeIf { it.isFinite() && it in .15f..3f } ?: .41f
+    val currentPreview by rememberUpdatedState(onPreview)
+    val currentPreviewClosed by rememberUpdatedState(onPreviewClosed)
+    LaunchedEffect(targetId, draft, previewBook?.id, previewBook?.coverRevision) { currentPreview(targetId, draft) }
+    DisposableEffect(Unit) { onDispose { currentPreviewClosed() } }
 
     Dialog(onDismissRequest = { if (!busy) onDismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }, color = scheme.background) {
             BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding()) {
                 // The preview must fit short unfolded windows as well as portrait phones. This is
                 // the finite dialog height, rather than the unbounded height of the scrolling column.
-                val previewWidth = minOf(300.dp, maxHeight * .48f)
+                val previewWidth = minOf(300.dp, maxHeight * .72f * previewAspectRatio)
                 Column(Modifier.align(Alignment.TopCenter).widthIn(max = 840.dp).fillMaxSize()
                     .imePadding().verticalScroll(rememberScrollState()).padding(16.dp).testTag("relic-cabinet-scroll"),
                     verticalArrangement = Arrangement.spacedBy(20.dp)) {
@@ -126,6 +142,25 @@ internal fun RelicCabinet(
                     Text("${relicReadingTime(collection.totalMillis)} credited across EPUB and PDF reading. Collected relics stay yours.",
                         style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant)
 
+                    if (testingActive || onStartTesting != null) SettingsSection("Testing access") {
+                        if (testingActive) {
+                            Text("All Moonlit Archive tiers are available for testing. Your reading time and collected rewards are unchanged.",
+                                modifier = Modifier.testTag("relic-testing-active"), style = MaterialTheme.typography.bodyMedium)
+                            testingExpiryLabel?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant) }
+                            Text("Test appearances are temporary. Your earned settings return when testing ends.",
+                                style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+                            onEndTesting?.let { end ->
+                                OutlinedButton(onClick = end, enabled = !busy,
+                                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("relic-testing-end")) { Text("End testing") }
+                            }
+                        } else onStartTesting?.let { start ->
+                            Text("Try every tier on the outside screen for 24 hours without changing your reading progress or earned rewards.",
+                                style = MaterialTheme.typography.bodyMedium)
+                            OutlinedButton(onClick = start, enabled = !busy,
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("relic-testing-start")) { Text("Unlock all tiers for 24 hours") }
+                        }
+                    }
+
                     BoxWithConstraints(Modifier.fillMaxWidth()) {
                         val fontScale = LocalDensity.current.fontScale
                         val columns = when {
@@ -137,10 +172,10 @@ internal fun RelicCabinet(
                             MoonlitTier.entries.chunked(columns).forEach { row ->
                                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                                     row.forEach { tier ->
-                                        RelicTile(tier, tier in collection.unlocked, selectedTier == tier, !busy,
+                                        RelicTile(tier, tier in collection.unlocked, tier in availableTiers, selectedTier == tier, !busy,
                                             Modifier.weight(1f)) {
                                             selectedTier = tier
-                                            // This is a draft preview only. Save remains gated by earned pieces.
+                                            // This is a draft. Saving requires earned pieces or temporary testing access.
                                             draft = appearanceAtTier(draft, tier)
                                         }
                                     }
@@ -150,11 +185,11 @@ internal fun RelicCabinet(
                         }
                     }
 
-                    SelectedRelic(selectedTier, collection)
+                    SelectedRelic(selectedTier, collection, availableTiers)
 
-                    SettingsSection("Outside cover preview", summary = "Changes are applied only when you tap Save appearance.") {
+                    SettingsSection("Outside cover preview", summary = "Changes preview live on the outside screen when available. Save appearance keeps your selection.") {
                         Box(Modifier.align(Alignment.CenterHorizontally).widthIn(max = previewWidth).fillMaxWidth()
-                            .aspectRatio(2f / 3f).testTag("relic-cover-preview")
+                            .aspectRatio(previewAspectRatio).testTag("relic-cover-preview")
                             .semantics {
                                 contentDescription = listOf("Outside cover appearance preview", previewTitle, previewAuthor)
                                     .filter { it.isNotBlank() }.joinToString(". ")
@@ -172,6 +207,12 @@ internal fun RelicCabinet(
                         }
                         if (artwork == null) Text("A standalone cover is shown until book artwork is available.",
                             style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+                        outsidePreviewStatus?.let { status -> Text(status, style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.testTag("relic-outside-preview-status").semantics { liveRegion = LiveRegionMode.Polite }) }
+                        onRetryOutsidePreview?.let { retry ->
+                            OutlinedButton(onClick = retry, enabled = !busy,
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("relic-outside-preview-retry")) { Text("Start outside preview") }
+                        }
                         if (lockedChoices) Text("Preview only: one or more selected pieces are locked. Keep reading to unlock them, or choose collected pieces to save.",
                             style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("relic-locked-preview"))
                     }
@@ -216,12 +257,20 @@ internal fun RelicCabinet(
                             modifier = Modifier.fillMaxWidth().testTag("relic-custom-color"))
                         CabinetChoice("Cover Edges", draft.edgeTier,
                             listOf(null to "None") + MoonlitTier.entries.filter { it.ordinal >= MoonlitTier.RARE.ordinal }
-                                .map { it to relicChoiceLabel(it, collection.unlocked) },
+                                .map { it to relicChoiceLabel(it, collection.unlocked, availableTiers) },
                             !busy, "relic-edges") { draft = draft.copy(edgeTier = it) }
                         CabinetChoice("Bookplate", draft.bookplate, listOf(
                             RelicBookplate.NONE to "None",
-                            RelicBookplate.STANDARD to if (MoonlitTier.UNCOMMON in collection.unlocked) "Standard · collected" else "Standard · locked until 1 hour",
-                            RelicBookplate.PRESTIGE to if (MoonlitTier.MYTHIC in collection.unlocked) "Prestige · collected" else "Prestige · locked until 100 hours"),
+                            RelicBookplate.STANDARD to when {
+                                MoonlitTier.UNCOMMON in collection.unlocked -> "Standard · collected"
+                                MoonlitTier.UNCOMMON in availableTiers -> "Standard · available for testing"
+                                else -> "Standard · locked until 1 hour"
+                            },
+                            RelicBookplate.PRESTIGE to when {
+                                MoonlitTier.MYTHIC in collection.unlocked -> "Prestige · collected"
+                                MoonlitTier.MYTHIC in availableTiers -> "Prestige · available for testing"
+                                else -> "Prestige · locked until 100 hours"
+                            }),
                             !busy, "relic-bookplate") { draft = draft.copy(bookplate = it) }
                         if (draft.bookplate != RelicBookplate.NONE) OutlinedTextField(
                             value = draft.inscription, onValueChange = { draft = draft.copy(inscription = it.take(80)) },
@@ -229,7 +278,7 @@ internal fun RelicCabinet(
                             supportingText = { Text("Shown on the outside cover. Leave blank for My library.") },
                             enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("relic-inscription"))
                         CabinetChoice("Relic seal", draft.seal,
-                            listOf(null to "None") + MoonlitTier.entries.map { it to relicChoiceLabel(it, collection.unlocked) },
+                            listOf(null to "None") + MoonlitTier.entries.map { it to relicChoiceLabel(it, collection.unlocked, availableTiers) },
                             !busy, "relic-seal") { draft = draft.copy(seal = it) }
                         SettingsSwitchRow("Animate Mythic edges", draft.motion, { draft = draft.copy(motion = it) }, enabled = !busy,
                             modifier = Modifier.testTag("relic-motion"),
@@ -237,11 +286,12 @@ internal fun RelicCabinet(
                     }
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { if (canSave) onSave(targetId, draft) }, enabled = canSave,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("relic-save")) { Text(if (busy) "Saving…" else "Save appearance") }
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("relic-save")) { Text(if (busy) "Saving…" else if (testingActive) "Save test appearance" else "Save appearance") }
                         if (targetId != null) TextButton(onClick = { targetId?.let(onReset) },
                             enabled = !busy && !missingTarget && collection.bookAppearances.containsKey(targetId),
                             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("relic-reset-book")) { Text("Use global default for this book") }
-                        Text("Your original book and cover files stay unchanged. Reward history and appearance choices are included in BookCover's local backup.",
+                        Text(if (testingActive) "Your original book and cover files stay unchanged. Test appearances are temporary and are not included in backups."
+                            else "Your original book and cover files stay unchanged. Reward history and appearance choices are included in BookCover's local backup.",
                             style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
                     }
                     Spacer(Modifier.height(12.dp))
@@ -253,7 +303,7 @@ internal fun RelicCabinet(
 }
 
 @Composable
-private fun RelicTile(tier: MoonlitTier, earned: Boolean, selected: Boolean, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
+private fun RelicTile(tier: MoonlitTier, earned: Boolean, available: Boolean, selected: Boolean, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     val shape = RoundedCornerShape(14.dp)
     val color = relicRarityColor(tier, scheme.background.luminance() < .5f)
@@ -264,7 +314,7 @@ private fun RelicTile(tier: MoonlitTier, earned: Boolean, selected: Boolean, ena
                 semanticsTestTag = "relic-item-${tier.id}"
                 role = Role.Button
                 contentDescription = "${tier.title}, ${tier.rarity}, ${relicMilestone(tier)}"
-                stateDescription = (if (earned) "Collected" else "Locked; available to preview") +
+                stateDescription = (if (earned) "Collected" else if (available) "Available for testing; not collected" else "Locked; available to preview") +
                     if (selected) "; Details shown" else ""
                 if (enabled) semanticsOnClick(label = "Preview ${tier.title}") { onClick(); true }
                 else disabled()
@@ -273,7 +323,7 @@ private fun RelicTile(tier: MoonlitTier, earned: Boolean, selected: Boolean, ena
             RelicGlyph(tier, color, Modifier.size(44.dp))
             Text(tier.title, style = MaterialTheme.typography.titleSmall)
             Text(tier.rarity, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant)
-            Text(if (earned) "Collected" else "Locked", style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant)
+            Text(if (earned) "Collected" else if (available) "Available for testing" else "Locked", style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant)
         }
     }
 }
@@ -287,7 +337,7 @@ private fun RelicGlyph(tier: MoonlitTier, color: Color, modifier: Modifier) {
 }
 
 @Composable
-private fun SelectedRelic(tier: MoonlitTier, collection: RelicCollection) {
+private fun SelectedRelic(tier: MoonlitTier, collection: RelicCollection, availableTiers: Set<MoonlitTier>) {
     val earned = tier in collection.unlocked
     val earnedAt = collection.earned[tier.id]
     val progress = if (earned) 1f else (collection.totalMillis.toDouble() / tier.thresholdMillis).coerceIn(0.0, 1.0).toFloat()
@@ -295,6 +345,7 @@ private fun SelectedRelic(tier: MoonlitTier, collection: RelicCollection) {
         Text(tier.title, style = MaterialTheme.typography.titleLarge.copy(fontFamily = FontFamily.Serif), modifier = Modifier.semantics { heading() })
         Text("${tier.rarity} · ${relicMilestone(tier)}", style = MaterialTheme.typography.bodyMedium)
         Text(when {
+            !earned && tier in availableTiers -> "Available for testing · not yet collected"
             !earned -> "${relicReadingTime(collection.totalMillis)} credited · locked"
             earnedAt == 0L -> "Collected from earlier reading"
             earnedAt != null && earnedAt > 0L -> "Collected ${DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(earnedAt))}"
@@ -345,8 +396,12 @@ private fun appearanceHasLockedChoices(appearance: RelicAppearance, unlocked: Se
         (appearance.bookplate == RelicBookplate.STANDARD && MoonlitTier.UNCOMMON !in unlocked) ||
         (appearance.bookplate == RelicBookplate.PRESTIGE && MoonlitTier.MYTHIC !in unlocked)
 
-private fun relicChoiceLabel(tier: MoonlitTier, unlocked: Set<MoonlitTier>): String =
-    "${tier.rarity} · ${tier.title}" + if (tier in unlocked) " · collected" else " · locked"
+private fun relicChoiceLabel(tier: MoonlitTier, unlocked: Set<MoonlitTier>, availableTiers: Set<MoonlitTier>): String =
+    "${tier.rarity} · ${tier.title}" + when (tier) {
+        in unlocked -> " · collected"
+        in availableTiers -> " · available for testing"
+        else -> " · locked"
+    }
 
 private fun relicMilestone(tier: MoonlitTier): String = when (tier) {
     MoonlitTier.COMMON -> "5 total reading minutes"

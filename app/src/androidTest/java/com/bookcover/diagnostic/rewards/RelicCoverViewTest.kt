@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.RectF
 import android.os.SystemClock
 import android.view.View
 import android.widget.LinearLayout
@@ -57,6 +58,13 @@ class RelicCoverViewTest {
     private fun bind(appearance: RelicAppearance, artwork: CoverArtwork? = CoverArtwork.from(source)) {
         instrumentation.runOnMainSync { view.bind(artwork, appearance, "Generated Moonlit Fixture", "BookCover QA") }
         instrumentation.waitForIdleSync()
+    }
+
+    private fun narrowViewport() {
+        instrumentation.runOnMainSync {
+            view.layoutParams = view.layoutParams.apply { width = 360; height = 880 }
+        }
+        await { view.width == 360 && view.height == 880 }
     }
 
     private fun pixels(bitmap: Bitmap) = IntArray(bitmap.width * bitmap.height).also {
@@ -122,8 +130,73 @@ class RelicCoverViewTest {
         assertArrayEquals(before, pixels(source))
     }
 
+    @Test fun narrowOutsideCompositionKeepsBothEdgeRailsVisibleAndEveryImageCorner() {
+        launch(); narrowViewport()
+        val sourceBefore = pixels(source)
+        val appearance = RelicAppearance(enabled = true, mode = RelicMode.MARGIN,
+            bookplate = RelicBookplate.PRESTIGE, seal = MoonlitTier.MYTHIC, motion = false)
+        val artwork = CoverArtwork.from(source)
+        bind(appearance, artwork)
+        val baseline = snapshot("moonlit-narrow-margin-without-edges")
+        bind(appearance.copy(edgeTier = MoonlitTier.MYTHIC), artwork)
+        val image = view.imageBoundsForTests
+        val frame = view.frameBoundsForTests
+        assertTrue("The composition surrounds the book rather than the tall screen", frame.height() < view.height * .85f)
+        assertTrue(image.left - frame.left > view.width * .05f)
+        assertTrue(frame.right - image.right > view.width * .05f)
+        snapshot("moonlit-narrow-margin-generated").apply {
+            try {
+                fun changesIn(left: Int, right: Int): Int {
+                    var changed = 0
+                    for (y in 0 until height) for (x in left.coerceAtLeast(0) until right.coerceAtMost(width))
+                        if (getPixel(x, y) != baseline.getPixel(x, y)) changed++
+                    return changed
+                }
+                assertTrue("Mythic edges draw visible pixels beside the left side of the art", changesIn(0, image.left.toInt()) > 100)
+                assertTrue("Mythic edges draw visible pixels beside the right side of the art", changesIn(image.right.toInt() + 1, width) > 100)
+                listOf(.1f to .1f, .9f to .1f, .1f to .9f, .9f to .9f).forEach { (x, y) ->
+                    assertEquals("Narrow-screen framing keeps the full original cover",
+                        source.getPixel((x * source.width).toInt(), (y * source.height).toInt()),
+                        getPixel((image.left + x * image.width()).toInt(), (image.top + y * image.height()).toInt()))
+                }
+            } finally { recycle(); baseline.recycle() }
+        }
+        assertArrayEquals(sourceBefore, pixels(source))
+    }
+
+    @Test fun narrowOverlayOrnamentsStayOnArtworkAndStandaloneRemainsBookShaped() {
+        launch(); narrowViewport()
+        bind(RelicAppearance())
+        val plainFit = RectF(view.imageBoundsForTests)
+        val appearance = RelicAppearance(enabled = true, mode = RelicMode.OVERLAY,
+            bookplate = RelicBookplate.PRESTIGE, motion = false)
+        val artwork = CoverArtwork.from(source)
+        bind(appearance, artwork)
+        val baseline = snapshot("moonlit-narrow-overlay-without-edges")
+        bind(appearance.copy(edgeTier = MoonlitTier.MYTHIC), artwork)
+        assertEquals(plainFit, view.imageBoundsForTests)
+        snapshot("moonlit-narrow-overlay-generated").apply {
+            try {
+                var changedOnArtwork = 0
+                for (y in 0 until height) for (x in 0 until width) {
+                    if (getPixel(x, y) != baseline.getPixel(x, y)) {
+                        assertTrue("Overlay decoration must not be clipped at the cover boundary", plainFit.contains(x.toFloat(), y.toFloat()))
+                        changedOnArtwork++
+                    }
+                }
+                assertTrue("The narrow overlay visibly draws Mythic edges", changedOnArtwork > 300)
+            } finally { recycle(); baseline.recycle() }
+        }
+        bind(appearance.copy(mode = RelicMode.STANDALONE, edgeTier = MoonlitTier.MYTHIC,
+            seal = MoonlitTier.MYTHIC), artwork = null)
+        val frame = view.frameBoundsForTests
+        assertTrue(frame.height() < frame.width() * 1.9f)
+        assertTrue(frame.top > 0f && frame.bottom < view.height)
+        snapshot("moonlit-narrow-standalone-generated").recycle()
+    }
+
     @Test fun mythicTraceStopsWhenHiddenClippedDisabledDetachedAndReleased() {
-        launch()
+        launch(); narrowViewport()
         val mythic = RelicAppearance(enabled = true, edgeTier = MoonlitTier.MYTHIC)
         bind(mythic)
         if (!ValueAnimator.areAnimatorsEnabled()) {
@@ -176,7 +249,7 @@ class RelicCoverViewTest {
         assertFalse(view.motionRunningForTests)
         bind(mythic)
         assertFalse("Release is terminal", view.motionRunningForTests)
-        motionEvidence("systemAnimations=true\ninitialPhase=$initialPhase\npausedPhase=$frozen\nrenderedPixelsChanged=true\n" +
+        motionEvidence("systemAnimations=true\nnarrowViewport=360x880\ninitialPhase=$initialPhase\npausedPhase=$frozen\nrenderedPixelsChanged=true\n" +
             "staticCoverReused=true\nhiddenPauseHeld=true\nclippedPauseAndResume=true\nreleaseStopped=true\n")
     }
 

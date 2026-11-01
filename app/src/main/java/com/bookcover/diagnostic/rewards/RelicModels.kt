@@ -51,6 +51,6 @@ internal data class RelicCollection(
 ) {
     val unlocked: Set<MoonlitTier> get() = earned.keys.mapNotNull(MoonlitTier::fromId).toSet()
     val unseen: Set<MoonlitTier> get() = unlocked.filter { it.id !in seen }.toSet()
-    fun appearanceFor(bookId: String?): RelicAppearance =
-        (bookId?.let(bookAppearances::get) ?: defaultAppearance).permitted(unlocked)
+    fun appearanceFor(bookId: String?, availableTiers: Set<MoonlitTier> = unlocked): RelicAppearance =
+        (bookId?.let(bookAppearances::get) ?: defaultAppearance).permitted(availableTiers)
 }

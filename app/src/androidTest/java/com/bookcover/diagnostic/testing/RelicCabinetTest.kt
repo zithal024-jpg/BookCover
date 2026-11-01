@@ -47,6 +47,8 @@ class RelicCabinetTest {
     @After fun closeFixture() {
         scenario?.close()
         RelicCabinetTestActivity.fontScaleForTests = 1f
+        RelicCabinetTestActivity.testingControlsForTests = false
+        RelicCabinetTestActivity.outsideAspectRatioForTests = .41f
         automation.serviceInfo = automation.serviceInfo.apply { flags = previousFlags }
     }
 
@@ -129,13 +131,61 @@ class RelicCabinetTest {
         assertEquals(MoonlitTier.COMMON, saved.seal)
     }
 
+    @Test fun temporaryTestingAllowsMythicDraftAndSaveWithoutCollectingIt() {
+        launch(testingControls = true)
+        val before = host.readStoredCollectionForTests()
+        clickTag("relic-testing-start")
+        waitFor("temporary testing access enabled") { onHost { it.testingActive } }
+        clickTag("relic-item-archive")
+        waitFor("live Mythic draft delivered") { onHost {
+            it.lastPreviewAppearance?.edgeTier == MoonlitTier.MYTHIC && it.lastPreviewAppearance?.motion == true
+        } }
+        val mythic = revealTag("relic-item-archive")
+        assertTrue("Testing access is announced honestly", mythic.stateDescription?.contains("Available for testing; not collected") == true)
+        assertEquals("The actual collection remains earned-only", setOf(MoonlitTier.COMMON), host.readStoredCollectionForTests().unlocked)
+        clickTag("relic-mode")
+        click(revealMenuChoice("Standalone title and author cover"))
+        waitFor("changed layout delivered live") { onHost { it.lastPreviewAppearance?.mode == RelicMode.STANDALONE } }
+        assertPreviewFits(revealTag("relic-cover-preview", forward = false))
+        screenshot("relic-cabinet-testing-mythic-narrow-preview")
+        val save = revealTag("relic-save")
+        assertTrue("Temporary access permits saving the Mythic test appearance", save.isEnabled)
+        click(save)
+        waitFor("temporary appearance callback completed") { onHost { it.saveRequests == 1 && !it.busy && !it.showCabinet } }
+        waitFor("live preview closed after save") { onHost { it.previewClosedRequests == 1 } }
+        assertEquals(MoonlitTier.MYTHIC, onHost { it.lastSavedAppearance?.edgeTier })
+        val after = host.readStoredCollectionForTests()
+        assertEquals("Temporary testing never awards a relic", before.earned, after.earned)
+        assertEquals("Temporary testing never adds reading credit", before.totalMillis, after.totalMillis)
+        assertEquals("The UI sends test choices without writing the genuine profile", before.defaultAppearance, after.defaultAppearance)
+    }
+
+    @Test fun liveDraftTracksTargetAndDismissalAndTestingCanEnd() {
+        launch(testingControls = true)
+        waitFor("initial live preview delivered") { onHost { it.previewRequests > 0 && it.lastPreviewId == null } }
+        clickTag("relic-testing-start")
+        waitFor("temporary testing access enabled") { onHost { it.testingActive } }
+        chooseTargetBook()
+        waitFor("book target delivered live") { onHost { it.lastPreviewId == book.id } }
+        clickTag("relic-item-archive", forward = false)
+        waitFor("Mythic target draft delivered live") { onHost { it.lastPreviewAppearance?.edgeTier == MoonlitTier.MYTHIC } }
+        clickTag("relic-testing-end", forward = false)
+        waitFor("testing access ended and draft reverted") { onHost { !it.testingActive && it.lastPreviewAppearance?.edgeTier == null } }
+        clickTag("relic-item-archive")
+        assertFalse("Ended testing access restores earned-only Save gating", revealTag("relic-save").isEnabled)
+        clickTag("relic-cabinet-close", forward = false)
+        waitFor("preview disposal delivered on dismissal") { onHost { it.dismissRequests == 1 && it.previewClosedRequests == 1 } }
+        assertEquals(setOf(MoonlitTier.COMMON), host.readStoredCollectionForTests().unlocked)
+    }
+
     private fun chooseTargetBook() {
         clickTag("relic-target")
         click(revealMenuChoice(book.title))
     }
 
-    private fun launch(scale: Float = 1f) {
+    private fun launch(scale: Float = 1f, testingControls: Boolean = false) {
         RelicCabinetTestActivity.fontScaleForTests = scale
+        RelicCabinetTestActivity.testingControlsForTests = testingControls
         scenario = ActivityScenario.launch(Intent(target, RelicCabinetTestActivity::class.java))
         scenario!!.onActivity { host = it }
         book = runBlocking { withTimeout(30_000) { host.ready.await() } }
@@ -265,11 +315,11 @@ class RelicCabinetTest {
 
     private fun previewHasFullAspect(node: AccessibilityNodeInfo): Boolean {
         val bounds = Rect().also(node::getBoundsInScreen)
-        return bounds.height() > 0 && kotlin.math.abs(bounds.width().toFloat() / bounds.height() - 2f / 3f) < .025f
+        return bounds.height() > 0 && kotlin.math.abs(bounds.width().toFloat() / bounds.height() - RelicCabinetTestActivity.outsideAspectRatioForTests) < .025f
     }
 
     private fun assertPreviewFits(node: AccessibilityNodeInfo) {
-        assertTrue("The full 2:3 preview is visible, rather than a clipped slice", previewHasFullAspect(node))
+        assertTrue("The full outside-screen-shaped preview is visible, rather than a clipped slice", previewHasFullAspect(node))
         assertTrue("The preview announces the generated book title and author",
             node.contentDescription?.let { it.contains(book.title) && it.contains(book.author) } == true)
         val bounds = Rect().also(node::getBoundsInScreen)

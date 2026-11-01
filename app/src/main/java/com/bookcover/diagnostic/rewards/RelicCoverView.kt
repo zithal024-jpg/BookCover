@@ -76,6 +76,7 @@ internal class RelicCoverView(context: Context) : View(context) {
     internal val imageBoundsForTests: RectF get() = layout.image.androidRect()
     internal val frameBoundsForTests: RectF get() = layout.frame.androidRect()
     internal val preparationCountForTests: Int get() = preparationCount
+    internal val backingColor: Int get() = if (appearance.enabled) palette.background else artwork?.background ?: palette.background
 
     fun bind(artwork: CoverArtwork?, appearance: RelicAppearance, title: String, author: String) {
         if (released) return
@@ -254,7 +255,7 @@ internal class RelicCoverView(context: Context) : View(context) {
         invalidate()
     }
 
-    private fun stroke(): Float = (min(width, height) * .0035f).coerceAtLeast(1f)
+    private fun stroke(): Float = (min(layout.frame.width, layout.frame.height) * .0045f).coerceAtLeast(1f)
 
     private fun prepareText() {
         val rect = layout.image
@@ -282,7 +283,7 @@ internal class RelicCoverView(context: Context) : View(context) {
 
     private fun drawStatic(canvas: Canvas) {
         val art = artwork
-        canvas.drawColor(if (appearance.enabled) palette.background else art?.background ?: palette.background)
+        canvas.drawColor(backingColor)
         if (appearance.enabled && appearance.mode == RelicMode.STANDALONE) drawStandalone(canvas)
         else if (art != null && !art.bitmap.isRecycled && layout.image.width > 0f && layout.image.height > 0f)
             canvas.drawBitmap(art.bitmap, null, layout.image.androidRect(), bitmapPaint)
@@ -401,11 +402,17 @@ internal class RelicCoverView(context: Context) : View(context) {
             perimeterMeasure.getSegment(0f, head, tracePath, true)
         } else perimeterMeasure.getSegment(tail, head, tracePath, true)
         paint.style = Paint.Style.STROKE; paint.strokeCap = Paint.Cap.ROUND
-        paint.color = palette.ink; paint.alpha = 150; paint.strokeWidth = stroke() * 1.4f
+        // The same two-tone treatment as the static edges keeps motion visible on both light
+        // and dark parts of an arbitrary overlay. This is a thin trace, without a glow or wash.
+        paint.color = palette.keyline; paint.alpha = 190; paint.strokeWidth = stroke() * 2.8f
+        canvas.drawPath(tracePath, paint)
+        paint.color = palette.ink; paint.alpha = 230; paint.strokeWidth = stroke() * 1.3f
         canvas.drawPath(tracePath, paint)
         perimeterMeasure.getPosTan(head, traceDot, null)
-        paint.style = Paint.Style.FILL; paint.alpha = 220
-        canvas.drawCircle(traceDot[0], traceDot[1], stroke() * 1.7f, paint)
+        paint.style = Paint.Style.FILL; paint.color = palette.keyline; paint.alpha = 200
+        canvas.drawCircle(traceDot[0], traceDot[1], stroke() * 2.1f, paint)
+        paint.color = palette.ink; paint.alpha = 240
+        canvas.drawCircle(traceDot[0], traceDot[1], stroke() * 1.3f, paint)
         paint.alpha = 255
     }
 }

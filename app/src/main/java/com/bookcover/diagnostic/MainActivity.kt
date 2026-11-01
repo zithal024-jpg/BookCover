@@ -1,6 +1,7 @@
 package com.bookcover.diagnostic
 
 import android.os.Bundle
+import android.content.Intent
 import android.content.res.Configuration
 import android.view.WindowManager
 import androidx.activity.compose.setContent
@@ -29,10 +30,15 @@ import com.bookcover.diagnostic.reader.PdfReaderScreen
 import com.bookcover.diagnostic.reader.readerBackground
 import com.bookcover.diagnostic.reader.installReadingKeyHandler
 import com.bookcover.diagnostic.rewards.RelicCabinet
+import com.bookcover.diagnostic.rewards.RelicAppearance
+import com.bookcover.diagnostic.rewards.RelicMode
+import com.bookcover.diagnostic.rewards.RelicTestAccess
+import com.bookcover.diagnostic.rewards.MoonlitTier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 // The QA-only process-recovery probe subclasses this activity without replacing its reader lifecycle.
@@ -40,6 +46,7 @@ open class MainActivity : FragmentActivity() {
     private lateinit var engine: ReadiumEngine
     private lateinit var library: BookLibrary
     private lateinit var exterior: ExteriorCoverController
+    private lateinit var relicTesting: RelicTestAccess
     private var session by mutableStateOf<EpubSession?>(null)
     private var pdfSession by mutableStateOf<PdfSession?>(null)
     // Set while a book that was open before rotation/fold is reopened; the library stays hidden meanwhile.
@@ -52,6 +59,10 @@ open class MainActivity : FragmentActivity() {
     private var showDiagnostics by mutableStateOf(false)
     private var showRelicCabinet by mutableStateOf(false)
     private var relicSaveError by mutableStateOf<String?>(null)
+    private var pendingRelicTesting by mutableStateOf(false)
+    private data class RelicPreviewDraft(val bookId: String?, val appearance: RelicAppearance)
+    private var relicPreviewDraft by mutableStateOf<RelicPreviewDraft?>(null)
+    private var previewResumeVersion by mutableIntStateOf(0)
     private var autoCover by mutableStateOf(true)
     private var timer by mutableIntStateOf(30)
     private var libraryTheme by mutableStateOf("automatic")
@@ -111,6 +122,9 @@ open class MainActivity : FragmentActivity() {
         installReadingKeyHandler(pdfReader = { pdfSession }) { session }
         DiagnosticLog.init(this)
         library = BookLibrary.forApp(this)
+        relicTesting = RelicTestAccess(this)
+        pendingRelicTesting = savedInstanceState?.getBoolean("pendingRelicTesting", false) ?: false
+        acceptRelicTestingRequest(intent)
         engine = library.engine
         exterior = ExteriorCoverController(this, lifecycleScope)
         restoredCover = savedInstanceState?.takeIf { it.getString("openBook") != null && it.containsKey("coverRequested") }?.let {
@@ -128,6 +142,28 @@ open class MainActivity : FragmentActivity() {
             val relicCollection by library.relics.collection.collectAsState()
             val relicError by library.relicError.collectAsState()
             val relicsLoaded by library.relicsLoaded.collectAsState()
+            val testingState by relicTesting.state.collectAsState()
+            val testingActive = relicTesting.supported && testingState.isActive(System.currentTimeMillis())
+            val editingCollection = if (testingActive) relicCollection.copy(
+                defaultAppearance = testingState.defaultAppearance, bookAppearances = testingState.bookAppearances,
+            ) else relicCollection
+            val availableTiers = if (testingActive) MoonlitTier.entries.toSet() else relicCollection.unlocked
+            LaunchedEffect(testingState.expiresAtMillis) {
+                while (relicTesting.state.value.startedAtMillis != 0L) {
+                    delay((relicTesting.state.value.expiresAtMillis - System.currentTimeMillis()).coerceIn(1L, 60_000L))
+                    withContext(Dispatchers.IO) { relicTesting.refresh() }
+                }
+            }
+            LaunchedEffect(pendingRelicTesting, relicsLoaded, busy) {
+                if (pendingRelicTesting && relicsLoaded && !busy) {
+                    pendingRelicTesting = false
+                    work(ReaderAction.ORGANIZE) {
+                        saveRelicChange { relicTesting.begin(library.relics.collection.value) }
+                        showRelicCabinet = true
+                        message = "All Moonlit tiers are available for 24-hour testing. Your earned rewards are unchanged."
+                    }
+                }
+            }
             val recent = books.filter { it.lastReadAt > 0 }.maxByOrNull { it.lastReadAt }
             val coverColors by produceState<List<BookCoverColor>>(emptyList(), books.map { it.id to it.coverRevision }) {
                 value = library.bookCoverColors()
@@ -146,10 +182,30 @@ open class MainActivity : FragmentActivity() {
                 val current = session
                 val pdf = pdfSession
                 val activeBook = current?.book ?: pdf?.book
-                val activeAppearance = activeBook?.let { relicCollection.appearanceFor(it.id) }
+                val activeAppearance = activeBook?.let { editingCollection.appearanceFor(it.id, availableTiers) }
                 LaunchedEffect(activeBook?.id, activeAppearance) {
                     if (activeBook != null && activeAppearance != null)
                         exterior.setAppearance(activeAppearance, activeBook.title, activeBook.author)
+                }
+                val previewDraft = relicPreviewDraft.takeIf { showRelicCabinet }
+                val previewBook = previewDraft?.let { draft ->
+                    books.firstOrNull { it.id == draft.bookId }
+                        ?: books.maxByOrNull { maxOf(it.lastReadAt, it.addedAt) }
+                }
+                // Decode once per book/revision. Color/tier/inscription edits reuse the prepared art.
+                val previewArtwork by produceState<CoverArtwork?>(null, previewBook?.id, previewBook?.coverRevision) {
+                    value = null
+                    previewBook?.let { book -> value = withContext(Dispatchers.IO) {
+                        runCatching { CoverArtwork.from(library.coverBitmap(book)) }.getOrNull()
+                    } }
+                }
+                LaunchedEffect(showRelicCabinet, previewDraft, previewArtwork, previewBook, previewResumeVersion) {
+                    if (previewDraft != null) {
+                        val shown = if (previewArtwork == null) previewDraft.appearance.copy(enabled = true, mode = RelicMode.STANDALONE)
+                            else previewDraft.appearance
+                        exterior.preview(previewArtwork, shown, previewBook?.title ?: "Moonlit Archive",
+                            previewBook?.author ?: "BookCover")
+                    } else exterior.endPreview()
                 }
                 if (current == null && pdf == null && reopeningBookId != null)
                     Box(Modifier.fillMaxSize().background(readerBackground(preferences.getString("theme", "Paper"))))
@@ -205,21 +261,52 @@ open class MainActivity : FragmentActivity() {
                     if (relicError != null) AlertDialog(onDismissRequest = { showRelicCabinet = false },
                         title = { Text("Relic cabinet unavailable") }, text = { Text(relicError!!) },
                         confirmButton = { TextButton(onClick = { showRelicCabinet = false }) { Text("Close") } })
-                    else RelicCabinet(relicCollection, books, library,
+                    else key(testingState.startedAtMillis, testingState.expiresAtMillis) {
+                    RelicCabinet(editingCollection, books, library,
                         onSave = { id, appearance -> if (!busy) work(ReaderAction.ORGANIZE) {
-                            saveRelicChange { library.relics.setAppearance(id, appearance) }
+                            saveRelicChange {
+                                if (testingActive) relicTesting.saveAppearance(id, appearance)
+                                else library.relics.setAppearance(id, appearance)
+                            }
                             showRelicCabinet = false
-                            message = "Outside appearance saved${if (id == null) " as your default" else " for this book"}."
+                            message = if (testingActive) "Test appearance saved. Your earned settings return when testing ends."
+                                else "Outside appearance saved${if (id == null) " as your default" else " for this book"}."
                         } },
                         onReset = { id -> if (!busy) work(ReaderAction.ORGANIZE) {
-                            saveRelicChange { library.relics.resetBookAppearance(id) }
+                            saveRelicChange {
+                                if (testingActive) relicTesting.resetBookAppearance(id)
+                                else library.relics.resetBookAppearance(id)
+                            }
                             showRelicCabinet = false; message = "This book now uses your default outside appearance."
                         } },
                         onSeen = { lifecycleScope.launch(Dispatchers.IO) {
                             runCatching { library.relics.markSeen() }.onFailure {
                                 DiagnosticLog.record("Relic acknowledgement failed: ${it.javaClass.simpleName}")
                             }
-                        } }, onDismiss = { if (!busy) showRelicCabinet = false }, busy = busy)
+                        } }, onDismiss = { if (!busy) showRelicCabinet = false }, busy = busy,
+                        availableTiers = availableTiers, testingActive = testingActive,
+                        testingExpiryLabel = if (testingActive) "Testing ends " + java.text.DateFormat.getDateTimeInstance(
+                            java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(java.util.Date(testingState.expiresAtMillis)) else null,
+                        onStartTesting = if (relicTesting.supported) ({ if (!busy) work(ReaderAction.ORGANIZE) {
+                            saveRelicChange { relicTesting.begin(library.relics.collection.value) }
+                        } }) else null,
+                        onEndTesting = if (testingActive) ({ if (!busy) work(ReaderAction.ORGANIZE) {
+                            saveRelicChange { relicTesting.end() }
+                            message = "Testing ended. Your earned outside appearance is restored."
+                        } }) else null,
+                        outsidePreviewStatus = exterior.status,
+                        outsideAspectRatio = exterior.outsideAspectRatio,
+                        onRetryOutsidePreview = if (!exterior.active && !exterior.busy) ({
+                            previewDraft?.let { draft ->
+                                val shown = if (previewArtwork == null) draft.appearance.copy(enabled = true, mode = RelicMode.STANDALONE)
+                                    else draft.appearance
+                                exterior.preview(previewArtwork, shown, previewBook?.title ?: "Moonlit Archive", previewBook?.author ?: "BookCover")
+                                exterior.retryPreview()
+                            }
+                        }) else null,
+                        onPreview = { id, appearance -> relicPreviewDraft = RelicPreviewDraft(id, appearance) },
+                        onPreviewClosed = { relicPreviewDraft = null; exterior.endPreview() })
+                    }
                 }
                 relicSaveError?.let { error -> AlertDialog(onDismissRequest = { relicSaveError = null },
                     title = { Text("Appearance not saved") }, text = { Text(error) },
@@ -268,6 +355,10 @@ open class MainActivity : FragmentActivity() {
     internal val busyForTests: Boolean get() = busy
     internal val messageForTests: String get() = message
     internal val showsLibraryForTests: Boolean get() = session == null && pdfSession == null && reopeningBookId == null
+    internal val relicTestingForTests: RelicTestAccess get() = relicTesting
+    internal val relicCabinetShownForTests: Boolean get() = showRelicCabinet
+    internal val relicPreviewRequestedForTests: Boolean get() = exterior.previewRequested
+    internal fun closeRelicCabinetForTests() { showRelicCabinet = false }
     internal fun openBookForTests(book: BookRecord) = openBook(book)
 
     internal val importProgressForTests: ImportProgress? get() = importProgress
@@ -322,7 +413,7 @@ open class MainActivity : FragmentActivity() {
                 // Take ownership first so a later failure here leaves the session owned and closable.
                 session = current
                 exterior.artwork = artwork
-                exterior.setAppearance(library.relics.collection.value.appearanceFor(book.id), book.title, book.author)
+                exterior.setAppearance(relicTesting.appearanceFor(library.relics.collection.value, book.id), book.title, book.author)
                 setReadingWindow(true)
                 if (reopeningBookId != null) operations.publishInitialMessage("Swipe left/right to turn pages. Tap the middle for controls.")
                 else message = "Swipe left/right to turn pages. Tap the middle for controls."
@@ -352,7 +443,7 @@ open class MainActivity : FragmentActivity() {
             commit = { current, artwork ->
                 pdfSession = current
                 exterior.artwork = artwork
-                exterior.setAppearance(library.relics.collection.value.appearanceFor(book.id), book.title, book.author)
+                exterior.setAppearance(relicTesting.appearanceFor(library.relics.collection.value, book.id), book.title, book.author)
                 setReadingWindow(true)
                 message = "Swipe to turn PDF pages."
                 val previousCover = restoredCover
@@ -407,6 +498,7 @@ open class MainActivity : FragmentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putBoolean("relicCabinet", showRelicCabinet)
+        outState.putBoolean("pendingRelicTesting", pendingRelicTesting)
         outState.putString("pendingCoverBook", coverBookId)
         outState.putBundle("documentPickerResults", Bundle().also(activityResultRegistry::onSaveInstanceState))
         outState.putString("openBook", session?.book?.id ?: pdfSession?.book?.id ?: reopeningBookId)
@@ -430,6 +522,22 @@ open class MainActivity : FragmentActivity() {
     override fun onResume() {
         super.onResume()
         exterior.hostResumed()
+        previewResumeVersion++
+        lifecycleScope.launch(Dispatchers.IO) { relicTesting.refresh() }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        acceptRelicTestingRequest(intent)
+    }
+
+    /** Explicit debug-owner setup only. Never grants an earned reward or changes the reading clock. */
+    private fun acceptRelicTestingRequest(incoming: Intent) {
+        if (relicTesting.supported && incoming.getBooleanExtra(EXTRA_MOONLIT_TESTING, false)) {
+            incoming.removeExtra(EXTRA_MOONLIT_TESTING)
+            pendingRelicTesting = true
+        }
     }
 
     override fun onStop() {
@@ -445,5 +553,9 @@ open class MainActivity : FragmentActivity() {
         session?.close()
         pdfSession?.close()
         super.onDestroy()
+    }
+
+    companion object {
+        internal const val EXTRA_MOONLIT_TESTING = "com.bookcover.diagnostic.MOONLIT_TESTING"
     }
 }

@@ -12,13 +12,16 @@ import android.os.Looper
 import android.os.SystemClock
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.FrameLayout
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.ViewCompat
 import androidx.window.WindowSdkExtensions
 import androidx.window.area.WindowAreaCapability
 import androidx.window.area.WindowAreaController
@@ -61,20 +64,28 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
     private var session: WindowAreaSessionPresenter? = null
     private var request = 0
     private var timeout: Runnable? = null
-    private val continuation = CoverSessionContinuation()
+    private val continuations = CoverPreviewContinuation()
+    private val continuation get() = continuations.current
     private var renderedView: RelicCoverView? = null
+    private var renderedContainer: FrameLayout? = null
     private var appearance = RelicAppearance()
     private var coverTitle = ""
     private var coverAuthor = ""
     private var containerVisible = true
     private var viewportInProgress = false
     private var hostVisible = activity.lifecycleIsStarted()
-    val requested get() = continuation.requested
-    val deadline get() = continuation.deadline
+    private data class Preview(val artwork: CoverArtwork?, val appearance: RelicAppearance, val title: String, val author: String)
+    private var preview: Preview? = null
+    private var resumeAfterClose = false
+    // Recreation persists the reader's request, never a temporary editor display.
+    val requested get() = continuations.reading.requested
+    val deadline get() = continuations.reading.deadline
+    val previewRequested get() = continuations.previewing && continuation.requested
+    var outsideAspectRatio by mutableFloatStateOf(0.41f); private set
     var artwork: CoverArtwork? = null
         set(value) {
             field = value
-            renderedView?.bind(value, appearance, coverTitle, coverAuthor)
+            bindDisplayedCover()
         }
     var active by mutableStateOf(false); private set
     var busy by mutableStateOf(false); private set
@@ -94,6 +105,10 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
             controller.windowAreaInfos.collect { list ->
                 val wasAvailable = available
                 areas = list
+                list.firstOrNull { it.type == WindowAreaInfo.Type.TYPE_REAR_FACING }?.metrics?.bounds?.let { bounds ->
+                    if (bounds.width() > 0 && bounds.height() > 0)
+                        outsideAspectRatio = bounds.width().toFloat() / bounds.height()
+                }
                 available = area() != null
                 capability = list.firstOrNull { it.type == WindowAreaInfo.Type.TYPE_REAR_FACING }
                     ?.getCapability(WindowAreaCapability.Operation.OPERATION_PRESENT_ON_AREA)?.status?.toString()
@@ -110,14 +125,19 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
     }
 
     fun start(timerMinutes: Int) {
+        if (continuations.previewing) {
+            if (!destroyed && (artwork != null || (appearance.enabled && appearance.mode == RelicMode.STANDALONE)))
+                continuations.reading.start(timerMinutes, SystemClock.elapsedRealtime())
+            return
+        }
         if (busy || destroyed || !hasContent()) return
-        continuation.start(timerMinutes, SystemClock.elapsedRealtime())
+        continuations.reading.start(timerMinutes, SystemClock.elapsedRealtime())
         openSession()
     }
 
     fun restore(wasRequested: Boolean, savedDeadline: Long) {
-        continuation.restore(wasRequested, savedDeadline, SystemClock.elapsedRealtime())
-        resumeCover()
+        continuations.reading.restore(wasRequested, savedDeadline, SystemClock.elapsedRealtime())
+        if (!continuations.previewing) resumeCover()
     }
 
     /** Appearance changes update the active view without renewing its session or countdown. */
@@ -125,10 +145,61 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
         this.appearance = appearance
         coverTitle = title
         coverAuthor = author
-        renderedView?.bind(artwork, appearance, title, author)
+        bindDisplayedCover()
     }
 
-    private fun hasContent() = artwork != null || (appearance.enabled && appearance.mode == RelicMode.STANDALONE)
+    /** Editing borrows an existing presentation, or opens one owned only by this preview. */
+    fun preview(artwork: CoverArtwork?, appearance: RelicAppearance, title: String, author: String) {
+        if (destroyed) return
+        preview = Preview(artwork, appearance, title, author)
+        if (continuations.begin(SystemClock.elapsedRealtime())) {
+            timeout?.let(handler::removeCallbacks); timeout = null
+        }
+        bindDisplayedCover()
+        if (stopPending) resumeAfterClose = true
+        else if (!busy) openSession()
+        if (active) status = "Live outside preview is on. Changes appear as you edit."
+    }
+
+    fun retryPreview() {
+        if (preview == null || destroyed || busy) return
+        // This is an explicit owner action; failed platform requests are never retried in a loop.
+        if (!continuation.requested) { continuations.end(); continuations.begin(SystemClock.elapsedRealtime()) }
+        openSession()
+    }
+
+    fun endPreview() {
+        if (preview == null) return
+        preview = null
+        continuations.end()
+        bindDisplayedCover()
+        val now = SystemClock.elapsedRealtime()
+        if (!continuation.requested || continuation.remaining(now) == 0L) {
+            continuation.stop()
+            resumeAfterClose = false
+            timeout?.let(handler::removeCallbacks); timeout = null
+            closeSession("appearance preview closed")
+        } else if (stopPending) resumeAfterClose = true
+        else if (busy) {
+            continuation.presenting()
+            scheduleTimeout()
+            status = if (deadline > 0L) "Outside cover on · timer running" else "Outside cover on · stop from reading controls"
+        } else resumeCover()
+    }
+
+    private fun bindDisplayedCover() {
+        val current = preview
+        if (current != null) renderedView?.bind(current.artwork, current.appearance, current.title, current.author)
+        else renderedView?.bind(artwork, appearance, coverTitle, coverAuthor)
+        renderedView?.let { renderedContainer?.setBackgroundColor(it.backingColor) }
+    }
+
+    private fun hasContent(): Boolean {
+        val current = preview
+        val shownArtwork = current?.artwork ?: if (current == null) artwork else null
+        val shownAppearance = current?.appearance ?: appearance
+        return shownArtwork != null || (shownAppearance.enabled && shownAppearance.mode == RelicMode.STANDALONE)
+    }
     private fun presentationIsVisible() = hostVisible && containerVisible && !viewportInProgress
 
     fun viewportChanging() {
@@ -167,10 +238,7 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
         continuation.presenting()
         busy = true; active = false; stopPending = false
         status = "Opening the outside cover. Accept Android's display dialog if offered."
-        timeout?.let(handler::removeCallbacks)
-        timeout = continuation.remaining(SystemClock.elapsedRealtime())?.let { remaining ->
-            Runnable { stop("cover timer") }.also { handler.postDelayed(it, remaining) }
-        }
+        scheduleTimeout()
         DiagnosticLog.record("Exterior start request=$token; original cover deadline retained; same reader activity")
         try {
             controller.presentContentOnWindowArea(area.token, activity, ContextCompat.getMainExecutor(activity), object : WindowAreaPresentationSessionCallback {
@@ -182,15 +250,28 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
                         releaseRenderedView()
                         val view = RelicCoverView(presenter.context).apply {
                             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                            bind(artwork, appearance, coverTitle, coverAuthor)
                             setPresentationVisible(presentationIsVisible())
                             addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
-                                if (r - l > 0 && b - t > 0 && (r - l != or - ol || b - t != ob - ot))
+                                if (r - l > 0 && b - t > 0 && (r - l != or - ol || b - t != ob - ot)) {
+                                    outsideAspectRatio = (r - l).toFloat() / (b - t)
                                     DiagnosticLog.record("Exterior cover view=${r - l}x${b - t}; matching background; normal brightness")
+                                }
                             }
                         }
                         renderedView = view
-                        presenter.setContentView(view)
+                        bindDisplayedCover()
+                        val safeContent = FrameLayout(presenter.context).apply {
+                            setBackgroundColor(view.backingColor)
+                            addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                        }
+                        renderedContainer = safeContent
+                        ViewCompat.setOnApplyWindowInsetsListener(safeContent) { container, insets ->
+                            val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+                            container.setPadding(safe.left, safe.top, safe.right, safe.bottom)
+                            insets
+                        }
+                        presenter.setContentView(safeContent)
+                        ViewCompat.requestApplyInsets(safeContent)
                         presenter.window?.let { window ->
                             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                             WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -200,9 +281,16 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
                             }
                         }
                         active = true
-                        status = if (continuation.deadline > 0L) "Outside cover on · timer running" else "Outside cover on · stop from reading controls"
+                        status = if (preview != null) "Live outside preview is on. Changes appear as you edit."
+                            else if (continuation.deadline > 0L) "Outside cover on · timer running" else "Outside cover on · stop from reading controls"
                         DiagnosticLog.record("Exterior onSessionStarted request=$token; EPUB reading stays inside same activity")
-                    } catch (error: Exception) { DiagnosticLog.record("Exterior render failed: ${error.javaClass.simpleName}"); stop("render error") }
+                    } catch (error: Exception) {
+                        DiagnosticLog.record("Exterior render failed: ${error.javaClass.simpleName}")
+                        continuation.stop()
+                        timeout?.let(handler::removeCallbacks); timeout = null
+                        resumeAfterClose = false
+                        closeSession("render error")
+                    }
                 }
                 override fun onSessionEnded(t: Throwable?) {
                     DiagnosticLog.record("Exterior onSessionEnded request=$token: ${t?.javaClass?.simpleName ?: "no detailed system reason"}")
@@ -210,6 +298,11 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
                         releaseRenderedView()
                         session = null
                         busy = false; active = false; stopPending = false
+                        if (resumeAfterClose && continuation.requested) {
+                            resumeAfterClose = false
+                            resumeCover()
+                            return
+                        }
                         status = "Outside cover is off. Reading can continue; restart it from controls if needed."
                         if (continuation.systemEnded(t != null)) resumeCover()
                         else if (!continuation.requested) { timeout?.let(handler::removeCallbacks); timeout = null }
@@ -236,8 +329,21 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
     }
 
     fun stop(reason: String) {
-        continuation.stop()
+        continuations.stop()
+        preview = null
+        resumeAfterClose = false
         timeout?.let(handler::removeCallbacks); timeout = null
+        closeSession(reason)
+    }
+
+    private fun scheduleTimeout() {
+        timeout?.let(handler::removeCallbacks)
+        timeout = continuation.remaining(SystemClock.elapsedRealtime())?.let { remaining ->
+            Runnable { stop("cover timer") }.also { handler.postDelayed(it, remaining) }
+        }
+    }
+
+    private fun closeSession(reason: String) {
         releaseRenderedView()
         if (!busy || stopPending) return
         stopPending = true; active = false
@@ -249,6 +355,7 @@ internal class ExteriorCoverController(private val activity: Activity, scope: Co
     private fun releaseRenderedView() {
         renderedView?.release()
         renderedView = null
+        renderedContainer = null
     }
 
     fun diagnostics(): String = buildString {
