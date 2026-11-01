@@ -35,13 +35,12 @@ import org.junit.runner.RunWith
 class ScreenIdleTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val target get() = instrumentation.targetContext
-    private val libraryFolder get() = File(target.filesDir, "library")
     private val minute = 60_000L
     private var scenario: ActivityScenario<MainActivity>? = null
 
     @Before fun freshQaLibrary() {
         check(target.packageName.endsWith(".qa")) { "Screen tests may only clear the isolated QA app's own data." }
-        libraryFolder.listFiles()?.forEach { it.deleteRecursively() }
+        resetQaBookFixtures()
         target.getSharedPreferences("reader", Context.MODE_PRIVATE).edit().clear()
             .putBoolean("samplesInstalled", true).putBoolean("autoCover", false).commit()
     }

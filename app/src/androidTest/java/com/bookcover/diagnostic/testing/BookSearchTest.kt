@@ -143,6 +143,9 @@ class BookSearchTest {
         val (location, offset) = settledReadingLocation()
         val visibleBefore = main { reader.fragment.visibleReadingAnchor() } ?: error("No visible passage before search")
         val selector = visibleBefore.locations["cssSelector"] as? String ?: error("No visible block before search")
+        Log.i("BookSearchTest", "BC29 before search: visible=${visibleBefore.toJSON()}; " +
+            "restoration=${main { reader.restorationLocator }?.toJSON()}; " +
+            "saved=${main { host.library.book(reader.book.id)?.locator }}")
         main { reader.flushPosition(); reader.openSearch() }
         timedQuery(SearchEpubFixture.LATE_PHRASE)
         val discarded = results().single()
@@ -167,17 +170,42 @@ class BookSearchTest {
         assertEquals("Closing search keeps the visible quote", visibleBefore.text.highlight, visibleAfter.text.highlight)
         Log.i("BookSearchTest", "BC29 keyboard dismissal: raw progression=${original.getJSONObject("locations").getDouble("progression")}/${dismissed.getJSONObject("locations").getDouble("progression")}; exact offset=$offset/${dismissedLocation.second}; visible selector and quote match")
         assertFalse("A discarded result cannot navigate after dismissal", main { reader.goToSearchResult(discarded) })
-        waitFor("the original position saves normally") {
-            main { host.library.book(reader.book.id)?.locator }?.let { value ->
-                val saved = JSONObject(value)
-                saved.getString("href") == original.getString("href") &&
-                    saved.getJSONObject("locations").optString("cssSelector") == selector &&
-                    saved.getJSONObject("text").optString("highlight") == visibleBefore.text.highlight
-            } == true
+        var savedPosition: String? = null
+        try {
+            waitFor("the original position saves normally") {
+                savedPosition = main { host.library.book(reader.book.id)?.locator }
+                savedPosition?.let { value ->
+                    val saved = JSONObject(value)
+                    saved.getString("href") == original.getString("href") &&
+                        saved.getJSONObject("locations").optString("cssSelector") == selector &&
+                        saved.getJSONObject("text").optString("highlight") == visibleBefore.text.highlight
+                } == true
+            }
+        } catch (failure: AssertionError) {
+            // Generated fixture only. Preserve exact semantic evidence rather than hiding a
+            // persistence/repagination race behind a generic timeout or a wider tolerance.
+            Log.e("BookSearchTest", "BC29 saved passage mismatch: before=${visibleBefore.toJSON()}; " +
+                "after=${visibleAfter.toJSON()}; saved=$savedPosition; " +
+                "restoration=${main { reader.restorationLocator }?.toJSON()}", failure)
+            throw failure
         }
         main { reader.openSearch() }
         assertEquals(BookSearchStatus.EMPTY, main { reader.search.state.value.status })
         assertTrue(results().isEmpty())
+        main { reader.dismissSearch(); reader.controlsVisible = false; reader.next() }
+        waitFor("intentional navigation after search advances the visible page") {
+            js("window.scrollX").toDouble() > dismissedLocation.second + 10
+        }
+        waitFor("the search hold cannot pin saving after intentional navigation") {
+            main { host.library.book(reader.book.id)?.locator }?.let { value ->
+                val saved = JSONObject(value)
+                val nextSelector = saved.getJSONObject("locations").optString("cssSelector")
+                val nextQuote = saved.getJSONObject("text").optString("highlight")
+                saved.getString("href") == original.getString("href") &&
+                    nextSelector.isNotBlank() && nextSelector != selector &&
+                    nextQuote.isNotBlank() && nextQuote != visibleBefore.text.highlight
+            } == true
+        }
     }
 
     @Test fun bookChangeAndRecreationDiscardThePreviousSearch() {

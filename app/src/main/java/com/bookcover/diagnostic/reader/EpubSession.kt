@@ -15,6 +15,9 @@ import android.os.SystemClock
 import androidx.compose.ui.graphics.toArgb
 import android.view.View
 import android.view.KeyEvent
+import android.view.Choreographer
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.bookcover.diagnostic.DiagnosticLog
 import com.bookcover.diagnostic.library.BookLibrary
 import com.bookcover.diagnostic.library.BookRecord
@@ -29,6 +32,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import org.json.JSONObject
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
@@ -133,6 +138,9 @@ internal class EpubSession(
     private var restoringViewport = false
     private val openedLocator = currentLocator
     private var holdsOpenedPassage = openedLocator != null
+    private class SearchPassage(val locator: Locator)
+    private var searchPassage: SearchPassage? = null
+    private var searchDismissalJob: Job? = null
     private var viewportSettled: (() -> Unit)? = null
     private val readingLifecycle = object : DefaultLifecycleObserver {
         override fun onPause(owner: LifecycleOwner) { readingPace.hold(SystemClock.elapsedRealtime()); record(readingTime.pause(SystemClock.elapsedRealtime())) }
@@ -281,7 +289,9 @@ internal class EpubSession(
                     // The initial locator echo precedes DOM placement; describing that DOM saves the chapter start.
                     val keepOpened = reportIsOpenedPassage(holdsOpenedPassage, locator, openedLocator)
                     val screen = if (keepOpened) null else withTimeoutOrNull(1_000) { fragment.visibleReadingAnchor() }
-                    val semantic = passageReportedWhileHolding(
+                    // A DOM query already in flight when search opens can finish during IME reflow.
+                    // Read the hold after that suspension, rather than publishing the transient page.
+                    val semantic = searchPassage?.locator ?: passageReportedWhileHolding(
                         holdsOpenedPassage, locator, openedLocator, screen, viewportContinuity.anchor,
                     ) { DiagnosticLog.record(it) }
                     viewportContinuity.remember(semantic, generation)
@@ -381,11 +391,14 @@ internal class EpubSession(
         val revert = pageTurns.abort()
         viewportSettled = onSettled
         readingPace.pause()
-        viewportContinuity.begin(typographyAnchor ?: revert ?: currentLocator)
+        viewportContinuity.begin(typographyAnchor ?: revert ?: searchPassage?.locator ?: currentLocator)
         restoreViewportWhenSettled()
     }
 
     private fun invalidateViewportAnchor() {
+        searchDismissalJob?.cancel()
+        searchDismissalJob = null
+        searchPassage = null
         holdsOpenedPassage = false
         viewportJob?.cancel()
         viewportContinuity.navigated()
@@ -452,9 +465,92 @@ internal class EpubSession(
     }
 
     fun openSearch() {
-        if (closed || typographyUpdating) return
+        if (closed || typographyUpdating || search.state.value.visible) return
+        searchDismissalJob?.cancel()
+        searchDismissalJob = null
+        searchPassage = restorationLocator?.takeIf(::isSearchPassage)?.let(::SearchPassage)
         controlsVisible = true
         search.open()
+    }
+
+    /** Dismissal never navigates. Keep IME pagination out of the saved passage while it settles. */
+    fun dismissSearch() {
+        search.dismiss() // Discarded results become invalid synchronously, before the keyboard closes.
+        val held = searchPassage ?: return
+        if (closed) return
+        searchDismissalJob?.cancel()
+        searchDismissalJob = activity.lifecycleScope.launch {
+            val thisJob = coroutineContext[Job]
+            var latestVisible: Locator? = null
+            try {
+                var previousSize: Pair<Int, Int>? = null
+                var stableFrames = 0
+                val matched = withTimeoutOrNull(3_000) {
+                    while (true) {
+                        awaitSearchFrame()
+                        if (closed || searchPassage !== held || search.state.value.visible) return@withTimeoutOrNull null
+                        val view = fragment.view ?: continue
+                        val size = view.width to view.height
+                        stableFrames = if (size == previousSize) stableFrames + 1 else 0
+                        previousSize = size
+                        val insets = ViewCompat.getRootWindowInsets(view)
+                        if (!resumed() || !view.isAttachedToWindow || size.first <= 0 || size.second <= 0 ||
+                            insets == null || insets.isVisible(WindowInsetsCompat.Type.ime()) ||
+                            typographyUpdating || viewportContinuity.pending != null || viewportJob?.isActive == true) {
+                            stableFrames = 0
+                            continue
+                        }
+                        if (stableFrames < 2) continue
+                        val generation = viewportContinuity.generation
+                        val visible = try { fragment.visibleReadingAnchor()?.takeIf(::isSearchPassage) }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { null } // A detached or rebuilding viewport can be retried on a later frame.
+                        if (closed || searchPassage !== held || search.state.value.visible) return@withTimeoutOrNull null
+                        if (generation != viewportContinuity.generation || viewportContinuity.pending != null ||
+                            viewportJob?.isActive == true || typographyUpdating) continue
+                        if (!resumed() || fragment.view !== view || !view.isAttachedToWindow ||
+                            size != (view.width to view.height) ||
+                            ViewCompat.getRootWindowInsets(view)?.isVisible(WindowInsetsCompat.Type.ime()) != false) {
+                            stableFrames = 0
+                            continue
+                        }
+                        if (visible != null) {
+                            latestVisible = visible
+                            if (sameSearchPassage(visible, held.locator)) return@withTimeoutOrNull visible
+                        }
+                    }
+                    @Suppress("UNREACHABLE_CODE")
+                    null
+                }
+                if (closed || searchPassage !== held || search.state.value.visible) return@launch
+                searchPassage = null // Even an unavailable viewport must not pin future navigation.
+                // An active fold restoration still owns its pending anchor and completion callback.
+                if (viewportContinuity.pending == null && viewportJob?.isActive != true && !typographyUpdating) {
+                    val settled = matched ?: latestVisible ?: held.locator
+                    viewportContinuity.navigated() // Reject DOM queries started during IME repagination.
+                    viewportContinuity.remember(settled, viewportContinuity.generation)
+                    positions.submit(settled)
+                }
+                if (matched == null) DiagnosticLog.record("EPUB search dismissal passage refresh timed out; hold released")
+            } finally {
+                if (searchDismissalJob === thisJob) searchDismissalJob = null
+            }
+        }
+    }
+
+    private fun isSearchPassage(locator: Locator): Boolean = supportsTypography &&
+        !(locator.locations["cssSelector"] as? String).isNullOrBlank() &&
+        !locator.text.highlight.isNullOrBlank() && locator.text.before != null
+
+    private fun sameSearchPassage(left: Locator, right: Locator): Boolean =
+        left.href.removeFragment().toString().removePrefix("/") == right.href.removeFragment().toString().removePrefix("/") &&
+            left.locations["cssSelector"] == right.locations["cssSelector"] && left.text.highlight == right.text.highlight
+
+    private suspend fun awaitSearchFrame() = suspendCancellableCoroutine<Unit> { continuation ->
+        val choreographer = Choreographer.getInstance()
+        val callback = Choreographer.FrameCallback { if (continuation.isActive) continuation.resume(Unit) }
+        choreographer.postFrameCallback(callback)
+        continuation.invokeOnCancellation { choreographer.removeFrameCallback(callback) }
     }
 
     /** Keep Readium's text locator intact; normal currentLocator collection saves the destination. */
@@ -691,7 +787,7 @@ internal class EpubSession(
     /** Page buttons in the controls. */
     fun next() = turnPage(PageTurnDirection.FORWARD, PageTurnSource.BUTTON)
     fun previous() = turnPage(PageTurnDirection.BACKWARD, PageTurnSource.BUTTON)
-    val restorationLocator: Locator? get() = viewportContinuity.pending ?: viewportContinuity.anchor ?: currentLocator
+    val restorationLocator: Locator? get() = viewportContinuity.pending ?: searchPassage?.locator ?: viewportContinuity.anchor ?: currentLocator
     /** Saves a waiting reading position now, e.g. when the app goes to the background. */
     fun flushPosition() = flushPosition(null)
 
@@ -716,6 +812,8 @@ internal class EpubSession(
 
     fun close() {
         if (closed) return
+        searchDismissalJob?.cancel()
+        searchDismissalJob = null
         record(readingTime.pause(SystemClock.elapsedRealtime()))
         readingTimeJob?.cancel()
         closed = true
@@ -729,6 +827,7 @@ internal class EpubSession(
         activity.lifecycle.removeObserver(readingLifecycle)
         fragment.view?.removeOnLayoutChangeListener(layoutListener)
         flushPosition(revert)
+        searchPassage = null
         typographyJob?.cancel()
         if (!activity.supportFragmentManager.isDestroyed && fragment.isAdded) {
             runCatching { activity.supportFragmentManager.beginTransaction().remove(fragment).commitNowAllowingStateLoss() }

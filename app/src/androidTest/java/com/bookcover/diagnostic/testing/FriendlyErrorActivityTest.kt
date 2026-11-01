@@ -20,7 +20,6 @@ import com.bookcover.diagnostic.library.BookRecord
 import com.bookcover.diagnostic.library.GeneratedBooks
 import com.bookcover.diagnostic.library.LibraryBackup
 import com.bookcover.diagnostic.library.LibraryIndex
-import com.bookcover.diagnostic.library.ReadiumEngine
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.UUID
@@ -45,11 +44,11 @@ class FriendlyErrorActivityTest {
 
     @Before fun prepareGeneratedQaLibrary() = runBlocking {
         check(target.packageName == "com.bookcover.diagnostic.qa") { "Only disposable isolated QA data may be changed." }
-        folder.listFiles()?.forEach { it.deleteRecursively() }
+        resetQaBookFixtures()
         target.getSharedPreferences("reader", Context.MODE_PRIVATE).edit().clear()
             .putBoolean("samplesInstalled", true).putBoolean("autoCover", false).commit()
         sources = File(target.cacheDir, "friendly-errors-${UUID.randomUUID()}").apply { mkdirs() }
-        val library = BookLibrary(target, ReadiumEngine(target)).apply { load() }
+        val library = BookLibrary.forApp(target).apply { load() }
         original = listOf("First safety book", "Second safety book").mapIndexed { index, title ->
             library.import(Uri.fromFile(GeneratedBooks.write(sources, title))).first.copy(
                 collection = "QA collection $index", lastReadAt = 1000L + index,

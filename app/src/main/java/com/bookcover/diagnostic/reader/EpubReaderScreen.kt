@@ -227,7 +227,7 @@ internal fun EpubReaderScreen(
             })
         }
         ReaderSearchDialog(controller = session.search, onSelect = { session.goToSearchResult(it) },
-            onClose = session.search::dismiss)
+            onClose = session::dismissSearch)
     }
 }
 

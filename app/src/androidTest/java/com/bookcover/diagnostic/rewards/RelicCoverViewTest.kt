@@ -393,7 +393,8 @@ class RelicCoverViewTest {
             scroll.addView(column); host.setContentView(scroll)
         }
         instrumentation.waitForIdleSync()
-        await { view.isLaidOut && !view.getGlobalVisibleRect(Rect()) }
+        await { view.isAttachedToWindow && view.isLaidOut && view.height == 800 &&
+            !view.getGlobalVisibleRect(Rect()) }
         await { !view.motionRunningForTests }
         instrumentation.runOnMainSync { scroll.scrollTo(0, spacerHeight) }
         await { view.getGlobalVisibleRect(Rect()) && view.motionRunningForTests }

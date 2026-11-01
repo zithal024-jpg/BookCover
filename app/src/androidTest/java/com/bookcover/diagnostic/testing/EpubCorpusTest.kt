@@ -44,7 +44,7 @@ internal class EpubCorpusTest(private val book: EpubCorpus.Book) {
 
     @Before fun freshQaLibrary() {
         check(target.packageName.endsWith(".qa")) { "Corpus tests may only clear the isolated QA app's own data." }
-        libraryFolder.listFiles()?.forEach { it.deleteRecursively() }
+        resetQaBookFixtures()
         target.getSharedPreferences("reader", Context.MODE_PRIVATE).edit().clear()
             .putBoolean("samplesInstalled", true).putBoolean("autoCover", false).commit()
     }

@@ -36,7 +36,7 @@ class PdfReaderIntegrationTest {
 
     @Before fun prepareIsolatedLibrary() {
         check(target.packageName.endsWith(".qa")) { "PDF tests require the isolated QA app." }
-        libraryFolder.listFiles()?.forEach { it.deleteRecursively() }
+        resetQaBookFixtures()
         target.getSharedPreferences("reader", Context.MODE_PRIVATE).edit().clear()
             .putBoolean("samplesInstalled", true).putBoolean("autoCover", false).commit()
         fixtureFolder = File(target.cacheDir, "pdf-reader-${UUID.randomUUID()}").apply { mkdirs() }

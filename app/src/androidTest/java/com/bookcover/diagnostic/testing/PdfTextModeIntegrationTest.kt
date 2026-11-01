@@ -44,7 +44,7 @@ class PdfTextModeIntegrationTest {
 
     @Before fun prepare() {
         check(target.packageName.endsWith(".qa")) { "PDF text tests require the isolated QA app." }
-        File(target.filesDir, "library").listFiles()?.forEach { it.deleteRecursively() }
+        resetQaBookFixtures()
         target.getSharedPreferences("reader", Context.MODE_PRIVATE).edit().clear()
             .putBoolean("samplesInstalled", true).putBoolean("autoCover", false).commit()
         fixtures = File(target.cacheDir, "generated-pdf-text-ui-${UUID.randomUUID()}").apply { mkdirs() }

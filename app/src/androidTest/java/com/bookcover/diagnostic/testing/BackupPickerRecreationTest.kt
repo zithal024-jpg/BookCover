@@ -34,7 +34,7 @@ class BackupPickerRecreationTest {
     @Before fun prepareQaOnly() {
         check(target.packageName == "com.bookcover.diagnostic.qa")
         val folder = File(target.filesDir, "library").apply { mkdirs() }
-        folder.listFiles()?.forEach { it.deleteRecursively() }
+        resetQaBookFixtures()
         LibraryIndex(folder).apply { load(); save(listOf(first, second)) }
         target.getSharedPreferences("reader", Context.MODE_PRIVATE).edit().clear()
             .putBoolean("samplesInstalled", true).putBoolean("autoCover", false).commit()
