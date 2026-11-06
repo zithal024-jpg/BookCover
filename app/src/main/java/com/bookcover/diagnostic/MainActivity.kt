@@ -241,7 +241,8 @@ open class MainActivity : FragmentActivity() {
                         0 -> "${relicCollection.unlockedRelics.size} of ${RelicCatalog.all.size} collected"
                         1 -> "1 new relic"
                         else -> "${relicCollection.unseenRelics.size} new relics"
-                    })
+                    },
+                    onDismissMessage = { message = "" })
                 else if (pdf != null) PdfReaderScreen(pdf, books.firstOrNull { it.id == pdf.book.id } ?: pdf.book,
                     exterior.active, exterior.busy || exterior.requested, exterior.stopPending, exterior.available && !busy,
                     message + "\n" + exterior.status,

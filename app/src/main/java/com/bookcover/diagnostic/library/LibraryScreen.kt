@@ -87,9 +87,11 @@ internal fun LibraryScreen(
     coverColors: List<BookCoverColor> = emptyList(),
     onOpenRelics: () -> Unit = {},
     relicSummary: String = "",
+    onDismissMessage: () -> Unit = {},
 ) {
     var query by remember { mutableStateOf("") }
-    var collection by remember { mutableStateOf("All") }
+    // Null means every collection, so a collection the reader names "All" stays distinct.
+    var collection by remember { mutableStateOf<String?>(null) }
     var sort by remember { mutableStateOf("Recent") }
     var settings by remember { mutableStateOf(false) }
     // In memory only: diagnostics hide again when the app restarts.
@@ -101,6 +103,8 @@ internal fun LibraryScreen(
     var opening by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(busy) { if (!busy) opening = null }
     var dismissedMessage by remember { mutableStateOf("") }
+    // Once the message changes (the activity clears it on dismissal), a later identical result shows again.
+    LaunchedEffect(message) { if (message != dismissedMessage) dismissedMessage = "" }
     val readingDays by library.readingDays.days.collectAsState()
     val streakScope = rememberCoroutineScope()
     LaunchedEffect(Unit) {
@@ -109,14 +113,8 @@ internal fun LibraryScreen(
             catch (error: Exception) { DiagnosticLog.record("Reading days unavailable: ${error.javaClass.simpleName}") }
         }
     }
-    val collections = remember(books) { listOf("All") + books.map { it.collection }.distinct().sorted() }
-    val visible = remember(books, collection, query, sort) {
-        books.filter { (collection == "All" || it.collection == collection) &&
-            (it.title.contains(query, true) || it.author.contains(query, true)) }.let {
-            when (sort) { "Title" -> it.sortedBy { b -> b.title.lowercase() }; "Author" -> it.sortedBy { b -> b.author.lowercase() }
-                else -> it.sortedByDescending { b -> maxOf(b.lastReadAt, b.addedAt) } }
-        }
-    }
+    val collections = remember(books) { libraryCollections(books) }
+    val visible = remember(books, collection, query, sort) { visibleBooks(books, collection, query, sort) }
     val recent = remember(books) { books.filter { it.lastReadAt > 0 }.maxByOrNull { it.lastReadAt } }
     val searching = query.isNotBlank()
     val open = { book: BookRecord -> if (!busy) { opening = book.id; onOpen(book) } }
@@ -138,7 +136,7 @@ internal fun LibraryScreen(
                         HomeHeader(joined, books.isNotEmpty(), busy, query, { query = it }, onImport) { settings = true }
                         if (!joined && books.isNotEmpty()) SearchField(query, { query = it }, Modifier.fillMaxWidth())
                         if (importProgress != null) ImportProgressRow(importProgress, onStopImport)
-                        if (message.isNotBlank() && message != dismissedMessage) StatusNote(message) { dismissedMessage = message }
+                        if (message.isNotBlank() && message != dismissedMessage) StatusNote(message) { dismissedMessage = message; onDismissMessage() }
                         AnimatedVisibility(visible = recent != null && !searching) {
                             recent?.let { ContinueCard(it, library, busy, opening == it.id && busy, roomy) { open(it) } }
                         }
@@ -157,11 +155,11 @@ internal fun LibraryScreen(
                             }
                         }
                         if (books.isNotEmpty()) CollectionToolbar(visible.size, books.size, sort, { sort = it }, collections, collection) { collection = it }
-                        if (books.isNotEmpty() && visible.isEmpty()) NoMatches(searching) { query = ""; collection = "All" }
+                        if (books.isNotEmpty() && visible.isEmpty()) NoMatches(searching) { query = ""; collection = null }
                     }
                 }
                 items(visible, key = { it.id }, contentType = { "book" }) { book ->
-                    BookTile(book, library, busy, opening == book.id && busy, showCollection = collection == "All" && collections.size > 2,
+                    BookTile(book, library, busy, opening == book.id && busy, showCollection = collection == null && collections.size > 1,
                         onOpen = { open(book) }, onMove = { moving = book; collectionName = book.collection }, onRemove = { removing = book })
                 }
             }
@@ -171,11 +169,11 @@ internal fun LibraryScreen(
     }
     moving?.let { book -> AlertDialog(onDismissRequest = { moving = null }, title = { Text("Collection") },
         text = { OutlinedTextField(collectionName, { collectionName = it }, label = { Text("New or existing collection") }, singleLine = true) },
-        confirmButton = { TextButton(onClick = { onMove(book, collectionName); collection = "All"; moving = null }) { Text("Save") } },
+        confirmButton = { TextButton(onClick = { onMove(book, collectionName); collection = null; moving = null }) { Text("Save") } },
         dismissButton = { TextButton(onClick = { moving = null }) { Text("Cancel") } }) }
     removing?.let { book -> AlertDialog(onDismissRequest = { removing = null }, title = { Text("Remove ${book.title}?") },
         text = { Text("Removes this app's copy, cover, bookmarks and progress. Your original file remains in Files.") },
-        confirmButton = { TextButton(onClick = { onRemove(book); collection = "All"; removing = null }) { Text("Remove") } },
+        confirmButton = { TextButton(onClick = { onRemove(book); collection = null; removing = null }) { Text("Remove") } },
         dismissButton = { TextButton(onClick = { removing = null }) { Text("Cancel") } }) }
     if (settings) LibrarySettingsDialog(busy = busy, autoCover = autoCover, timer = timer, onAutoCover = onAutoCover,
         onTimer = onTimer, libraryTheme = libraryTheme, onLibraryTheme = onLibraryTheme,
@@ -299,7 +297,7 @@ internal fun chapterTitle(locator: String?): String? =
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CollectionToolbar(shown: Int, total: Int, sort: String, onSort: (String) -> Unit,
-                              collections: List<String>, collection: String, onCollection: (String) -> Unit) {
+                              collections: List<String>, collection: String?, onCollection: (String?) -> Unit) {
     val count = when { shown == total -> if (total == 1) "1 book" else "$total books"; else -> "$shown of $total books" }
     Column(Modifier.padding(top = Home.Gap)) {
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
@@ -309,9 +307,15 @@ private fun CollectionToolbar(shown: Int, total: Int, sort: String, onSort: (Str
             SortControl(sort, onSort)
         }
         LazyRow(Modifier.fillMaxWidth().padding(top = Home.Gap), horizontalArrangement = Arrangement.spacedBy(Home.Gap)) {
-            items(collections, key = { it }) { name ->
+            item(key = "all-collections") {
+                FilterChip(selected = collection == null, onClick = { onCollection(null) }, label = { Text("All") },
+                    modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "Collection: All" })
+            }
+            items(collections, key = { "collection:$it" }) { name ->
+                // A reader's own collection called "All" is announced differently from the everything chip.
+                val described = if (name == "All") "Collection named All" else "Collection: $name"
                 FilterChip(selected = collection == name, onClick = { onCollection(name) }, label = { Text(name) },
-                    modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "Collection: $name" })
+                    modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = described })
             }
         }
     }
@@ -429,3 +433,14 @@ private fun edgeColor(bitmap: Bitmap): Int {
     }
     return matchingCoverColor(samples.toIntArray())
 }
+
+/** The reader's own collection names, sorted; the "All" chip is separate (null selection). */
+internal fun libraryCollections(books: List<BookRecord>): List<String> = books.map { it.collection }.distinct().sorted()
+
+/** Books in [collection] (null = every collection) matching [query], in [sort] order. */
+internal fun visibleBooks(books: List<BookRecord>, collection: String?, query: String, sort: String): List<BookRecord> =
+    books.filter { (collection == null || it.collection == collection) &&
+        (it.title.contains(query, true) || it.author.contains(query, true)) }.let {
+        when (sort) { "Title" -> it.sortedBy { b -> b.title.lowercase() }; "Author" -> it.sortedBy { b -> b.author.lowercase() }
+            else -> it.sortedByDescending { b -> maxOf(b.lastReadAt, b.addedAt) } }
+    }

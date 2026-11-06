@@ -1,0 +1,28 @@
+BookCover
+Copyright (c) 2026 Frank. All rights reserved. See LICENSE.
+
+BookCover includes the following third-party components. Each keeps its own licence.
+The full licence texts ship inside the app (Settings -> About -> Licences) and in
+app/src/main/assets/ (Readium font licences are bundled by Readium itself).
+
+- Readium Kotlin Toolkit 3.4.0 (opening and displaying EPUB and PDF books, Readium CSS)
+  BSD 3-Clause. (c) 2017 Readium. READIUM-LICENSE.txt
+- Readium comic player libraries: PixiJS, resource-loader, Hammer.JS (c) 2016 Jorik Tangelder,
+  punycode by Mathias Bynens. MIT. READIUM-SCRIPTS-LICENSE.txt
+- AccessibleDfA font (c) 2015 Orange, Reserved Font Name Accessible-Dfa.
+  SIL Open Font License 1.1. Bundled by Readium.
+- iA Writer Duospace font, based on IBM Plex (c) 2017 IBM Corp., Reserved Font Name "Plex".
+  SIL Open Font License 1.1. Bundled by Readium.
+- OpenDyslexic 2.001 (c) 2012 Abelardo Gonzalez, based on Bitstream Vera (c) 2003 Bitstream, Inc.
+  Not modified. CC BY 3.0, over the Bitstream Vera font licence. OPENDYSLEXIC-LICENSE.txt
+- jsoup (c) 2009-2026 Jonathan Hedley. MIT. JSOUP-LICENSE.txt
+- PdfiumAndroid (c) 2015 Bekket McClane, (c) 2016 Bartosz Schiller: Apache License 2.0.
+  PDFium (c) 2014 PDFium Authors: BSD 3-Clause. PDFIUM-LICENSE.txt
+- AndroidPdfViewer (c) 2017 Bartosz Schiller and contributors. Apache License 2.0.
+  APACHE-2.0-LICENSE.txt
+- AndroidX, Jetpack Compose, WindowManager, Media3 and Guava (The Android Open Source Project
+  and Google); Kotlin, kotlinx coroutines, serialization and datetime, annotations (JetBrains);
+  Timber (Jake Wharton); Koi (mcxiaoke); JSpecify. Apache License 2.0. APACHE-2.0-LICENSE.txt
+- Java library desugaring (parts of the OpenJDK class library), Android desugar_jdk_libs 2.1.5,
+  (c) Oracle and/or its affiliates. GPL v2 with the Classpath Exception.
+  OPENJDK-GPL2-CLASSPATH-LICENSE.txt

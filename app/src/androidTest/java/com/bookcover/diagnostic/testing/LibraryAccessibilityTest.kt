@@ -40,6 +40,7 @@ class LibraryAccessibilityTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val automation get() = instrumentation.uiAutomation
     private val target get() = instrumentation.targetContext
+    private val versionText get() = com.bookcover.diagnostic.library.appVersionLabel(target)
     private var scenario: ActivityScenario<LibraryAccessibilityActivity>? = null
     private lateinit var host: LibraryAccessibilityActivity
     private lateinit var book: BookRecord
@@ -197,7 +198,7 @@ class LibraryAccessibilityTest {
         assertEquals(0, main { host.timer })
         click("Back to Library settings", dialog = true)
         click("About", dialog = true)
-        repeat(7) { click("BookCover 0.4.0 prototype", dialog = true) }
+        repeat(7) { click(versionText, dialog = true) }
         assertTrue("The revealed diagnostic action stays reachable with large text", fullyVisible(reveal("Device diagnostics", dialog = true)))
         click("Back to Library settings", dialog = true)
         click("Done", dialog = true)
@@ -316,13 +317,13 @@ class LibraryAccessibilityTest {
         click("Show full licence for OpenDyslexic font")
         waitFor("the bundled font licence text expands") { find("Hide full licence for OpenDyslexic font") != null }
         click("Back to About", forward = false)
-        waitFor("Licences Back returns to About") { find("About") != null && find("BookCover 0.4.0 prototype") != null }
+        waitFor("Licences Back returns to About") { find("About") != null && find(versionText) != null }
         click("Licences", dialog = true)
         pressBack()
-        waitFor("System Back also returns from Licences to About") { find("About") != null && find("BookCover 0.4.0 prototype") != null }
-        repeat(6) { click("BookCover 0.4.0 prototype", dialog = true) }
+        waitFor("System Back also returns from Licences to About") { find("About") != null && find(versionText) != null }
+        repeat(6) { click(versionText, dialog = true) }
         assertNull("Six taps do not reveal diagnostics", find("Device diagnostics"))
-        click("BookCover 0.4.0 prototype", dialog = true)
+        click(versionText, dialog = true)
         reveal("Device diagnostics", dialog = true)
         click("Done", dialog = true)
         click("Settings")

@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -75,7 +76,7 @@ internal fun LibrarySettingsDialog(
                             SettingsCategory("Outside cover", (if (autoCover) "Starts with a book" else "Start manually") +
                                 " · " + (if (timer == 0) "Manual timer" else "$timer min"), "cover") { page = LibrarySettingsPage.COVER }
                             SettingsCategory("Backup", "Reading data, relics and cover appearances", "backup") { page = LibrarySettingsPage.BACKUP }
-                            SettingsCategory("About", "BookCover 0.4.0 prototype · Licences", "about") { page = LibrarySettingsPage.ABOUT }
+                            SettingsCategory("About", "${appVersionLabel(LocalContext.current)} · Licences", "about") { page = LibrarySettingsPage.ABOUT }
                         }
                         LibrarySettingsPage.APPEARANCE -> {
                             Text("Automatic follows the cover of your most recently read book. " +
@@ -128,7 +129,7 @@ internal fun LibrarySettingsDialog(
                                     versionTaps += 1
                                     if (versionTaps >= DEVELOPER_TAPS) onDeveloperOptions()
                                 }, contentAlignment = Alignment.CenterStart) {
-                                Text("BookCover 0.4.0 prototype", style = MaterialTheme.typography.bodySmall)
+                                Text(appVersionLabel(LocalContext.current), style = MaterialTheme.typography.bodySmall)
                             }
                             if (developerOptions) TextButton(onClick = { onDismiss(); onDiagnostics() }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Device diagnostics") }
                         }
@@ -168,3 +169,10 @@ private fun ThemeRow(id: String, label: String, seed: Int?, selected: Boolean, o
         seed?.let { Box(Modifier.size(20.dp).clip(CircleShape).background(Color(it))) }
     }
 }
+
+/** "BookCover" and the installed version name, read from the package so About never goes stale. */
+internal fun appVersionLabel(context: android.content.Context): String = versionLabel(
+    runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull())
+
+internal fun versionLabel(versionName: String?): String =
+    versionName?.trim()?.takeIf { it.isNotEmpty() }?.let { "BookCover $it" } ?: "BookCover"

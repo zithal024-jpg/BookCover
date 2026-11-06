@@ -56,7 +56,15 @@ jobs:
           bash ./gradlew --no-daemon --no-build-cache --no-configuration-cache --stacktrace \
             --project-cache-dir "$RUNNER_TEMP/gradle-project-cache" \
             "-Pbookcover.buildRoot=$BOOKCOVER_BUILD_ROOT" \
-            clean assembleDebug testQaUnitTest lintDebug lintQa assembleQaAndroidTest
+            clean assembleDebug testQaUnitTest lintDebug lintQa assembleQaAndroidTest assembleRelease
+
+      # CI has no release key, so this is the unsigned release; it checks the shared app ID only.
+      - name: Verify the release APK uses the shared application ID
+        run: |
+          release_apk="$BOOKCOVER_BUILD_ROOT/app/outputs/apk/release/app-release-unsigned.apk"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest application-id "$release_apk" | grep -qx 'com.frankrodriguez.bookcover.reader'
+          if "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest permissions "$release_apk" | grep -q 'android.permission.INTERNET'; then echo 'Release requests INTERNET'; exit 1; fi
+          echo 'Verified release application ID and no INTERNET permission'
 
       - name: Verify the assembled test APK targets only the QA app
         run: |
