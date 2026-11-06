@@ -14,5 +14,5 @@ First public release.
 - Backup and restore of positions, bookmarks, collections, reading history and relics.
 - No internet permission; nothing leaves your phone.
 
-Install or update: see the [instructions](README.md#install). Check the download against the
+Install or update: see the [instructions](https://github.com/zithal024-jpg/BookCover-Releases#install). Check the download against the
 `.sha256` file attached to this release.

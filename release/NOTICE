@@ -1,9 +1,8 @@
 BookCover
-Copyright (c) 2026 Frank. All rights reserved. See LICENSE.
+Copyright (c) 2026 Frank. All rights reserved.
 
 BookCover includes the following third-party components. Each keeps its own licence.
-The full licence texts ship inside the app (Settings -> About -> Licences) and in
-app/src/main/assets/ (Readium font licences are bundled by Readium itself).
+The full licence texts ship inside the app: Settings -> About -> Licences.
 
 - Readium Kotlin Toolkit 3.4.0 (opening and displaying EPUB and PDF books, Readium CSS)
   BSD 3-Clause. (c) 2017 Readium. READIUM-LICENSE.txt

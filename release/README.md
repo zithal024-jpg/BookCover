@@ -4,7 +4,7 @@ BookCover is a private, offline e-book reader for Android. On a foldable phone s
 Samsung Galaxy Z Fold, it can show the cover of the book you are reading on the outside
 screen while you read on the inside screen.
 
-**[Download the latest version](../../releases/latest)** (the file ending in `.apk`).
+**[Download the latest version](https://github.com/zithal024-jpg/BookCover-Releases/releases/latest)** (the file ending in `.apk`).
 
 ## What it does
 
@@ -30,7 +30,7 @@ Two short sample books are included so you can try it straight away.
 
 ## Install
 
-1. On your phone, open the [latest release](../../releases/latest) and tap the `.apk` file to
+1. On your phone, open the [latest release](https://github.com/zithal024-jpg/BookCover-Releases/releases/latest) and tap the `.apk` file to
    download it.
 2. Open the downloaded file (from the browser's downloads or the Files app).
 3. If Android asks, allow that app to **install unknown apps**, then go back and tap
@@ -62,11 +62,11 @@ themselves, so keep your original EPUB and PDF files too.
 
 ## Problems and suggestions
 
-Please report them in this page's **Issues** tab. Describe your phone model, Android version
+Please report them in this page's [Issues](https://github.com/zithal024-jpg/BookCover-Releases/issues) tab. Describe your phone model, Android version
 and what happened. Please don't attach your own books or screenshots showing their text.
 
 ## Licence
 
 Copyright © 2026 Frank. All rights reserved. BookCover is free to download and use.
 Third-party components keep their own licences; they are listed in the app under
-**Settings → About → Licences** and in [NOTICE](NOTICE).
+**Settings → About → Licences** and in [NOTICE](NOTICE). See also [LICENSE](LICENSE).
